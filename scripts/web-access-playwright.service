@@ -1,0 +1,27 @@
+[Unit]
+Description=Web Access Gateway - Playwright MCP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yosef
+Group=yosef
+WorkingDirectory=/data/web-access-gateway/runtime/playwright-mcp
+EnvironmentFile=/data/web-access-gateway/config/playwright.env
+Environment=PATH=/data/web-access-gateway/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/data/web-access-gateway/runtime/playwright-mcp/node_modules/.bin/playwright-mcp --host 127.0.0.1 --port 8931 --headless --isolated --block-service-workers --output-dir /data/web-access-gateway/artifacts/playwright --output-max-size 1073741824 --timeout-action 5000 --timeout-navigation 60000 --timeout-settle 500
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+MemoryMax=6G
+TasksMax=512
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/data/web-access-gateway/artifacts /data/web-access-gateway/runtime
+
+[Install]
+WantedBy=multi-user.target

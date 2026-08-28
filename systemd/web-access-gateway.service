@@ -1,0 +1,28 @@
+[Unit]
+Description=Web Access Gateway - authenticated MCP endpoint
+After=network-online.target web-access-crawl4ai.service web-access-playwright.service
+Wants=network-online.target web-access-crawl4ai.service web-access-playwright.service
+
+[Service]
+Type=simple
+User=yosef
+Group=yosef
+WorkingDirectory=/data/web-access-gateway/runtime/gateway
+EnvironmentFile=/data/web-access-gateway/secrets/gateway.env
+Environment=NODE_ENV=production
+Environment=PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp
+ExecStart=/data/web-access-gateway/runtime/node/bin/node server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=20
+MemoryMax=2G
+TasksMax=256
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/data/web-access-gateway/artifacts
+
+[Install]
+WantedBy=multi-user.target

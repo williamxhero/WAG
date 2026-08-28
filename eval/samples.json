@@ -1,0 +1,22 @@
+{
+  "search": {
+    "query": "site:searxng.org SearXNG official documentation",
+    "expected_domain": "searxng.org"
+  },
+  "static": {
+    "url": "https://example.com/",
+    "expected_text": "Example Domain"
+  },
+  "render": {
+    "url": "https://quotes.toscrape.com/js/",
+    "expected_text": "Quotes to Scrape"
+  },
+  "browser": {
+    "url": "https://example.com/"
+  },
+  "security": {
+    "loopback_url": "http://127.0.0.1:8801/",
+    "redirect_to_loopback_url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%3A8801%2F",
+    "slow_url": "https://httpbin.org/delay/35"
+  }
+}

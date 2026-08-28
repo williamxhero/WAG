@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WAG / 评测</title><link rel="stylesheet" href="/evals/static/evals.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead"><div><p class="eyebrow">WEB ACCESS GATEWAY · READ ONLY</p><h1>评测结果</h1></div><div class="refresh"><span id="refresh-dot"></span><span id="refresh-status">每 60 秒刷新</span></div></header>
+    <section id="empty" class="empty" hidden><h2>尚无评测报告</h2><p>每日冒烟评测或下一次发布门禁完成后，结果会显示在这里。</p></section>
+    <section id="content" hidden>
+      <section class="latest" aria-labelledby="latest-title"><div class="section-head"><p class="eyebrow">LATEST RUN</p><h2 id="latest-title">最近一次结论</h2><p id="latest-meta" class="muted"></p></div><div id="kpis" class="kpis"></div></section>
+      <section class="split top-split"><div><div class="section-head"><p class="eyebrow">30 DAYS</p><h2>运行趋势</h2></div><div id="trend" class="trend" role="img" aria-label="最近 30 天评测趋势"></div></div><div><div class="section-head"><p class="eyebrow">HISTORY</p><h2>历史运行</h2></div><div id="runs" class="runs"></div></div></section>
+      <section class="detail"><div class="section-head"><p class="eyebrow">SELECTED RUN</p><h2 id="detail-title">运行明细</h2><p id="detail-meta" class="muted"></p></div><div id="tools" class="tool-table"></div><div id="cases" class="cases"></div></section>
+    </section>
+  </main>
+  <template id="case-template"><article class="case"><div class="case-top"><div><span class="status"></span><strong class="name"></strong><small class="category"></small></div><span class="latency"></span></div><div class="stages"></div><div class="checks"></div><pre class="error" hidden></pre><div class="artifact"></div></article></template>
+  <script type="module" src="/evals/static/evals.js"></script>
+</body>
+</html>

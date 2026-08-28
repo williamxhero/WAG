@@ -1,0 +1,27 @@
+[Unit]
+Description=Web Access Gateway - native Crawl4AI reader
+After=network-online.target web-access-egress-proxy.service
+Wants=network-online.target web-access-egress-proxy.service
+
+[Service]
+Type=simple
+User=yosef
+Group=yosef
+WorkingDirectory=/data/web-access-gateway
+EnvironmentFile=/data/web-access-gateway/secrets/crawl4ai.env
+Environment=CRAWL4_AI_BASE_DIRECTORY=/data/web-access-gateway/data/crawl4ai
+ExecStart=/data/web-access-gateway/runtime/crawl4ai-venv/bin/uvicorn app:app --app-dir /data/web-access-gateway/runtime/crawl4ai-service --host 127.0.0.1 --port 11235 --workers 1 --no-access-log
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+MemoryMax=6G
+TasksMax=512
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/data/web-access-gateway/data /data/web-access-gateway/runtime
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+# Dependencies and language caches
+node_modules/
+__pycache__/
+*.py[cod]
+
+# Runtime state and generated evaluation output
+artifacts/
+reports/
+runtime/evals/
+runtime/**/artifacts/
+*.tmp
+
+# Local service configuration and credentials (templates remain versioned)
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Editor and operating-system metadata
+.DS_Store
+Thumbs.db

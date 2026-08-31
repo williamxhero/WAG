@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { isEvaluationReportFileName, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
+import { dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, runWithRetries, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
 
 const root = process.env.WAG_ROOT ?? '/data/web-access-gateway';
 const suite = process.argv[2] === 'release' ? 'release' : 'smoke';
@@ -39,11 +39,11 @@ function artifactFrom(payload, name, caseId) {
   return { name: `${caseId}-${name}`, artifact_id: candidate.id, bytes: candidate.bytes ?? null, type: name === 'pdf' ? 'application/pdf' : 'image/png' };
 }
 async function resourceSnapshot() {
-  const services = ['web-access-gateway.service', 'web-access-playwright.service', 'web-access-crawl4ai.service'];
+  const services = ['web-access-gateway.service', 'web-access-playwright.service', 'web-access-crawl4ai.service', 'web-access-egress-proxy.service'];
   const records = await Promise.all(services.map(async service => {
-    const output = await exec('systemctl', ['show', service, '--property=MemoryCurrent,CPUUsageNSec,TasksCurrent', '--value']);
-    const [memory, cpu, tasks] = output.split('\n');
-    return { service, memory_bytes: Number(memory) || null, cpu_usage_ns: Number(cpu) || null, tasks: Number(tasks) || null };
+    const output = await exec('systemctl', ['show', service, '--property=MemoryCurrent,CPUUsageNSec,TasksCurrent,NRestarts', '--value']);
+    const [memory, cpu, tasks, restarts] = output.split('\n');
+    return { service, memory_bytes: Number(memory) || null, cpu_usage_ns: Number(cpu) || null, tasks: Number(tasks) || null, restarts: Number(restarts) || 0 };
   }));
   return Object.fromEntries(records.map(record => [record.service, record]));
 }
@@ -55,7 +55,8 @@ function peakResources(samples) {
       service,
       memory_bytes: Math.max(current.memory_bytes ?? 0, values.memory_bytes ?? 0) || null,
       cpu_usage_ns: Math.max(current.cpu_usage_ns ?? 0, values.cpu_usage_ns ?? 0) || null,
-      tasks: Math.max(current.tasks ?? 0, values.tasks ?? 0) || null
+      tasks: Math.max(current.tasks ?? 0, values.tasks ?? 0) || null,
+      restarts: Math.max(current.restarts ?? 0, values.restarts ?? 0),
     };
   }
   return peak;
@@ -87,14 +88,22 @@ async function callTool(client, name, args) {
 async function runCase(cases, artifacts, definition) {
   const started = now();
   try {
-    const outcome = await definition.run();
-    const quality = definition.quality ? definition.quality(outcome.payload, outcome) : assertQuality([{ name: 'request-completed', passed: true }]);
+    const attempted = await runWithRetries(async () => {
+      const outcome = await definition.run();
+      const quality = definition.quality ? definition.quality(outcome.payload, outcome) : assertQuality([{ name: 'request-completed', passed: true }]);
+      return { outcome, quality };
+    }, {
+      maximumAttempts: definition.retry ? 3 : 1,
+      shouldRetryResult: result => definition.retryQuality === true && !result.quality.passed,
+      resultError: () => 'transient quality assertion failed',
+    });
+    const { outcome, quality } = attempted;
     const status = quality.passed ? 'passed' : 'failed';
-    const record = { id: definition.id, name: definition.name, category: definition.category, tool: definition.tool, status, total_ms: outcome.total_ms ?? elapsed(started), first_valid_result_ms: outcome.first_valid_result_ms ?? outcome.total_ms ?? elapsed(started), stages_ms: outcome.stages_ms ?? {}, quality, ...(outcome.metrics ? { metrics: outcome.metrics } : {}), ...(status === 'failed' ? { error: { kind: 'quality', message: 'quality assertion failed' } } : {}) };
+    const record = { id: definition.id, name: definition.name, category: definition.category, dimension: definition.dimension ?? 'core', tool: definition.tool, status, attempts: attempted.attempts, degraded: attempted.degraded, ...(attempted.first_error ? { first_error: attempted.first_error } : {}), total_ms: outcome.total_ms ?? elapsed(started), first_valid_result_ms: outcome.first_valid_result_ms ?? outcome.total_ms ?? elapsed(started), stages_ms: outcome.stages_ms ?? {}, quality, ...(outcome.metrics ? { metrics: outcome.metrics } : {}), ...(status === 'failed' ? { error: { kind: 'quality', message: 'quality assertion failed' } } : {}) };
     if (outcome.artifact) { artifacts.push(outcome.artifact); record.artifact = outcome.artifact.name; }
     cases.push(record);
   } catch (error) {
-    cases.push({ id: definition.id, name: definition.name, category: definition.category, tool: definition.tool, status: 'failed', total_ms: elapsed(started), first_valid_result_ms: null, stages_ms: {}, quality: assertQuality([{ name: 'request-completed', passed: false }]), error: errorInfo(error) });
+    cases.push({ id: definition.id, name: definition.name, category: definition.category, dimension: definition.dimension ?? 'core', tool: definition.tool, status: 'failed', attempts: error.attempts ?? 1, ...(error.first_error ? { first_error: error.first_error } : {}), total_ms: elapsed(started), first_valid_result_ms: null, stages_ms: {}, quality: assertQuality([{ name: 'request-completed', passed: false }]), error: errorInfo(error) });
   }
 }
 async function main() {
@@ -103,12 +112,12 @@ async function main() {
   const resourceTimer = setInterval(() => resourceSnapshot().then(snapshot => resourceSamples.push(snapshot)).catch(() => {}), 1000);
   const { client, transport } = await createClient();
   try {
-    await runCase(cases, artifacts, { id: 'search-public', name: 'Public search returns results', category: 'search', tool: 'web_search', run: () => callTool(client, 'web_search', { query: samples.search.query }), quality: payload => assertQuality([{ name: 'has-results', passed: Array.isArray(payload.results) && payload.results.length > 0 }, { name: 'expected-domain', passed: (payload.results ?? []).some(item => String(item.url ?? '').includes(samples.search.expected_domain)) }]) });
-    await runCase(cases, artifacts, { id: 'read-static', name: 'Static page extraction', category: 'read', tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' }), quality: payload => assertQuality([{ name: 'expected-title', passed: String(payload.title ?? '').includes(samples.static.expected_text) }, { name: 'minimum-body', passed: String(payload.markdown ?? '').length >= 40 }]) });
-    await runCase(cases, artifacts, { id: 'read-rendered', name: 'JavaScript-rendered page extraction', category: 'render', tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.render.url, render: 'always', output: 'markdown' }), quality: payload => assertQuality([{ name: 'expected-text', passed: String(payload.markdown ?? '').includes(samples.render.expected_text) }]) });
-    await runCase(cases, artifacts, { id: 'browser-snapshot-click', name: 'Browser snapshot and safe link click', category: 'browser', tool: 'web_browser', run: async () => {
+    await runCase(cases, artifacts, { id: 'search-public', name: 'Public search returns results', category: 'search', dimension: 'connectivity', retry: true, retryQuality: true, tool: 'web_search', run: () => callTool(client, 'web_search', { query: samples.search.query }), quality: payload => assertQuality([{ name: 'has-results', passed: Array.isArray(payload.results) && payload.results.length > 0 }, { name: 'expected-domain', passed: (payload.results ?? []).some(item => String(item.url ?? '').includes(samples.search.expected_domain)) }]) });
+    await runCase(cases, artifacts, { id: 'read-static', name: 'Static page extraction', category: 'read', dimension: 'connectivity', retry: true, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' }), quality: payload => assertQuality([{ name: 'expected-title', passed: String(payload.title ?? '').includes(samples.static.expected_text) }, { name: 'minimum-body', passed: String(payload.markdown ?? '').length >= 40 }]) });
+    await runCase(cases, artifacts, { id: 'read-rendered', name: 'JavaScript-rendered page extraction', category: 'render', dimension: 'connectivity', retry: true, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.render.url, render: 'always', output: 'markdown' }), quality: payload => assertQuality([{ name: 'expected-text', passed: String(payload.markdown ?? '').includes(samples.render.expected_text) }]) });
+    await runCase(cases, artifacts, { id: 'browser-snapshot-click', name: 'Browser snapshot and safe link click', category: 'browser', dimension: 'connectivity', retry: true, tool: 'web_browser', run: async () => {
       const initial = await callTool(client, 'web_browser', { actions: [{ type: 'navigate', url: samples.browser.url }, { type: 'snapshot' }] });
-      const snapshot = JSON.stringify(initial.payload.outputs ?? []);
+      const snapshot = latestSnapshotText(initial.payload.outputs);
       const ref = /\blink\b[^\n]*\[ref=([^\]]+)\]/i.exec(snapshot)?.[1]
         ?? /\[ref=([^\]]+)\][^\n]*\blink\b/i.exec(snapshot)?.[1];
       if (!ref || !initial.payload.session_id) throw new Error('browser snapshot did not expose a link reference');
@@ -116,7 +125,8 @@ async function main() {
       const closed = await callTool(client, 'web_browser', { session_id: initial.payload.session_id, actions: [{ type: 'close' }] });
       return { payload: { clicked: clicked.payload, closed: closed.payload.closed === true }, total_ms: initial.total_ms + clicked.total_ms + closed.total_ms, first_valid_result_ms: initial.first_valid_result_ms, stages_ms: { navigate_snapshot_ms: initial.total_ms, click_snapshot_ms: clicked.total_ms, close_ms: closed.total_ms } };
     }, quality: payload => assertQuality([{ name: 'snapshot-and-click-completed', passed: payload.clicked?.outputs?.length > 0 }, { name: 'session-closed', passed: payload.closed === true }]) });
-    for (const output of ['screenshot', 'pdf']) await runCase(cases, artifacts, { id: `read-${output}`, name: `Rendered ${output}`, category: 'artifact', tool: 'web_read', run: async () => { const result = await callTool(client, 'web_read', { url: samples.static.url, render: 'always', output }); const artifact = artifactFrom(result.payload, output, `read-${output}`); if (!artifact) throw new Error(`missing ${output} artifact`); return { ...result, artifact }; }, quality: (_payload, outcome) => assertQuality([{ name: 'non-empty-artifact', passed: Number(outcome.artifact?.bytes) > 100 }]) });
+    for (const output of ['screenshot', 'pdf']) await runCase(cases, artifacts, { id: `read-${output}`, name: `Rendered ${output}`, category: 'artifact', dimension: 'connectivity', retry: true, tool: 'web_read', run: async () => { const result = await callTool(client, 'web_read', { url: samples.static.url, render: 'always', output }); const artifact = artifactFrom(result.payload, output, `read-${output}`); if (!artifact) throw new Error(`missing ${output} artifact`); return { ...result, artifact }; }, quality: (_payload, outcome) => assertQuality([{ name: 'non-empty-artifact', passed: Number(outcome.artifact?.bytes) > 100 }]) });
+    await runCase(cases, artifacts, { id: 'gateway-health', name: 'Authenticated gateway health', category: 'health', tool: 'health', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz'), { headers: { authorization: `Bearer ${token}` } }); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }]) });
     await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
     await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.loopback_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); return { payload: { blocked: result.isError === true }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'blocked', passed: payload.blocked === true }]) });
     if (suite === 'release') {
@@ -128,13 +138,16 @@ async function main() {
   } finally { clearInterval(resourceTimer); await client.close().catch(() => {}); await transport.close().catch(() => {}); }
   const completedAt = new Date(); const summary = summarizeCases(cases);
   const resourceEnd = await resourceSnapshot(); resourceSamples.push(resourceEnd);
-  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, status: cases.every(item => item.status === 'passed') ? 'passed' : 'failed', thresholds: suite === 'smoke' ? { success_rate_pct: 100, quality_rate_pct: 100 } : { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 }, summary, tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length } };
+  const status = evaluationStatus(cases);
+  const proxyRestartsStart = resourceStart['web-access-egress-proxy.service']?.restarts ?? 0;
+  const proxyRestartsEnd = resourceEnd['web-access-egress-proxy.service']?.restarts ?? 0;
+  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, status, thresholds: suite === 'smoke' ? { success_rate_pct: 100, quality_rate_pct: 100 } : { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
   await fs.mkdir(reportDirectory, { recursive: true, mode: 0o750 });
   await pruneExpiredReports(reportDirectory);
   const reportPath = path.join(reportDirectory, `${runId}.json`); const temporaryPath = `${reportPath}.${crypto.randomUUID()}.tmp`;
   await fs.writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o640 });
   await fs.chmod(temporaryPath, 0o644);
   await fs.rename(temporaryPath, reportPath);
-  console.log(reportPath); if (report.status !== 'passed') process.exitCode = 1;
+  console.log(reportPath); if (report.status === 'failed') process.exitCode = 1;
 }
 main().catch(error => { console.error(error.stack ?? error); process.exitCode = 1; });

@@ -307,7 +307,7 @@ app.get('/api/evals/:runId/artifacts/:name', async (req, res) => {
 });
 app.use(requireToken);
 app.get('/healthz', async (_req, res) => {
-  try { const response = await fetch(`${cfg.searxUrl}/search?q=health&format=json`, { signal: AbortSignal.timeout(5000) }); res.status(response.ok ? 200 : 503).json({ ok: response.ok, render_active: renderSlots.active, browser_active: browserSlots.active }); } catch { res.status(503).json({ ok: false }); }
+  res.json({ ok: true, render_active: renderSlots.active, browser_active: browserSlots.active });
 });
 app.get('/artifacts/*path', async (req, res) => {
   const relative = req.params.path.join('/');

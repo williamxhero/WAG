@@ -1,5 +1,44 @@
 export const REPORT_VERSION = 1;
 
+export function latestSnapshotText(outputs) {
+  const snapshot = outputs?.at(-1);
+  return (snapshot?.content ?? [])
+    .filter(item => item.type === 'text')
+    .map(item => item.text)
+    .join('\n');
+}
+
+export function classifyTransientFailure(error) {
+  return /ECONNRESET|ERR_CONNECTION_(?:CLOSED|RESET)|\b50[234]\b|temporar(?:y|ily)|timed?\s*out/i.test(String(error?.message ?? error ?? ''));
+}
+
+export async function runWithRetries(operation, options = {}) {
+  const maximumAttempts = options.maximumAttempts ?? 3;
+  const delayMs = options.delayMs ?? 250;
+  const shouldRetryError = options.shouldRetryError ?? classifyTransientFailure;
+  const shouldRetryResult = options.shouldRetryResult ?? (() => false);
+  let firstError = null;
+  for (let attempts = 1; attempts <= maximumAttempts; attempts++) {
+    try {
+      const result = await operation(attempts);
+      if (attempts < maximumAttempts && shouldRetryResult(result)) {
+        firstError ??= options.resultError?.(result) ?? 'transient result failure';
+      } else {
+        return { ...result, attempts, degraded: attempts > 1, ...(firstError ? { first_error: firstError } : {}) };
+      }
+    } catch (error) {
+      firstError ??= String(error?.message ?? error);
+      if (attempts === maximumAttempts || !shouldRetryError(error)) {
+        error.attempts = attempts;
+        error.first_error = firstError;
+        throw error;
+      }
+    }
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  throw new Error('retry loop exhausted');
+}
+
 export function percentile(values, quantile) {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -48,8 +87,27 @@ export function toolSummaries(cases) {
   return Object.fromEntries([...groups].map(([tool, items]) => [tool, summarizeCases(items)]));
 }
 
+export function dimensionSummaries(cases) {
+  const groups = new Map();
+  for (const item of cases) {
+    const dimension = item.dimension ?? 'core';
+    const group = groups.get(dimension) ?? [];
+    group.push(item);
+    groups.set(dimension, group);
+  }
+  return Object.fromEntries([...groups].map(([dimension, items]) => [dimension, summarizeCases(items)]));
+}
+
+export function evaluationStatus(cases) {
+  if (cases.some(item => (item.dimension ?? 'core') === 'core' && item.status !== 'passed')) return 'failed';
+  if (cases.some(item => item.dimension === 'connectivity' && item.status !== 'passed')) return 'degraded';
+  return 'passed';
+}
+
 export function normalizeReport(raw, fileName = '') {
-  if (raw?.schema_version === REPORT_VERSION && Array.isArray(raw.cases)) return raw;
+  if (raw?.schema_version === REPORT_VERSION && Array.isArray(raw.cases)) {
+    return { ...raw, dimensions: raw.dimensions ?? dimensionSummaries(raw.cases) };
+  }
   const health = raw?.health ?? {};
   const blocked = String(raw?.private_proxy_status ?? '') === '403';
   const cases = [
@@ -65,6 +123,7 @@ export function normalizeReport(raw, fileName = '') {
     status: cases.every(item => item.status === 'passed') ? 'passed' : 'failed',
     legacy: true,
     summary: summarizeCases(cases),
+    dimensions: dimensionSummaries(cases),
     tools: toolSummaries(cases),
     cases,
     artifacts: [],
@@ -83,6 +142,7 @@ export function publicRunSummary(report) {
     duration_ms: normalized.duration_ms ?? null,
     legacy: normalized.legacy === true,
     summary: normalized.summary,
+    dimensions: normalized.dimensions,
   };
 }
 

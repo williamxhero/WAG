@@ -7,8 +7,4 @@ Type=oneshot
 User=yosef
 Group=yosef
 EnvironmentFile=/data/web-access-gateway/secrets/gateway.env
-ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer ${GATEWAY_TOKEN}" http://${GATEWAY_HOST}:${GATEWAY_PORT}/healthz
-ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 10 http://127.0.0.1:11235/healthz
-ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 10 --proxy http://127.0.0.1:7895 https://example.com/
-ExecStart=/bin/sh -ec 'status=$$(/usr/bin/curl --silent --output /dev/null --write-out "%%{http_code}" --max-time 10 -H "Host: localhost:8931" http://127.0.0.1:8931/mcp || true); case "$$status" in 200|400|405|406) exit 0;; *) exit 1;; esac'
-ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 10 http://yosef-server:8801/search?q=healthcheck&format=json
+ExecStart=/data/web-access-gateway/scripts/healthcheck.sh

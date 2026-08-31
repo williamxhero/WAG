@@ -1,0 +1,20 @@
+name: WAG reliability gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check gateway/server.mjs
+      - run: node --check gateway/eval-runner.mjs
+      - run: node --check proxy/server.mjs
+      - run: node --test gateway/eval-core.test.mjs proxy/server.test.mjs
+      - run: bash -n scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh

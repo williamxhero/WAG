@@ -133,7 +133,7 @@ function requestOnce(url) {
         const request = transport.request({
           protocol: url.protocol, hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`,
           method: 'GET', agent: false, createConnection: () => requestSocket,
-          headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity' },
+          headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
           timeout: timeoutMs,
         }, page => {
         const parts = [];
@@ -141,21 +141,29 @@ function requestOnce(url) {
         page.on('data', chunk => {
           total += chunk.length;
           if (total <= 5 * 1024 * 1024) parts.push(chunk);
-          else request.destroy(rejectError('response exceeds 5 MiB', 'response_too_large'));
+          else {
+            const error = rejectError('response exceeds 5 MiB', 'response_too_large');
+            complete(error);
+            request.destroy();
+          }
         });
         page.on('end', () => {
           const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
           if (result.status < 200 || result.status >= 400) {
-            return complete(rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
+            const error = rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
               httpStatus: result.status,
               retryAfter: result.headers['retry-after'] ?? null,
               contentType: result.headers['content-type'] ?? null,
               bytes: result.body.length,
               contentHash: crypto.createHash('sha256').update(result.body).digest('hex'),
               blockedReason: result.status === 403 ? 'upstream_forbidden' : result.status === 429 ? 'upstream_rate_limited' : result.status >= 500 ? 'upstream_server_error' : 'upstream_http_error',
-            }));
+            });
+            complete(error);
+            request.destroy();
+            return;
           }
           complete(null, result);
+          request.destroy();
         });
         });
         request.once('timeout', () => { request.destroy(); complete(rejectError('upstream request timed out', 'upstream_timeout')); });

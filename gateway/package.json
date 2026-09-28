@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "scripts": { "test": "node --test *.test.mjs" },
   "engines": { "node": ">=22" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

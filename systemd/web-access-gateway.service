@@ -11,6 +11,7 @@ WorkingDirectory=/data/web-access-gateway/runtime/gateway
 EnvironmentFile=/data/web-access-gateway/secrets/gateway.env
 Environment=NODE_ENV=production
 Environment=PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp
+Environment=EGRESS_PROXY=http://127.0.0.1:7895
 ExecStart=/data/web-access-gateway/runtime/node/bin/node server.mjs
 Restart=on-failure
 RestartSec=5

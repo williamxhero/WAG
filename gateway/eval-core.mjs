@@ -65,6 +65,10 @@ export function summarizeCases(cases) {
   const passed = cases.filter(item => item.status === 'passed').length;
   const qualityPassed = cases.filter(item => item.quality?.passed === true).length;
   const timedOut = cases.filter(item => item.error?.kind === 'timeout').length;
+  const availability = cases.filter(item => (item.expectation ?? 'availability') === 'availability');
+  const expected = cases.filter(item => (item.expectation ?? 'availability') !== 'availability');
+  const availabilityPassed = availability.filter(item => item.status === 'passed').length;
+  const expectedPassed = expected.filter(item => item.status === 'passed').length;
   return {
     total_cases: total,
     passed_cases: passed,
@@ -72,6 +76,12 @@ export function summarizeCases(cases) {
     success_rate_pct: ratio(passed, total),
     quality_rate_pct: ratio(qualityPassed, total),
     timeout_rate_pct: ratio(timedOut, total),
+    availability_total_cases: availability.length,
+    availability_passed_cases: availabilityPassed,
+    availability_success_rate_pct: ratio(availabilityPassed, availability.length),
+    expected_outcomes_total: expected.length,
+    expected_outcomes_passed: expectedPassed,
+    expected_outcome_rate_pct: ratio(expectedPassed, expected.length),
     first_valid_result: latencySummary(cases.map(item => item.first_valid_result_ms)),
     total_latency: latencySummary(cases.map(item => item.total_ms)),
   };

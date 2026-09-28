@@ -11,6 +11,7 @@ WorkingDirectory=/data/web-access-gateway/runtime/proxy
 Environment=EGRESS_PROXY_HOST=127.0.0.1
 Environment=EGRESS_PROXY_PORT=7895
 Environment=EGRESS_UPSTREAM=http://127.0.0.1:7890
+Environment=EGRESS_MAX_HOST_CONCURRENCY=32
 ExecStart=/data/web-access-gateway/runtime/node/bin/node server.mjs
 Restart=on-failure
 RestartSec=3

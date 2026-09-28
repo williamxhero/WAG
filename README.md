@@ -87,6 +87,8 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
   "http://$GATEWAY_HOST:$GATEWAY_PORT/healthz"
 ```
 
+`/healthz` 只表示网关进程已响应；`/readyz` 会探测 SearXNG、Crawl4AI、Playwright 和统一公网出口，并返回最近一次依赖检查结果。两个接口都需要 Bearer Token。
+
 ## MCP 工具
 
 ### `web_search`
@@ -105,6 +107,8 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
 
 `query` 必填；可选参数为 `categories`、`engines`、`language`、`time_range`（`day`、`month`、`year`）和 `page`（1–10）。网关不会修改 SearXNG 已配置的可用引擎。
 
+每个搜索结果还返回 `retrieved_at`、`source.url`、`source.host` 和 `temporal_evidence`。如果 SearXNG 提供可信的发布时间，网关会将其作为 `published_at` 保留，并在摘要前标明发布时间的元数据来源。
+
 ### `web_read`
 
 读取公开 URL 并返回干净 Markdown。默认先以轻量 HTML 提取读取；正文过短或要求渲染时，自动改用 Crawl4AI。
@@ -119,6 +123,8 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
 
 - `render`：`auto`（默认）、`never`、`always`
 - `output`：`markdown`（默认）、`screenshot`、`pdf`
+- Markdown 结果返回 `retrieved_at`、`source` 和 `temporal_evidence`；`published_at` 只来自页面发布者元数据或 JSON-LD，不使用网关检索时间代替。
+- 结果同时返回 `http_status`、`content_type`、`bytes`、`content_hash` 和字符集；403、429、5xx 和超限响应作为错误返回，不进入正文证据。
 - 截图和 PDF 保存到 `artifacts/`，返回的下载链接同样需要 Bearer Token；默认保留 7 天。
 
 ### `web_browser`
@@ -136,6 +142,8 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
 ```
 
 可用动作：`navigate`、`click`、`wait`、`scroll`、`snapshot`、`screenshot`。后续调用传回的 `session_id` 可以复用同一会话。接口不提供填写字段、上传、下载或登录操作；只应用于公开网页，避免点击会提交外部表单的按钮。
+
+浏览器导航、点击后的最终 URL 和页面请求都经过公网出口；私网、回环、链路本地和保留地址由网关与出口代理共同拦截。快照结果带有当前 `url`、`retrieved_at`、`source` 和 `temporal_evidence`。
 
 ## 安全与资源限制
 

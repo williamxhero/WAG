@@ -7,9 +7,14 @@ const host = process.env.EGRESS_PROXY_HOST ?? '127.0.0.1';
 const port = Number(process.env.EGRESS_PROXY_PORT ?? 7895);
 const upstream = process.env.EGRESS_UPSTREAM ?? 'http://127.0.0.1:7890';
 const connectTimeoutMs = Number(process.env.EGRESS_CONNECT_TIMEOUT_MS ?? 10000);
+const maxHostConcurrency = Number(process.env.EGRESS_MAX_HOST_CONCURRENCY ?? 8);
 const upstreamUrl = new URL(upstream);
+const hostSlots = new Map();
 const isPublic = address => {
-  if (address.includes(':')) return !/^(::|::1|fc|fd|fe[89ab]|ff|2001:db8:)/i.test(address);
+  const value = address.toLowerCase();
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
+  if (mapped) return isPublic(mapped[1]);
+  if (value.includes(':')) return !/^(::|::1|fc|fd|fe[89ab]|ff|2001:db8:|2001:2:|2001:10:|2002:|64:ff9b:1:)/i.test(value);
   const [a, b, c] = address.split('.').map(Number);
   return !(a === 0 || a === 10 || a === 100 && b >= 64 && b <= 127 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) || a === 198 && (b === 18 || b === 19 || b === 51) || a === 203 && b === 0 && c === 113 || a >= 224);
 };
@@ -18,6 +23,9 @@ function validPort(value) { return Number(value) === 80 || Number(value) === 443
 async function tunnel(req, client, head) {
   const [name, portText] = req.url.split(':'); if (!name || !validPort(portText)) return client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
   try { await resolve(name); } catch { return client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); }
+  const slot = hostSlots.get(name) ?? 0;
+  if (slot >= maxHostConcurrency) return client.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n');
+  hostSlots.set(name, slot + 1);
   const socket = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 80) });
   let handshake = '';
   let closed = false;
@@ -27,6 +35,8 @@ async function tunnel(req, client, head) {
     clearTimeout(timer);
     client.destroy();
     socket.destroy();
+    const active = (hostSlots.get(name) ?? 1) - 1;
+    if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
   };
   const timer = setTimeout(teardown, connectTimeoutMs);
   client.once('error', teardown);

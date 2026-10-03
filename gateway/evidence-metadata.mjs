@@ -26,13 +26,29 @@ function temporalValue(value) {
   return normalized ? { value: normalized, on: normalized.slice(0, 10), precision: 'instant' } : null;
 }
 
-function safeUrl(value, base) {
+function parseHttpUrl(value, base) {
   try {
     const url = new URL(value, base);
-    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+    return ['http:', 'https:'].includes(url.protocol) ? url : null;
   } catch {
     return null;
   }
+}
+
+function safeUrl(value, base) {
+  return parseHttpUrl(value, base)?.href ?? null;
+}
+
+export function normalizeUrlForDedup(value) {
+  const url = parseHttpUrl(value);
+  if (!url) return text(value);
+  url.hash = '';
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^(?:utm_[^]+|fbclid|gclid)$/i.test(key)) url.searchParams.delete(key);
+  }
+  url.searchParams.sort();
+  if ((url.protocol === 'http:' && url.port === '80') || (url.protocol === 'https:' && url.port === '443')) url.port = '';
+  return url.href;
 }
 
 function firstMeta(document, selectors) {
@@ -124,6 +140,33 @@ export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = 
   };
 }
 
+function validUrlDate(year, month, day = null) {
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, day == null ? 1 : Number(day)));
+  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || (day != null && date.getUTCDate() !== Number(day))) return null;
+  return {
+    on: day == null ? `${year}-${month}` : `${year}-${month}-${day}`,
+    precision: day == null ? 'month' : 'day',
+    value: null,
+    source: 'url.pattern',
+  };
+}
+
+function urlDate(value) {
+  const pathname = parseHttpUrl(value)?.pathname ?? '';
+  const patterns = [
+    /(?:^|\/)(\d{4})-(\d{2})-(\d{2})(?=$|[\/_-])/,
+    /(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?=$|[\/_-])/,
+    /(?:^|\/)(\d{4})(\d{2})(\d{2})(?=$|[\/_-])/,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(pathname);
+    const normalized = match && validUrlDate(match[1], match[2], match[3]);
+    if (normalized) return normalized;
+  }
+  const monthMatch = /(?:^|\/)(\d{4})[-\/](\d{2})(?=$|\/)/.exec(pathname);
+  return monthMatch ? validUrlDate(monthMatch[1], monthMatch[2]) : null;
+}
+
 export function normalizeSearchResult(item, retrievedAt = new Date().toISOString()) {
   const url = text(item?.url);
   const candidates = [
@@ -133,19 +176,22 @@ export function normalizeSearchResult(item, retrievedAt = new Date().toISOString
   ];
   let published = null;
   for (const [field, value] of candidates) {
-    const normalized = timestamp(value);
+    const normalized = temporalValue(value);
     if (normalized) { published = { ...normalized, source: `searxng.result.${field}` }; break; }
   }
+  const pathPublished = published ? null : urlDate(url);
   const source = {
     url,
-    host: null,
+    host: parseHttpUrl(url)?.hostname.toLowerCase() ?? '',
     search_engine: text(item?.engine) || null,
   };
-  source.host = safeUrl(url) ? new URL(url).hostname.toLowerCase() : null;
   const temporalEvidence = [];
   if (published) temporalEvidence.push({ kind: 'published_at', value: published.value, on: published.on, precision: published.precision, source: published.source });
+  else if (pathPublished) temporalEvidence.push({ kind: 'published_on', value: null, on: pathPublished.on, precision: pathPublished.precision, source: pathPublished.source });
   temporalEvidence.push({ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' });
-  const prefix = published ? `[WAG publisher timestamp: ${published.value}; metadata source: ${published.source}]\n` : '';
+  const prefix = published
+    ? `[WAG publisher ${published.value ? 'timestamp' : 'date'}: ${published.value ?? published.on}; metadata source: ${published.source}]\n`
+    : '';
   return {
     title: item?.title,
     url,
@@ -153,12 +199,32 @@ export function normalizeSearchResult(item, retrievedAt = new Date().toISOString
     engine: item?.engine,
     category: item?.category,
     published_at: published?.value ?? null,
-    published_on: published?.on ?? null,
-    precision: published?.precision ?? null,
+    published_on: published?.on ?? pathPublished?.on ?? null,
+    precision: published?.precision ?? pathPublished?.precision ?? null,
     retrieved_at: retrievedAt,
     source,
     temporal_evidence: temporalEvidence,
   };
+}
+
+function searchResultCompleteness(result) {
+  return Math.min(text(result.content).length, 4000) +
+    (text(result.title) ? 200 : 0) +
+    (result.published_at || result.published_on ? 100 : 0) +
+    (text(result.engine) ? 20 : 0) +
+    (text(result.category) ? 20 : 0) +
+    (result.source?.host ? 20 : 0);
+}
+
+export function normalizeSearchResults(items, retrievedAt = new Date().toISOString(), limit = 20) {
+  const unique = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const result = normalizeSearchResult(item, retrievedAt);
+    const key = normalizeUrlForDedup(result.url);
+    const previous = unique.get(key);
+    if (!previous || searchResultCompleteness(result) > searchResultCompleteness(previous)) unique.set(key, result);
+  }
+  return [...unique.values()].slice(0, limit);
 }
 
 export function prependPublishedEvidence(markdown, evidence) {

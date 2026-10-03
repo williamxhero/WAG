@@ -14,7 +14,8 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as z from 'zod/v4';
-import { extractPageEvidence, normalizeSearchResult, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { searchSearxng } from './search.mjs';
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -471,7 +472,7 @@ async function browserAction(session, action) {
 const temporalEvidenceSchema = z.object({ kind: z.string(), value: z.string().nullable().optional(), on: z.string().nullable().optional(), precision: z.string().nullable().optional(), source: z.string() });
 const sourceSchema = z.object({ url: z.string(), host: z.string(), canonical_url: z.string().nullable().optional(), site_name: z.string().nullable().optional(), author: z.string().nullable().optional(), search_engine: z.string().nullable().optional() });
 const telemetrySchema = z.object({ first_valid_result_ms: z.number().optional(), stages_ms: z.record(z.string(), z.number()).optional() }).passthrough();
-const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), telemetry: telemetrySchema }).passthrough();
+const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), unresponsive_engines: z.unknown().optional(), telemetry: telemetrySchema }).passthrough();
 const readOutputSchema = z.object({ trace_id: z.string(), url: z.string().optional(), renderer: z.string().optional(), title: z.string().optional(), markdown: z.string().optional(), http_status: z.number().optional(), content_type: z.string().nullable().optional(), bytes: z.number().optional(), content_hash: z.string().optional(), charset: z.string().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), artifact: z.record(z.string(), z.unknown()).optional(), expires_after_days: z.number().optional(), blocked_reason: z.string().nullable().optional(), telemetry: telemetrySchema.optional() }).passthrough();
 const browserOutputSchema = z.object({ trace_id: z.string(), session_id: z.string().optional(), expires_in_seconds: z.number().optional(), url: z.string().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), outputs: z.array(z.record(z.string(), z.unknown())).optional(), closed: z.boolean().optional(), telemetry: telemetrySchema }).passthrough();
 function getServer() {
@@ -479,16 +480,18 @@ function getServer() {
   server.registerTool('web_search', { description: 'Search public web pages through the local SearXNG instance.', inputSchema: { query: z.string().min(1).max(500), categories: z.string().optional(), engines: z.string().optional(), language: z.string().optional(), time_range: z.enum(['day', 'month', 'year']).optional(), page: z.number().int().min(1).max(10).optional() }, outputSchema: searchOutputSchema }, async input => {
     const trace_id = crypto.randomUUID(); const started = Date.now();
     return executeTool('web_search', trace_id, async () => {
-      const params = new URLSearchParams({ q: input.query, format: 'json' });
-      for (const key of ['categories', 'engines', 'language', 'time_range']) if (input[key]) params.set(key, input[key]);
-      if (input.page) params.set('pageno', String(input.page));
-      const response = await fetch(`${cfg.searxUrl}/search?${params}`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw rejectError(`SearXNG returned ${response.status}`, 'search_backend_status', { httpStatus: response.status });
-      const body = await response.json();
-      const retrievedAt = new Date().toISOString();
-      const results = (body.results ?? []).slice(0, 20).map(item => normalizeSearchResult(item, retrievedAt));
+      const search = await searchSearxng({ baseUrl: cfg.searxUrl, input, signal: AbortSignal.timeout(30000) });
       const duration_ms = Date.now() - started;
-      return textResult({ trace_id, telemetry: { first_valid_result_ms: duration_ms, stages_ms: { search_ms: duration_ms } }, query: input.query, number_of_results: body.number_of_results ?? results.length, results });
+      return textResult({
+        trace_id,
+        telemetry: { first_valid_result_ms: duration_ms, stages_ms: search.stages_ms },
+        query: input.query,
+        number_of_results: search.number_of_results,
+        results: search.results,
+        ...(Object.prototype.hasOwnProperty.call(search, 'unresponsive_engines')
+          ? { unresponsive_engines: search.unresponsive_engines }
+          : {}),
+      });
     }, new URL(cfg.searxUrl).hostname);
   });
   server.registerTool('web_read', { description: 'Read a public URL as clean Markdown. Uses lightweight extraction first and Crawl4AI rendering when needed.', inputSchema: { url: z.string().url(), render: z.enum(['auto', 'never', 'always']).default('auto'), output: z.enum(['markdown', 'screenshot', 'pdf']).default('markdown') }, outputSchema: readOutputSchema }, async input => {

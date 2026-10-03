@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractPageEvidence, normalizeSearchResult, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { extractPageEvidence, normalizeSearchResult, normalizeSearchResults, normalizeUrlForDedup, prependPublishedEvidence } from './evidence-metadata.mjs';
 
 test('page evidence keeps publisher time separate from retrieval and response time', () => {
   const html = `<!doctype html><html><head>
@@ -46,4 +46,45 @@ test('date-only publisher metadata is retained with day precision', () => {
   assert.equal(evidence.precision, 'day');
   assert.equal(evidence.temporal_evidence.find(item => item.kind === 'published_at').precision, 'day');
   assert.match(prependPublishedEvidence('公告', evidence), /publisher date: 2026-09-28/);
+});
+
+test('search result dates use publisher metadata before URL evidence', () => {
+  const result = normalizeSearchResult({
+    title: 'News',
+    url: 'https://example.org/2026/10/02/news',
+    content: 'Summary',
+    publishedDate: '2026-09-30',
+  }, '2026-10-03T00:00:00.000Z');
+  assert.equal(result.published_at, null);
+  assert.equal(result.published_on, '2026-09-30');
+  assert.equal(result.precision, 'day');
+  assert.equal(result.temporal_evidence[0].source, 'searxng.result.publishedDate');
+  assert.equal(result.temporal_evidence.some(item => item.source === 'url.pattern'), false);
+});
+
+test('search result URL dates cover slash, compact, and dashed paths', () => {
+  const retrievedAt = '2026-10-03T00:00:00.000Z';
+  const cases = [
+    ['https://example.org/2026/10/02/story', '2026-10-02', 'day'],
+    ['https://example.org/archive/20261003/story', '2026-10-03', 'day'],
+    ['https://example.org/news/2026-10-04/story', '2026-10-04', 'day'],
+    ['https://example.org/archive/2026/10/story', '2026-10', 'month'],
+  ];
+  for (const [url, publishedOn, precision] of cases) {
+    const result = normalizeSearchResult({ title: 'News', url, content: 'Summary' }, retrievedAt);
+    assert.equal(result.published_on, publishedOn, url);
+    assert.equal(result.precision, precision, url);
+    assert.deepEqual(result.temporal_evidence[0], { kind: 'published_on', value: null, on: publishedOn, precision, source: 'url.pattern' });
+  }
+});
+
+test('search results deduplicate normalized URLs and retain the fuller record', () => {
+  assert.equal(normalizeUrlForDedup('HTTPS://example.org:443/story?utm_source=news#fragment'), 'https://example.org/story');
+  const results = normalizeSearchResults([
+    { title: 'Short', url: 'https://example.org/story#top', content: 'Short' },
+    { title: 'Full story', url: 'https://example.org/story?utm_source=news', content: 'A much longer summary with more details.' },
+  ], '2026-10-03T00:00:00.000Z');
+  assert.equal(results.length, 1);
+  assert.equal(results[0].title, 'Full story');
+  assert.match(results[0].content, /more details/);
 });

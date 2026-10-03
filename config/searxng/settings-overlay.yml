@@ -1,0 +1,61 @@
+# Minimal WAG overlay for the SearXNG settings.yml on yosef-server.
+# Apply with scripts/searxng-apply-overlay.sh; do not replace settings.yml by hand.
+# The apply script merges mappings and engine entries by name, preserving the rest
+# of the distribution's settings and creating a timestamped rollback copy.
+
+outgoing:
+  # Google, Bing, DuckDuckGo and the other public engines are not reachable
+  # directly from yosef-server.  HTTPX's all:// route covers HTTP and HTTPS.
+  proxies:
+    "all://":
+      - http://127.0.0.1:7890
+  # Keep an individual engine from holding up the whole SearXNG response.
+  request_timeout: 8.0
+  max_request_timeout: 8.0
+  pool_connections: 100
+  pool_maxsize: 20
+  # A single transport retry handles short proxy/upstream blips without
+  # multiplying the gateway's own bounded empty-result retry.
+  retries: 1
+  retry_on_http_error: false
+
+engines:
+  # Main general/news sources: explicitly enabled so a stale local setting
+  # cannot silently leave the proxy-backed pool empty.
+  - name: google
+    disabled: false
+    categories: [general, news]
+  - name: bing
+    disabled: false
+    categories: [general, news]
+  - name: duckduckgo
+    disabled: false
+    categories: [general, news]
+  - name: brave
+    disabled: false
+    categories: [general, news]
+  - name: mojeek
+    disabled: false
+    categories: [general, news]
+  - name: qwant
+    disabled: false
+    categories: [general, news]
+  # Keep Yandex available as a fallback engine; it was one of the few engines
+  # observed to work intermittently before proxy routing was fixed.
+  - name: yandex
+    disabled: false
+    categories: [general, news]
+
+  # These engines were observed timing out or requiring a CAPTCHA in the
+  # current environment.  Disable them so they do not consume the request
+  # budget or make an otherwise useful response look unhealthy.
+  - name: baidu
+    disabled: true
+  - name: crowdview
+    disabled: true
+  - name: mwmbl
+    disabled: true
+  - name: naver
+    disabled: true
+  - name: privacywall
+    disabled: true

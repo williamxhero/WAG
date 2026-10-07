@@ -118,7 +118,7 @@ test('CONNECT rejects forbidden or malformed answers and ambiguous authorities w
   const proxy = await startProxy(t, upstream.server);
   for (const authority of [
     'mixed.test:443', 'expanded-private.test:443', 'discard.test:443', 'expanded-doc.test:443', 'invalid-answer.test:443',
-    '127.0.0.1:80', '[::1]:443', '[::ffff:127.0.0.1]:443', '[2001:db8::1]:443',
+    '127.0.0.1:80', '2130706433:443', '0x7f000001:443', '[::1]:443', '[0:0:0:0:0:0:0:1]:443', '[::ffff:127.0.0.1]:443', '[2001:db8::1]:443',
     'navigation.test:8080', 'navigation.test:443:80', '2606:4700:4700::1111:443',
     'user@navigation.test:443', 'https://navigation.test:443', 'navigation.test:443/path', '[navigation.test]:443',
   ]) {
@@ -342,6 +342,32 @@ test('owned crawler API proxy config enforces navigation, redirects and real ren
   assert.equal(blocked.status, 502, 'the rendered redirect cannot tunnel to private DNS');
   assert.equal((await crawl('https://blocked.test/private')).status, 400, 'top-level policy remains public-only');
   assert.ok(!received.includes('blocked.test'));
+});
+
+test('checked-address retries retain one capacity reservation until terminal teardown', { timeout: 10000 }, async t => {
+  let retrySocket;
+  let retryArrived;
+  const arrived = new Promise(resolve => { retryArrived = resolve; });
+  const upstream = recordingUpstream((socket, _header, attempt) => {
+    if (attempt === 1) return socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+    if (attempt === 2) { retrySocket = socket; retryArrived(); return; }
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+  });
+  const proxy = await startProxy(t, upstream.server, { EGRESS_MAX_CONNECTIONS: '1', EGRESS_MAX_HOST_CONCURRENCY: '1' });
+  const pending = connect(t, proxy.port, 'retry.test:443');
+  await arrived;
+  assert.equal((await connect(t, proxy.port, '1.1.1.1:443')).status, 429, 'the checked retry still occupies global capacity');
+  retrySocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+  const established = await pending;
+  assert.equal(established.status, 200);
+  assert.equal((await connect(t, proxy.port, '1.1.1.1:443')).status, 429, 'the established retry holds the same reservation');
+  const closed = new Promise(resolve => established.socket.once('close', resolve));
+  established.socket.end();
+  await closed;
+  assert.equal((await connect(t, proxy.port, '8.8.4.4:443')).status, 200, 'terminal teardown restores admission');
+  assert.equal((await connect(t, proxy.port, '1.1.1.1:443')).status, 429, 'retry close/error events cannot release another tunnel');
+  assert.deepEqual(upstream.requests.map(header => header.split('\r\n')[0]), ['CONNECT 8.8.8.8:443 HTTP/1.1', 'CONNECT 1.1.1.1:443 HTTP/1.1', 'CONNECT 8.8.4.4:443 HTTP/1.1']);
+  assert.deepEqual(proxy.lookups.map(value => value.name), ['retry.test']);
 });
 
 test('CONNECT pins the checked address rather than delegating a rebinding hostname', { timeout: 10000 }, async t => {

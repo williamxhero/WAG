@@ -8,11 +8,14 @@ const port = Number(process.env.EGRESS_PROXY_PORT ?? 7895);
 const upstream = process.env.EGRESS_UPSTREAM ?? 'http://127.0.0.1:7890';
 const connectTimeoutMs = Number(process.env.EGRESS_CONNECT_TIMEOUT_MS ?? 10000);
 const maxHostConcurrency = Number(process.env.EGRESS_MAX_HOST_CONCURRENCY ?? 8);
+const maxConnections = Number(process.env.EGRESS_MAX_CONNECTIONS ?? 32);
+if (!Number.isSafeInteger(maxConnections) || maxConnections < 1) throw new Error('EGRESS_MAX_CONNECTIONS must be a positive safe integer');
 const upstreamUrl = new URL(upstream);
 if (upstreamUrl.protocol !== 'http:' || upstreamUrl.username || upstreamUrl.password) {
   throw new Error('EGRESS_UPSTREAM must be an unauthenticated HTTP CONNECT proxy; other transports cannot enforce address pinning');
 }
 const hostSlots = new Map();
+let connections = 0;
 const isPublic = address => {
   const family = net.isIP(address);
   if (!family) return false;
@@ -44,36 +47,57 @@ function parseAuthority(value) {
 }
 function formatAuthority(address, portText) { return `${net.isIP(address) === 6 ? `[${address}]` : address}:${portText}`; }
 async function tunnel(req, client, head) {
-  let name, portText;
-  try { ({ name, portText } = parseAuthority(req.url)); } catch { return client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); }
-  let checked;
-  try { checked = await resolve(name); } catch { return client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); }
-  const slot = hostSlots.get(name) ?? 0;
-  if (slot >= maxHostConcurrency) return client.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n');
-  hostSlots.set(name, slot + 1);
-  let socket;
+  const limited = 'HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n';
+  if (connections >= maxConnections) {
+    client.once('error', () => client.destroy());
+    return client.end(limited);
+  }
+  // Reserve before asynchronous validation so pending work cannot bypass the budget.
+  connections += 1;
+  let name, portText, checked, socket;
+  let hostReserved = false;
   let nextAddress = 0;
   let closed = false;
-  const teardown = () => {
+  const release = () => {
     if (closed) return;
     closed = true;
     clearTimeout(timer);
+    connections -= 1;
+    if (hostReserved) {
+      const active = hostSlots.get(name) - 1;
+      if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
+    }
+  };
+  const teardown = () => {
+    release();
     client.destroy();
     socket?.destroy();
-    const active = (hostSlots.get(name) ?? 1) - 1;
-    if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
   };
-  // The whole checked-set attempt shares one deadline and one host slot.
+  const reject = response => {
+    release();
+    socket?.destroy();
+    client.end(response);
+  };
+  // Validation and all checked-address retries share one deadline and reservation.
   const timer = setTimeout(teardown, connectTimeoutMs);
   client.once('error', teardown);
   client.once('close', teardown);
+  client.once('end', teardown);
+  try { ({ name, portText } = parseAuthority(req.url)); } catch { return reject('HTTP/1.1 403 Forbidden\r\n\r\n'); }
+  const slot = hostSlots.get(name) ?? 0;
+  if (slot >= maxHostConcurrency) return reject(limited);
+  hostSlots.set(name, slot + 1);
+  hostReserved = true;
+  try { checked = await resolve(name); } catch { if (!closed) reject('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
+  if (closed) return;
   const attempt = () => {
     if (closed) return;
     if (nextAddress >= checked.length) return teardown();
     // Only numeric destinations cross the upstream boundary. The client retains
     // its logical HTTP Host and TLS identity; the proxy does not terminate TLS.
     const authority = formatAuthority(checked[nextAddress++].address, portText);
-    const connection = net.connect({ host: upstreamUrl.hostname.replace(/^\[|\]$/g, ''), port: Number(upstreamUrl.port || 80) });
+    let connection;
+    try { connection = net.connect({ host: upstreamUrl.hostname.replace(/^\[|\]$/g, ''), port: Number(upstreamUrl.port || 80) }); } catch { return teardown(); }
     socket = connection;
     let handshake = '';
     let failed = false;
@@ -85,6 +109,7 @@ async function tunnel(req, client, head) {
     };
     connection.once('error', fail);
     connection.once('close', fail);
+    connection.once('end', fail);
     connection.once('connect', () => connection.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\nConnection: keep-alive\r\n\r\n`));
     connection.on('data', chunk => {
       if (failed || closed || handshake === null) return;

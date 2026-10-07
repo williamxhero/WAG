@@ -16,8 +16,8 @@ jobs:
       - run: node --check gateway/server.mjs
       - run: node --check gateway/eval-runner.mjs
       - run: node --check proxy/server.mjs
-      - run: npm --prefix gateway ci
-      - run: npm --prefix runtime/playwright-mcp ci
+      - run: npm --prefix gateway ci --ignore-scripts --no-audit --no-fund
+      - run: npm --prefix runtime/playwright-mcp ci --ignore-scripts --no-audit --no-fund
       - run: node runtime/playwright-mcp/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/setup-python@v5
         with:
@@ -32,5 +32,7 @@ jobs:
           requirements = [line for line in Path('config/crawl4ai-requirements.lock').read_text().splitlines() if line.split('==')[0] in packages]
           subprocess.run([sys.executable, '-m', 'pip', 'install', *requirements], check=True)
           PY
-      - run: node --test gateway/eval-core.test.mjs proxy/*.test.mjs
-      - run: bash -n scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh
+      - run: npm --prefix gateway test
+      - run: node --test proxy/*.test.mjs
+      - run: bash -n scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh scripts/bootstrap.sh
+      - run: python3 scripts/bootstrap.test.py

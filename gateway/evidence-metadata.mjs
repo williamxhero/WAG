@@ -36,7 +36,8 @@ function parseHttpUrl(value, base) {
 }
 
 function safeUrl(value, base) {
-  return parseHttpUrl(value, base)?.href ?? null;
+  const raw = text(value);
+  return raw ? parseHttpUrl(raw, base)?.href ?? null : null;
 }
 
 export function normalizeUrlForDedup(value) {
@@ -115,6 +116,7 @@ export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = 
   const modified = declaredModified ?? (headerModified ? { value: headerModified, source: 'http.header.last-modified' } : null);
   const responseDate = timestamp(headers.date);
   const canonical = firstMeta(document, [['link[rel~="canonical"]', 'href']]);
+  const canonicalUrl = safeUrl(canonical?.value, finalUrl);
   const site = firstMeta(document, [['meta[property="og:site_name"]'], ['meta[name="application-name"]']]);
   const authorMeta = firstMeta(document, [['meta[name="author"]'], ['meta[property="article:author"]']]);
   const jsonAuthor = jsonLd.map(value => authorName(value.author)).find(Boolean) ?? '';
@@ -132,7 +134,7 @@ export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = 
     source: {
       url: finalUrl,
       host: new URL(finalUrl).hostname.toLowerCase(),
-      canonical_url: safeUrl(canonical?.value, finalUrl),
+      ...(canonicalUrl ? { canonical_url: canonicalUrl } : {}),
       site_name: site?.value ?? null,
       author: authorMeta?.value || jsonAuthor || null,
     },

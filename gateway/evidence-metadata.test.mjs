@@ -22,6 +22,49 @@ test('page evidence keeps publisher time separate from retrieval and response ti
   assert.match(prependPublishedEvidence('News', evidence), /WAG publisher timestamp: 2026-09-27T04:30:00.000Z/);
 });
 
+test('page evidence omits a missing publisher canonical URL', () => {
+  const evidence = extractPageEvidence('<html><body>News</body></html>', 'https://example.org/news');
+  assert.equal(Object.hasOwn(evidence.source, 'canonical_url'), false);
+  assert.equal(JSON.stringify(evidence).includes('/undefined'), false);
+  assert.equal(evidence.source.url, 'https://example.org/news');
+});
+
+test('page evidence omits empty and invalid publisher canonical attributes', () => {
+  const links = [
+    '<link rel="canonical">',
+    '<link rel="canonical" href="">',
+    '<link rel="canonical" href="   ">',
+    '<link rel="canonical" href="https://[invalid">',
+    '<link rel="canonical" href="http://">',
+    '<link rel="canonical" href="javascript:alert(1)">',
+    '<link rel="canonical" href="data:text/html,News">',
+    '<link rel="canonical" href="ftp://example.org/story">',
+  ];
+  for (const link of links) {
+    const evidence = extractPageEvidence(`<html><head>${link}</head><body>News</body></html>`, 'https://final.example.org/articles/news');
+    assert.equal(Object.hasOwn(evidence.source, 'canonical_url'), false, link);
+    assert.equal(JSON.stringify(evidence).includes('/undefined'), false, link);
+    assert.equal(evidence.source.url, 'https://final.example.org/articles/news');
+    assert.equal(evidence.source.host, 'final.example.org');
+  }
+});
+
+test('page evidence resolves publisher canonical URLs against the final response URL', () => {
+  const cases = [
+    ['../declared?edition=1', 'https://final.example.org/declared?edition=1'],
+    ['/declared', 'https://final.example.org/declared'],
+    ['//publisher.example.org/declared', 'https://publisher.example.org/declared'],
+    ['  https://publisher.example.org/declared  ', 'https://publisher.example.org/declared'],
+    ['http://publisher.example.org/declared', 'http://publisher.example.org/declared'],
+  ];
+  for (const [href, expected] of cases) {
+    const evidence = extractPageEvidence(`<html><head><link rel="canonical" href="${href}"></head></html>`, 'https://final.example.org/articles/news?tracking=1');
+    assert.equal(evidence.source.canonical_url, expected, href);
+    assert.equal(evidence.source.url, 'https://final.example.org/articles/news?tracking=1');
+    assert.equal(evidence.source.host, 'final.example.org');
+  }
+});
+
 test('response date and search retrieval time are never presented as publication time', () => {
   const retrievedAt = '2026-09-28T01:00:00.000Z';
   const page = extractPageEvidence('<html><body>News</body></html>', 'https://example.org/news',

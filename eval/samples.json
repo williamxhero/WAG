@@ -16,7 +16,6 @@
   },
   "security": {
     "loopback_url": "http://127.0.0.1/",
-    "redirect_to_loopback_url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F",
-    "slow_url": "https://httpbin.org/delay/35"
+    "redirect_to_loopback_url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F"
   }
 }

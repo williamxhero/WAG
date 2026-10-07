@@ -1,5 +1,18 @@
 export const REPORT_VERSION = 1;
 
+export const DEADLINE_KINDS = Object.freeze(['timeout', 'upstream_timeout', 'egress_timeout']);
+
+export function deadlineKind(error, seen = new Set()) {
+  if (!error || typeof error !== 'object' || seen.has(error)) return null;
+  seen.add(error);
+  if (DEADLINE_KINDS.includes(error.kind)) return error.kind;
+  for (const nested of [error.cause, error.error, error.payload]) {
+    const kind = deadlineKind(nested, seen);
+    if (kind) return kind;
+  }
+  return null;
+}
+
 export function latestSnapshotText(outputs) {
   const snapshot = outputs?.at(-1);
   return (snapshot?.content ?? [])
@@ -64,8 +77,8 @@ export function summarizeCases(cases) {
   const total = cases.length;
   const passed = cases.filter(item => item.status === 'passed').length;
   const qualityPassed = cases.filter(item => item.quality?.passed === true).length;
-  const timedOut = cases.filter(item => item.error?.kind === 'timeout').length;
   const availability = cases.filter(item => (item.expectation ?? 'availability') === 'availability');
+  const timedOut = availability.filter(item => deadlineKind(item.error) !== null).length;
   const expected = cases.filter(item => (item.expectation ?? 'availability') !== 'availability');
   const availabilityPassed = availability.filter(item => item.status === 'passed').length;
   const expectedPassed = expected.filter(item => item.status === 'passed').length;
@@ -75,12 +88,16 @@ export function summarizeCases(cases) {
     failed_cases: total - passed,
     success_rate_pct: ratio(passed, total),
     quality_rate_pct: ratio(qualityPassed, total),
-    timeout_rate_pct: ratio(timedOut, total),
+    timeout_cases: timedOut,
+    timeout_eligible_cases: availability.length,
+    timeout_rate_pct: ratio(timedOut, availability.length),
+    availability_coverage: availability.length ? 'measured' : 'empty',
     availability_total_cases: availability.length,
     availability_passed_cases: availabilityPassed,
     availability_success_rate_pct: ratio(availabilityPassed, availability.length),
     expected_outcomes_total: expected.length,
     expected_outcomes_passed: expectedPassed,
+    expected_outcomes_failed: expected.length - expectedPassed,
     expected_outcome_rate_pct: ratio(expectedPassed, expected.length),
     first_valid_result: latencySummary(cases.map(item => item.first_valid_result_ms)),
     total_latency: latencySummary(cases.map(item => item.total_ms)),
@@ -109,6 +126,7 @@ export function dimensionSummaries(cases) {
 }
 
 export function evaluationStatus(cases) {
+  if (!cases.some(item => (item.expectation ?? 'availability') === 'availability')) return 'failed';
   if (cases.some(item => (item.dimension ?? 'core') === 'core' && item.status !== 'passed')) return 'failed';
   if (cases.some(item => item.dimension === 'connectivity' && item.status !== 'passed')) return 'degraded';
   return 'passed';

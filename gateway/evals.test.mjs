@@ -50,6 +50,8 @@ async function fixture(t) {
   // isolated .claude/worktrees. Run an exact source copy outside that boundary.
   const gateway = path.join(root, 'gateway');
   await fs.cp(moduleDir, gateway, { recursive: true, filter: source => path.basename(source) !== 'node_modules' });
+  await fs.mkdir(path.join(root, 'proxy'));
+  await fs.copyFile(path.join(moduleDir, '../proxy/public-address.mjs'), path.join(root, 'proxy/public-address.mjs'));
   await fs.symlink(path.join(moduleDir, 'node_modules'), path.join(gateway, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   const child = spawn(process.execPath, [path.join(gateway, 'server.mjs')], {
     env: { ...process.env, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1',

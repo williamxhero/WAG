@@ -196,6 +196,24 @@ systemctl status web-access-healthcheck.timer
 systemctl list-timers web-access-healthcheck.timer
 ```
 
+### Browser output staging and retained artifacts
+
+Playwright MCP writes SDK output under
+`/data/web-access-gateway/data/playwright/output`, **outside** `ARTIFACT_DIR`.
+Both service units create that directory as the application user before startup;
+bootstrap provisions it with application ownership. `PLAYWRIGHT_OUTPUT_DIR` must
+match the SDK `--output-dir` if overridden. Do not point SDK output or eviction at
+retained artifacts. SDK output-size eviction bounds only staging, not the shared
+retained quota.
+
+Gateway screenshots use unique owned staging directories and an explicit SDK
+filename, read bounded original bytes, then publish through the same serialized,
+quota-admitted atomic artifact store as crawler artifacts. Owned screenshot
+staging is removed after success or rejection; failed sessions are closed first.
+Rejected admission never adds files to retained storage or removes existing
+evidence. Other SDK diagnostics/snapshots remain unretained staging output and
+are subject to the SDK's staging eviction policy.
+
 ### Runtime release transaction (offline preparation contract)
 
 `scripts/deploy.sh` has no implicit installation or systemd destination. Its CLI is
@@ -213,6 +231,11 @@ covers tracked production helpers/assets under the owned source roots, excluding
 tests, fixtures, caches and runtime data. Unknown operator configuration and
 existing runtime environment files are preserved; secret-bearing environment
 files are never hashed (safe-configuration digests use parsed non-secret fields).
+The gateway projection includes effective `SEARXNG_URL`, `CRAWL4AI_URL`,
+`EGRESS_PROXY`, and `PLAYWRIGHT_MCP_URL` scheme/host/port/path, with runtime
+fallbacks for absent values; userinfo, queries and fragments are excluded. Endpoint
+or route drift blocks commit, while token/credential rotation does not. Rollback
+preserves operator edits to those environment files.
 `provenance.json` records revision, inventory/code/manifest/safe-configuration
 digests and installed versions. Dependency-manager output is not printed.
 

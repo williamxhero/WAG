@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +25,13 @@ async function listen(server) {
   return server.address().port;
 }
 
-async function browserFixture(t) {
+async function browserFixture(t, env = {}) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wag-browser-'));
+  const artifactDir = path.join(root, 'artifacts');
+  const outputDir = path.join(root, 'browser-output');
+  await fs.mkdir(artifactDir); await fs.mkdir(outputDir);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const screenshot = { bytes: Buffer.from('abc'), filenames: [] };
   const waits = [];
   const sessions = new Map();
   const streams = new Set();
@@ -49,6 +57,16 @@ async function browserFixture(t) {
       server.registerTool('browser_evaluate', { inputSchema: { function: z.string() } }, async () => ({
         content: [{ type: 'text', text: JSON.stringify(publicLocation) }],
       }));
+      // Emulate the locked SDK: every screenshot writes a file; an explicit
+      // filename produces a text link only, while an implicit one adds an image.
+      server.registerTool('browser_take_screenshot', { inputSchema: { fullPage: z.boolean(), filename: z.string().optional() } }, async ({ filename }) => {
+        const destination = filename ?? path.join(artifactDir, 'playwright', `${crypto.randomUUID()}.png`);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.writeFile(destination, screenshot.bytes);
+        screenshot.filenames.push(destination);
+        return { content: [{ type: 'text', text: `Screenshot saved: ${destination}` },
+          ...(filename ? [] : [{ type: 'image', data: screenshot.bytes.toString('base64'), mimeType: 'image/png' }])] };
+      });
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => crypto.randomUUID(),
         onsessioninitialized: id => sessions.set(id, { server, transport }),
@@ -85,6 +103,10 @@ async function browserFixture(t) {
       SEARXNG_URL: `http://127.0.0.1:${upstreamPort}`,
       CRAWL4AI_URL: `http://127.0.0.1:${upstreamPort}`,
       EGRESS_PROXY: `http://127.0.0.1:${upstreamPort}`,
+      ARTIFACT_DIR: artifactDir,
+      ARTIFACT_BASE_URL: `http://127.0.0.1:${gatewayPort}`,
+      PLAYWRIGHT_OUTPUT_DIR: outputDir,
+      ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -119,8 +141,56 @@ async function browserFixture(t) {
       resolve();
     });
   });
-  return { client, waits, call, close, failure, streams, disconnected };
+  return { client, waits, call, close, failure, streams, disconnected, artifactDir, outputDir, screenshot, token };
 }
+
+test('installed browser output is outside retained storage and its directory is provisioned for both services', async () => {
+  const root = path.resolve(moduleDir, '..');
+  const playwright = await fs.readFile(path.join(root, 'systemd/web-access-playwright.service'), 'utf8');
+  const gateway = await fs.readFile(path.join(root, 'systemd/web-access-gateway.service'), 'utf8');
+  const bootstrap = await fs.readFile(path.join(root, 'scripts/bootstrap.sh'), 'utf8');
+  const template = await fs.readFile(path.join(root, 'config/gateway.env.template'), 'utf8');
+  const staging = '/data/web-access-gateway/data/playwright/output';
+  assert.ok(playwright.includes(`--output-dir ${staging} `));
+  assert.equal(playwright.includes('--output-dir /data/web-access-gateway/artifacts'), false);
+  for (const unit of [playwright, gateway]) {
+    assert.ok(unit.includes(`ExecStartPre=/usr/bin/mkdir -p ${staging}`));
+    assert.match(unit, /^ReadWritePaths=.*\/data\/web-access-gateway\/data\s*$/m);
+    assert.match(unit, /^User=yosef\s*$/m);
+  }
+  assert.ok(bootstrap.includes('"$ROOT/data/playwright/output"'));
+  assert.ok(bootstrap.includes('install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750'));
+  assert.ok(template.includes(`PLAYWRIGHT_OUTPUT_DIR=${staging}`));
+});
+
+test('web_browser rejects publication without leaving SDK output inside the retained quota and recovers', { timeout: 15000 }, async t => {
+  const fixture = await browserFixture(t, { ARTIFACT_QUOTA_BYTES: '12' });
+  const existing = path.join(fixture.artifactDir, 'operator-evidence.bin');
+  await fs.writeFile(existing, Buffer.alloc(10, 120));
+  const rejected = await fixture.call({ actions: [{ type: 'screenshot' }] });
+  assert.equal(rejected.isError, true);
+  assert.equal(rejected.structuredContent.error.kind, 'artifact_quota_exceeded');
+  assert.deepEqual(await fs.readdir(fixture.artifactDir), ['operator-evidence.bin'], 'SDK files must not bypass rejected admission');
+  assert.deepEqual(await fs.readdir(fixture.outputDir), [], 'owned screenshot staging is removed on rejection');
+  await fixture.disconnected();
+  fixture.screenshot.bytes = Buffer.from('ab');
+  const recovered = await fixture.call({ actions: [{ type: 'screenshot' }] });
+  assert.notEqual(recovered.isError, true, JSON.stringify(recovered));
+  const artifact = recovered.structuredContent.outputs[0].artifact;
+  assert.equal(artifact.bytes, 2);
+  assert.equal(artifact.content_hash, crypto.createHash('sha256').update('ab').digest('hex'));
+  const downloaded = await fetch(artifact.url, { headers: { authorization: `Bearer ${fixture.token}` } });
+  assert.equal(downloaded.status, 200); assert.equal(await downloaded.text(), 'ab');
+  assert.equal((await fs.readdir(fixture.artifactDir)).length, 2);
+  assert.deepEqual(await fs.readdir(fixture.outputDir), []);
+  for (const filename of fixture.screenshot.filenames) {
+    assert.ok(filename.startsWith(fixture.outputDir + path.sep));
+    assert.equal(JSON.stringify(recovered).includes(filename), false, 'do not publish temporary filesystem links');
+    await assert.rejects(fs.stat(filename), { code: 'ENOENT' });
+  }
+  assert.equal((await fs.readFile(existing)).length, 10, 'existing retained evidence is untouched');
+  await fixture.close(recovered.structuredContent.session_id);
+});
 
 test('web_browser forwards 1000 milliseconds as one upstream second', { timeout: 15000 }, async t => {
   const fixture = await browserFixture(t);

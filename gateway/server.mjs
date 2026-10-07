@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -33,6 +34,7 @@ const cfg = Object.freeze({
   searxUrl: process.env.SEARXNG_URL ?? 'http://yosef-server:8801',
   playwrightUrl: process.env.PLAYWRIGHT_MCP_URL ?? 'http://localhost:8931/mcp',
   artifactDir: process.env.ARTIFACT_DIR ?? '/data/web-access-gateway/artifacts',
+  browserOutputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? '/data/web-access-gateway/data/playwright/output',
   artifactBase: process.env.ARTIFACT_BASE_URL ?? process.env.ARTIFACT_BASE ?? 'http://yosef-server:8930',
   reportDir: process.env.EVAL_REPORT_DIR ?? '/data/web-access-gateway/reports',
   egressProxy: process.env.EGRESS_PROXY ?? 'http://127.0.0.1:7895',
@@ -423,12 +425,56 @@ function validateArtifactEncoding(value) {
   if ((remainder === 2 && (tail & 15) !== 0) || (remainder === 3 && (tail & 3) !== 0)) throw rejectError('invalid artifact base64 padding bits', 'artifact_invalid');
   return encoded;
 }
+async function publishArtifact(content, extension) {
+  const artifact = await artifactStore.save(content, extension);
+  return { ...artifact, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(artifact.id)}` };
+}
 async function saveArtifact(value, extension) {
   const encoded = validateArtifactEncoding(value);
   if (encoded == null) return null;
-  const content = Buffer.from(encoded, 'base64');
-  const artifact = await artifactStore.save(content, extension);
-  return { ...artifact, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(artifact.id)}` };
+  return publishArtifact(Buffer.from(encoded, 'base64'), extension);
+}
+async function browserScreenshot(session) {
+  // The SDK always writes screenshots to disk. Its eviction is neither atomic
+  // nor shared with crawler artifacts, so it must never write in retained storage.
+  const overlaps = (left, right) => left === right || left.startsWith(right + path.sep) || right.startsWith(left + path.sep);
+  const configured = path.resolve(cfg.browserOutputDir);
+  const retained = path.resolve(cfg.artifactDir);
+  if (overlaps(configured, retained)) throw rejectError('browser staging must be outside retained artifacts', 'artifact_invalid');
+  await fs.mkdir(configured, { recursive: true, mode: 0o700 });
+  const stagingRoot = await fs.realpath(configured);
+  const artifactRoot = await fs.realpath(retained).catch(error => { if (error.code === 'ENOENT') return retained; throw error; });
+  if (overlaps(stagingRoot, artifactRoot)) throw rejectError('browser staging must be outside retained artifacts', 'artifact_invalid');
+  const staging = await fs.mkdtemp(path.join(stagingRoot, 'gateway-screenshot-'));
+  const filename = path.join(staging, 'screenshot.png');
+  try {
+    // An explicit filename suppresses the SDK inline image. Read the original
+    // staged bytes rather than relying on a potentially resized image response.
+    const output = await playwrightCall(session, 'browser_take_screenshot', { fullPage: true, filename });
+    if (output.isError) throw rejectError('browser screenshot failed', 'artifact_missing');
+    await browserLocation(session);
+    const handle = await fs.open(filename, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    let content;
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw rejectError('invalid staged browser artifact', 'artifact_invalid');
+      if (info.size > cfg.artifactMaxBytes) throw rejectError('artifact exceeds decoded size limit', 'artifact_too_large');
+      content = Buffer.alloc(info.size);
+      let offset = 0;
+      while (offset < content.length) {
+        const { bytesRead } = await handle.read(content, offset, content.length - offset, offset);
+        if (!bytesRead) throw rejectError('incomplete staged browser artifact', 'artifact_invalid');
+        offset += bytesRead;
+      }
+      if ((await handle.read(Buffer.alloc(1), 0, 1, offset)).bytesRead) throw rejectError('staged browser artifact changed', 'artifact_invalid');
+    } finally { await handle.close(); }
+    const artifact = await publishArtifact(content, 'png');
+    return { content: [{ type: 'text', text: 'Screenshot captured' }], artifact };
+  } catch (error) {
+    // Stop the SDK before removing our owned staging directory on failure.
+    await session.client.close().catch(() => {});
+    throw error;
+  } finally { await fs.rm(staging, { recursive: true, force: true }); }
 }
 async function createBrowserSession() {
   const transport = new StreamableHTTPClientTransport(new URL(cfg.playwrightUrl));
@@ -515,7 +561,7 @@ async function browserAction(session, action) {
   }
   if (type === 'scroll') { const output = await playwrightCall(session, 'browser_evaluate', { function: `() => window.scrollBy(0, ${Math.max(-3000, Math.min(3000, Number(action.pixels ?? 600)))})` }); await browserLocation(session); return output; }
   if (type === 'snapshot') { const output = await playwrightCall(session, 'browser_snapshot', {}); await browserLocation(session); return output; }
-  if (type === 'screenshot') { const output = await playwrightCall(session, 'browser_take_screenshot', { fullPage: true }); await browserLocation(session); return output; }
+  if (type === 'screenshot') return browserScreenshot(session);
   throw new Error(`unsupported browser action: ${type}`);
 }
 const temporalEvidenceSchema = z.object({ kind: z.string(), value: z.string().nullable().optional(), on: z.string().nullable().optional(), precision: z.string().nullable().optional(), source: z.string() });
@@ -605,11 +651,7 @@ function getServer() {
         const output = await browserAction(session, action);
         stages_ms[`browser_${action.type}_ms`] = (stages_ms[`browser_${action.type}_ms`] ?? 0) + Date.now() - actionStarted;
         if (action.type === 'snapshot') session.snapshot = (output.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
-        if (action.type === 'screenshot') {
-          const image = output.content?.find(item => item.type === 'image');
-          const artifact = await saveArtifact(image?.data, 'png');
-          outputs.push({ content: (output.content ?? []).filter(item => item.type !== 'image'), artifact });
-        } else if (action.type === 'snapshot') {
+        if (action.type === 'snapshot') {
           outputs.push({ ...output, ...browserEvidence(session) });
         } else {
           outputs.push(output);

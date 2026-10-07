@@ -13,7 +13,8 @@ Environment=HOME=/data/web-access-gateway/data/playwright
 Environment=XDG_CACHE_HOME=/data/web-access-gateway/data/playwright/cache
 Environment=XDG_CONFIG_HOME=/data/web-access-gateway/data/playwright/config
 Environment=PATH=/data/web-access-gateway/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/data/web-access-gateway/runtime/playwright-mcp/node_modules/.bin/playwright-mcp --host 127.0.0.1 --port 8931 --headless --executable-path /data/web-access-gateway/runtime/playwright-browsers/chromium-1237/chrome-linux64/chrome --isolated --block-service-workers --output-dir /data/web-access-gateway/artifacts/playwright --output-max-size 1073741824 --timeout-action 5000 --timeout-navigation 60000 --timeout-settle 500 --proxy-server http://127.0.0.1:7895
+ExecStartPre=/usr/bin/mkdir -p /data/web-access-gateway/data/playwright/output
+ExecStart=/data/web-access-gateway/runtime/playwright-mcp/node_modules/.bin/playwright-mcp --host 127.0.0.1 --port 8931 --headless --executable-path /data/web-access-gateway/runtime/playwright-browsers/chromium-1237/chrome-linux64/chrome --isolated --block-service-workers --output-dir /data/web-access-gateway/data/playwright/output --output-max-size 1073741824 --timeout-action 5000 --timeout-navigation 60000 --timeout-settle 500 --proxy-server http://127.0.0.1:7895
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=120
@@ -24,7 +25,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/data/web-access-gateway/artifacts /data/web-access-gateway/runtime /data/web-access-gateway/data/playwright
+ReadWritePaths=/data/web-access-gateway/runtime /data/web-access-gateway/data
 
 [Install]
 WantedBy=multi-user.target

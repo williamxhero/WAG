@@ -46,7 +46,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-cer
 install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 \
   "$ROOT" "$ROOT/config" "$ROOT/secrets" "$ROOT/scripts" "$ROOT/runtime" \
   "$ROOT/runtime/gateway" "$ROOT/runtime/crawl4ai-service" "$ROOT/runtime/playwright-mcp" "$ROOT/runtime/proxy" \
-  "$ROOT/data/crawl4ai" "$ROOT/logs" "$ROOT/artifacts/crawl4ai" "$ROOT/artifacts/playwright" "$ROOT/systemd" "$ROOT/compose"
+  "$ROOT/data/crawl4ai" "$ROOT/data/playwright/output" "$ROOT/logs" "$ROOT/artifacts/crawl4ai" "$ROOT/systemd" "$ROOT/compose"
 
 if [[ "$gateway_source" != "$ROOT/runtime/gateway" ]]; then
   cp -a "$gateway_source/." "$ROOT/runtime/gateway/"

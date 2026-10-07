@@ -171,9 +171,27 @@ test('core failure overrides permissive aggregate command thresholds', async t =
 for (const [threshold, code] of [[100, 0], [99.99, 1]]) test(`release command enforces concurrency boundary ${threshold}% with a controlled clock`, async t => {
   const f = await passingFixture(t);
   const clock = path.join(f.root, 'clock.mjs');
-  // Only the elapsed-time boundary is replaced in this child. Real MCP and HTTP
-  // requests, case outcomes, gates, report publication and exits remain intact.
-  await fs.writeFile(clock, "let tick = 0; Object.defineProperty(performance, 'now', { value: () => tick += 10 });\n");
+  // Advance elapsed time on real tool-response completion, never on clock reads:
+  // Node HTTP instrumentation also reads performance.now(), with OS/timing-dependent
+  // frequency. Each solo call takes 10ms; the pair takes 20ms (100% degradation).
+  // Real requests, outcomes, gates, report publication and exits remain intact.
+  await fs.writeFile(clock, `let tick = 0;
+Object.defineProperty(performance, 'now', { value: () => tick });
+const fetch = globalThis.fetch;
+let baselineObserved = false;
+globalThis.fetch = async (url, init) => {
+  const response = await fetch(url, init);
+  const message = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+  if (message?.method === 'tools/call') tick += 10;
+  if (!baselineObserved && message?.method === 'tools/call' && message.params.name === 'web_read'
+      && message.params.arguments.render === 'never' && message.params.arguments.url === 'https://example.com/') {
+    baselineObserved = true;
+    // HTTP instrumentation is also allowed to read the shared performance clock.
+    performance.now(); performance.now();
+  }
+  return response;
+};
+`);
   const config = await samplesWithThresholds(f, { concurrency_degradation_pct: threshold });
   const { report } = await runEvaluator(t, f, config, ['--import', pathToFileURL(clock).href], code, 'release');
   assert.equal(report.cases.find(item => item.id === 'concurrency-two').metrics.degradation_pct, 100);

@@ -339,6 +339,31 @@ for (const terminal of ['abort', 'timeout']) {
   });
 }
 
+test('aborted over-capacity clients cannot terminate the proxy or release occupied slots', { timeout: 10000 }, async t => {
+  const proxy = await capacityProxy(t, { env: { EGRESS_MAX_CONNECTIONS: '1' } });
+  const survivor = request(proxy.port);
+  assert.match(await survivor.response, /^HTTP\/1\.1 200/);
+  for (let i = 0; i < 64; i += 1) {
+    const socket = net.connect(proxy.port, '127.0.0.1');
+    socket.on('error', () => {});
+    const closed = new Promise(resolve => socket.once('close', resolve));
+    socket.once('connect', () => {
+      socket.write('CONNECT 1.1.1.1:443 HTTP/1.1\r\nHost: 1.1.1.1:443\r\n\r\n', () => socket.resetAndDestroy());
+    });
+    await closed;
+  }
+  const excess = request(proxy.port, '1.1.1.1:443');
+  assert.match(await excess.response, /^HTTP\/1\.1 429/);
+  await excess.closed;
+  assert.equal(proxy.child.exitCode, null);
+  survivor.socket.end();
+  await survivor.closed;
+  const replacement = request(proxy.port);
+  assert.match(await replacement.response, /^HTTP\/1\.1 200/);
+  replacement.socket.end();
+  await replacement.closed;
+});
+
 test('invalid global capacity fails closed at startup', { timeout: 10000 }, async () => {
   for (const limit of ['0', '-1', '1.5', 'NaN', 'Infinity', '9007199254740992']) {
     const child = spawn(process.execPath, [path.join(moduleDir, 'server.mjs')], {

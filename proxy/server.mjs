@@ -25,7 +25,10 @@ async function resolve(name) { const records = await dns.lookup(name, { all: tru
 function validPort(value) { return Number(value) === 80 || Number(value) === 443; }
 async function tunnel(req, client, head) {
   const limited = 'HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n';
-  if (connections >= maxConnections) return client.end(limited);
+  if (connections >= maxConnections) {
+    client.once('error', () => client.destroy());
+    return client.end(limited);
+  }
   // Reserve before asynchronous validation so pending work cannot bypass the budget.
   connections += 1;
   const [name, portText] = req.url.split(':');

@@ -7,6 +7,18 @@
 <body>
   <main class="shell">
     <header class="masthead"><div><p class="eyebrow">WEB ACCESS GATEWAY · READ ONLY</p><h1>评测结果</h1></div><div class="refresh"><span id="refresh-dot"></span><span id="refresh-status">每 60 秒刷新</span></div></header>
+    <section class="credentials" aria-labelledby="credentials-title">
+      <h2 id="credentials-title">授权查看</h2>
+      <p id="token-help" class="muted">Token 仅在当前页面内存中使用，不会保存；关闭或重新加载页面后需重新输入。</p>
+      <form id="token-form" autocomplete="off">
+        <label for="token">Bearer Token</label>
+        <input id="token" type="password" autocomplete="off" spellcheck="false" aria-describedby="token-help" required>
+        <button type="submit">使用 / 替换 Token</button>
+        <button id="clear-token" type="button">清除凭据</button>
+        <button id="refresh" type="button" disabled>刷新报告</button>
+      </form>
+      <p id="auth-status" class="muted" role="status" aria-live="polite">请输入 Token 查看受保护的报告和产物。</p>
+    </section>
     <section id="empty" class="empty" hidden><h2>尚无评测报告</h2><p>每日冒烟评测或下一次发布门禁完成后，结果会显示在这里。</p></section>
     <section id="content" hidden>
       <section class="latest" aria-labelledby="latest-title"><div class="section-head"><p class="eyebrow">LATEST RUN</p><h2 id="latest-title">最近一次结论</h2><p id="latest-meta" class="muted"></p></div><div id="kpis" class="kpis"></div></section>

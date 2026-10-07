@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT=/data/web-access-gateway
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_USER="${SUDO_USER:-yosef}"
-APP_GROUP="$(id -gn "$APP_USER")"
 NODE_VERSION=v22.23.2
 NODE_SHA256=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307
 NODE_ARCH=linux-x64
@@ -14,9 +13,20 @@ UVICORN_VERSION=0.52.4
 PROXY_URL=http://127.0.0.1:7890
 INTERNAL_NO_PROXY=localhost,127.0.0.1
 
-if [[ "$(id -u)" -ne 0 ]]; then
-  exec sudo --preserve-env=SUDO_USER bash "$0" "$@"
+# Reject explicit overrides before privilege escalation or installation effects.
+# Python is a preflight prerequisite; do not install dependencies to validate input.
+if ! command -v python3 >/dev/null; then
+  echo "Bind validation requires python3 before bootstrap can install anything." >&2
+  exit 2
 fi
+if [[ "${GATEWAY_BIND_HOST+x}" ]]; then
+  python3 "$SOURCE_ROOT/scripts/bootstrap-bind.py" --override
+fi
+if [[ "$(id -u)" -ne 0 ]]; then
+  exec sudo --preserve-env=SUDO_USER,GATEWAY_BIND_HOST bash "$0" "$@"
+fi
+bind_host="$(python3 "$SOURCE_ROOT/scripts/bootstrap-bind.py" "$ROOT/secrets/gateway.env" "$SOURCE_ROOT/config/gateway.env.template")"
+APP_GROUP="$(id -gn "$APP_USER")"
 gateway_source="$SOURCE_ROOT/gateway"
 crawl4ai_source="$SOURCE_ROOT/crawl4ai"
 if [[ ! -d "$gateway_source" ]]; then
@@ -36,7 +46,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-cer
 install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 \
   "$ROOT" "$ROOT/config" "$ROOT/secrets" "$ROOT/scripts" "$ROOT/runtime" \
   "$ROOT/runtime/gateway" "$ROOT/runtime/crawl4ai-service" "$ROOT/runtime/playwright-mcp" "$ROOT/runtime/proxy" \
-  "$ROOT/data/crawl4ai" "$ROOT/logs" "$ROOT/artifacts/crawl4ai" "$ROOT/artifacts/playwright" "$ROOT/systemd" "$ROOT/compose"
+  "$ROOT/data/crawl4ai" "$ROOT/data/playwright/output" "$ROOT/logs" "$ROOT/artifacts/crawl4ai" "$ROOT/systemd" "$ROOT/compose"
 
 if [[ "$gateway_source" != "$ROOT/runtime/gateway" ]]; then
   cp -a "$gateway_source/." "$ROOT/runtime/gateway/"
@@ -64,7 +74,7 @@ umask 077
 if [[ ! -s "$ROOT/secrets/gateway.env" ]]; then
   gateway_token="$(openssl rand -hex 32)"
   crawl_token="$(openssl rand -hex 32)"
-  sed -e "s/GATEWAY_TOKEN=__GENERATED__/GATEWAY_TOKEN=$gateway_token/" -e "s/CRAWL4AI_TOKEN=__GENERATED__/CRAWL4AI_TOKEN=$crawl_token/" "$ROOT/config/gateway.env.template" > "$ROOT/secrets/gateway.env"
+  sed -e "s/^GATEWAY_BIND_HOST=.*/GATEWAY_BIND_HOST=$bind_host/" -e "s/GATEWAY_TOKEN=__GENERATED__/GATEWAY_TOKEN=$gateway_token/" -e "s/CRAWL4AI_TOKEN=__GENERATED__/CRAWL4AI_TOKEN=$crawl_token/" "$ROOT/config/gateway.env.template" > "$ROOT/secrets/gateway.env"
 else
   crawl_token="$(sed -n 's/^CRAWL4AI_TOKEN=//p' "$ROOT/secrets/gateway.env" | head -n 1)"
   if [[ -z "$crawl_token" ]]; then
@@ -115,6 +125,7 @@ systemctl restart web-access-crawl4ai.service
 systemctl restart web-access-playwright.service
 systemctl restart web-access-gateway.service
 systemctl start web-access-healthcheck.timer
+WAG_ROOT="$ROOT" "$ROOT/scripts/install-artifact-cleanup.sh"
 
 echo "Installed native Crawl4AI, native Playwright MCP, and the authenticated gateway."
 echo "Read the token locally with: ssh yosef-server 'sudo cat $ROOT/secrets/gateway.env'"

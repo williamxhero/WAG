@@ -1,21 +1,83 @@
 #!/usr/bin/env bash
+# Disable inherited tracing before sourcing or expanding any secret.
+{ set +x; } 2>/dev/null
 set -euo pipefail
 
-ROOT=/data/web-access-gateway
+ROOT="${WAG_ROOT:-/data/web-access-gateway}"
 mode="${1:-}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Bound the entire command, including service-manager and diagnostic failures.
+if [[ "${WAG_HEALTHCHECK_BOUNDED:-}" != 1 ]]; then
+  seconds="${WAG_HEALTHCHECK_TIMEOUT_SECONDS:-45}"
+  if [[ ! "$seconds" =~ ^[0-9]+$ ]] || ((seconds < 1 || seconds > 60)); then
+    printf '{"layer":"healthcheck","ok":false,"error":{"kind":"invalid_deadline"}}\n' >&2
+    exit 1
+  fi
+  if timeout --signal=TERM --kill-after=2 "${seconds}s" env WAG_HEALTHCHECK_BOUNDED=1 bash "$0" "$@"; then exit 0; else status=$?; fi
+  if [[ "$status" == 124 || "$status" == 137 ]]; then
+    printf '{"layer":"healthcheck","ok":false,"exit_code":%s,"error":{"kind":"healthcheck_timeout","message":"Overall healthcheck deadline exceeded"}}\n' "$status" >&2
+  fi
+  exit "$status"
+fi
+
+# Export only into subprocesses so their diagnostics can redact secret values.
+set -a
 # shellcheck disable=SC1091
 source "$ROOT/secrets/gateway.env"
-check() { local layer="$1"; shift; if "$@" >/dev/null 2>&1; then printf '{"layer":"%s","ok":true}\n' "$layer"; else printf '{"layer":"%s","ok":false}\n' "$layer" >&2; return 1; fi; }
-check process systemctl is-active --quiet web-access-egress-proxy.service web-access-crawl4ai.service web-access-playwright.service web-access-gateway.service
-check gateway curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $GATEWAY_TOKEN" "http://$GATEWAY_HOST:$GATEWAY_PORT/healthz"
-check crawl4ai curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:11235/healthz"
-playwright_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 -H 'Host: localhost:8931' http://127.0.0.1:8931/mcp || true)"
-case "$playwright_status" in 200|400|405|406) printf '{"layer":"playwright","ok":true}\n';; *) printf '{"layer":"playwright","ok":false,"http_status":"%s"}\n' "$playwright_status" >&2; exit 1;; esac
-[[ "$mode" == "--core-only" ]] && exit 0
-check gateway-ready curl --fail --silent --show-error --max-time 30 -H "Authorization: Bearer $GATEWAY_TOKEN" "http://$GATEWAY_HOST:$GATEWAY_PORT/readyz"
+set +a
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+trap 'exit 124' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+umask 077
+
+diagnose() {
+  python3 "$SCRIPT_DIR/healthcheck-diagnostics.py" "$1" "$2" "$3" "$work/body" "$work/error" "$work/status"
+}
+# Keep inner commands in the outer timeout's process group for prompt teardown.
+check_command() {
+  local layer="$1" status=0; shift
+  : > "$work/status"
+  timeout --foreground --signal=TERM --kill-after=1 8s "$@" > "$work/body" 2> "$work/error" || status=$?
+  diagnose "$layer" "$status" command
+}
+check_http() {
+  local layer="$1" validation="$2" status=0; shift 2
+  : > "$work/body"
+  timeout --foreground --signal=TERM --kill-after=1 9s curl --silent --show-error --max-time 8 --max-filesize 65536 --output "$work/body" --write-out '%{http_code}' "$@" > "$work/status" 2> "$work/error" || status=$?
+  diagnose "$layer" "$status" "$validation"
+}
+
+# Probe the local listener, not the logical/public hostname. Keep the Host
+# header independent so the same production host allowlist is still exercised.
+probe_host="${GATEWAY_HEALTHCHECK_HOST:-${GATEWAY_BIND_HOST:-127.0.0.1}}"
+probe_host="${probe_host#[}"; probe_host="${probe_host%]}"
+case "$probe_host" in 0.0.0.0) probe_host=127.0.0.1;; ::) probe_host=::1;; esac
+[[ "$probe_host" != *:* ]] || probe_host="[$probe_host]"
+logical_host="${GATEWAY_HOST:-yosef-server}"
+if [[ "$logical_host" == *:* && "$logical_host" != \[*\] ]]; then logical_host="[$logical_host]"; fi
+gateway_url="http://$probe_host:$GATEWAY_PORT"
+gateway_host_header="Host: $logical_host:$GATEWAY_PORT"
+
+check_command process systemctl is-active --quiet web-access-egress-proxy.service web-access-crawl4ai.service web-access-playwright.service web-access-gateway.service
+check_http gateway http --noproxy '*' -H "$gateway_host_header" -H "Authorization: Bearer $GATEWAY_TOKEN" "$gateway_url/healthz"
+check_http crawl4ai http http://127.0.0.1:11235/healthz
+check_http playwright playwright -H 'Host: localhost:8931' http://127.0.0.1:8931/mcp
+if [[ "$mode" == --core-only ]]; then
+  # Public search/egress degradation must not trigger deployment rollback.
+  check_http gateway-ready ready-core --noproxy '*' -H "$gateway_host_header" -H "Authorization: Bearer $GATEWAY_TOKEN" "$gateway_url/readyz"
+  exit 0
+fi
+
 degraded=0
-check egress-connect curl --fail --silent --show-error --max-time 10 --proxy http://127.0.0.1:7895 https://example.com/ || degraded=1
-check public-search curl --fail --silent --show-error --max-time 10 "http://yosef-server:8801/search?q=healthcheck&format=json" || degraded=1
-restarts="$(systemctl show web-access-egress-proxy.service --property=NRestarts --value)"
-printf '{"layer":"proxy-restarts","ok":true,"count":%s}\n' "${restarts:-0}"
+if check_http gateway-ready ready --noproxy '*' -H "$gateway_host_header" -H "Authorization: Bearer $GATEWAY_TOKEN" "$gateway_url/readyz"; then :; else
+  status=$?
+  [[ "$status" == 2 ]] || exit 1
+  degraded=1
+fi
+check_http egress-connect http --proxy http://127.0.0.1:7895 https://example.com/ || degraded=1
+check_http public-search search "http://yosef-server:8801/search?q=healthcheck&format=json" || degraded=1
+check_command proxy-restarts systemctl show web-access-egress-proxy.service --property=NRestarts --value || degraded=1
 exit "$degraded"

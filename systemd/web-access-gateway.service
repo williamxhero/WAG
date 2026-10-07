@@ -12,6 +12,7 @@ EnvironmentFile=/data/web-access-gateway/secrets/gateway.env
 Environment=NODE_ENV=production
 Environment=PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp
 Environment=EGRESS_PROXY=http://127.0.0.1:7895
+ExecStartPre=/usr/bin/mkdir -p /data/web-access-gateway/data/playwright/output
 ExecStart=/data/web-access-gateway/runtime/node/bin/node server.mjs
 Restart=on-failure
 RestartSec=5
@@ -23,7 +24,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/data/web-access-gateway/artifacts
+ReadWritePaths=/data/web-access-gateway/artifacts /data/web-access-gateway/data
 
 [Install]
 WantedBy=multi-user.target

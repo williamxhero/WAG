@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +16,11 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as z from 'zod/v4';
-import { extractPageEvidence, normalizeSearchResult, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { searchSearxng } from './search.mjs';
+import { createArtifactStore } from './artifact-store.mjs';
+import { createReadiness } from './readiness.mjs';
+import { isPublicAddress as classifyPublicAddress } from '../proxy/public-address.mjs';
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -28,12 +34,14 @@ const cfg = Object.freeze({
   searxUrl: process.env.SEARXNG_URL ?? 'http://yosef-server:8801',
   playwrightUrl: process.env.PLAYWRIGHT_MCP_URL ?? 'http://localhost:8931/mcp',
   artifactDir: process.env.ARTIFACT_DIR ?? '/data/web-access-gateway/artifacts',
+  browserOutputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? '/data/web-access-gateway/data/playwright/output',
   artifactBase: process.env.ARTIFACT_BASE_URL ?? process.env.ARTIFACT_BASE ?? 'http://yosef-server:8930',
   reportDir: process.env.EVAL_REPORT_DIR ?? '/data/web-access-gateway/reports',
   egressProxy: process.env.EGRESS_PROXY ?? 'http://127.0.0.1:7895',
   tokenRateLimit: Number(process.env.GATEWAY_TOKEN_RATE_LIMIT ?? 120),
   tokenRateWindowMs: Number(process.env.GATEWAY_TOKEN_RATE_WINDOW_MS ?? 60000),
   hostConcurrency: Number(process.env.GATEWAY_HOST_CONCURRENCY ?? 4),
+  crawlResponseMaxBytes: Number(process.env.CRAWL4AI_RESPONSE_MAX_BYTES ?? 80 * 1024 * 1024),
   artifactMaxBytes: Number(process.env.ARTIFACT_MAX_BYTES ?? 25 * 1024 * 1024),
   artifactQuotaBytes: Number(process.env.ARTIFACT_QUOTA_BYTES ?? 1024 * 1024 * 1024),
   dashboardDir: path.join(moduleDir, 'public'),
@@ -41,6 +49,8 @@ const cfg = Object.freeze({
 });
 
 if (cfg.token.length < 32) throw new Error('GATEWAY_TOKEN must be at least 32 characters');
+if (!Number.isSafeInteger(cfg.crawlResponseMaxBytes) || cfg.crawlResponseMaxBytes <= 0) throw new Error('CRAWL4AI_RESPONSE_MAX_BYTES must be a positive safe integer');
+if (!Number.isSafeInteger(cfg.artifactMaxBytes) || cfg.artifactMaxBytes <= 0) throw new Error('ARTIFACT_MAX_BYTES must be a positive safe integer');
 
 const browserSessions = new Map();
 const renderSlots = { active: 0, limit: 2 };
@@ -48,10 +58,18 @@ const browserSlots = { active: 0, limit: 2 };
 const requestSlots = { active: 0, limit: Number(process.env.GATEWAY_REQUEST_CONCURRENCY ?? 16) };
 const hostSlots = new Map();
 const tokenRequests = new Map();
-const artifactSlots = { active: 0, limit: 1 };
-let artifactUsage = null;
-let artifactUsagePromise = null;
-const readiness = { checkedAt: 0, value: null, promise: null };
+const artifactStore = createArtifactStore({ root: cfg.artifactDir,
+  maxBytes: cfg.artifactMaxBytes, quotaBytes: cfg.artifactQuotaBytes });
+const getReadiness = createReadiness({
+  searxUrl: cfg.searxUrl, crawlUrl: cfg.crawlUrl, crawlToken: cfg.crawlToken, playwrightUrl: cfg.playwrightUrl,
+  secrets: Object.entries(process.env).filter(([key]) => /token|secret|password|api[_-]?key|authorization|credential|private[_-]?key|access[_-]?key/i.test(key)).map(([, value]) => value),
+  egressProbe: async signal => {
+    const { url, records } = await resolvePublicUrl('https://example.com/');
+    signal.throwIfAborted();
+    const response = await requestOnce(url, records, signal);
+    return { http_status: response.status };
+  },
+});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const tokenEqual = value => {
   const supplied = Buffer.from(value ?? '');
@@ -80,16 +98,7 @@ const requireToken = (req, res, next) => {
   next();
 };
 
-function isPublicAddress(address) {
-  // RFC 1918, loopback, link-local, CGNAT, documentation/benchmark and all
-  // IPv6 special-use ranges are deliberately excluded.  DNS answers must all
-  // be public: selecting one answer would otherwise permit DNS rebinding.
-  if (address.includes(':')) {
-    const value = address.toLowerCase().replace(/^::ffff:/, '');
-    if (!value.includes(':')) return isPublicAddress(value);
-    return !(/^(::|::1|fc|fd|fe[89ab]|2001:db8:|2001:2:|2001:10:|2002:|64:ff9b:1:)/.test(value) ||
-      value.startsWith('ff') || value.startsWith('::ffff:'));
-  }
+function isPublicIPv4(address) {
   const octets = address.split('.').map(Number);
   if (octets.length !== 4 || octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   const [a, b, c] = octets;
@@ -99,86 +108,144 @@ function isPublicAddress(address) {
     a === 198 && (b === 18 || b === 19 || b === 51) || a === 203 && b === 0 && c === 113 ||
     a >= 224);
 }
+const isPublicAddress = address => classifyPublicAddress(address, isPublicIPv4);
 async function resolvePublicUrl(raw) {
   let url;
   try { url = new URL(raw); } catch { throw rejectError('invalid URL', 'invalid_url'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw rejectError('only public HTTP/HTTPS URLs are allowed', 'ssrf_blocked', { blockedReason: 'unsupported_url' });
   if (url.port && !['80', '443'].includes(url.port)) throw rejectError('only ports 80 and 443 are allowed', 'ssrf_blocked', { blockedReason: 'unsupported_port' });
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const family = net.isIP(hostname);
   let records;
-  try { records = await dns.lookup(url.hostname, { all: true, verbatim: true }); }
+  try { records = family ? [{ address: hostname, family }] : await dns.lookup(hostname, { all: true, verbatim: true }); }
   catch (error) { throw rejectError(`hostname could not be resolved: ${error.message}`, 'dns_error', { cause: error }); }
   if (!records.length || records.some(record => !isPublicAddress(record.address))) throw rejectError('non-public targets are blocked', 'ssrf_blocked', { blockedReason: 'non_public_address', host: url.hostname });
   return { url, records };
 }
 const proxyUrl = new URL(cfg.egressProxy);
-function requestOnce(url) {
+if (proxyUrl.protocol !== 'http:' || proxyUrl.username || proxyUrl.password) {
+  throw new Error('EGRESS_PROXY must be an unauthenticated HTTP CONNECT proxy; other transports cannot enforce address pinning');
+}
+function requestOnce(url, records, signal) {
   const timeoutMs = 30000;
   return new Promise((resolve, reject) => {
     let settled = false;
-    const finish = (error, value) => { if (settled) return; settled = true; error ? reject(error) : resolve(value); };
-    const connect = http.request({ host: proxyUrl.hostname, port: proxyUrl.port || 80, method: 'CONNECT', path: `${url.hostname}:${url.port || (url.protocol === 'https:' ? 443 : 80)}`, timeout: timeoutMs });
-    const deadline = setTimeout(() => { connect.destroy(); finish(rejectError('egress request timed out', 'egress_timeout')); }, timeoutMs);
-    const complete = (error, value) => { clearTimeout(deadline); finish(error, value); };
-    connect.once('error', error => complete(rejectError(error.message, 'egress_connect', { cause: error })));
-    connect.once('timeout', () => { connect.destroy(); complete(rejectError('egress proxy connection timed out', 'egress_timeout')); });
-    connect.once('connect', (response, socket, head) => {
-      connect.setTimeout(0);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        socket.destroy();
-        return complete(rejectError(`egress proxy returned ${response.statusCode}`, 'egress_proxy_status', { httpStatus: response.statusCode, blockedReason: response.statusCode === 403 ? 'egress_proxy_blocked' : null }));
-      }
-      if (head.length) socket.unshift(head);
-      const transport = url.protocol === 'https:' ? https : http;
-      const sendRequest = requestSocket => {
-        const request = transport.request({
-          protocol: url.protocol, hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`,
-          method: 'GET', agent: false, createConnection: () => requestSocket,
-          headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
-          timeout: timeoutMs,
-        }, page => {
-        const parts = [];
-        let total = 0;
-        page.on('data', chunk => {
-          total += chunk.length;
-          if (total <= 5 * 1024 * 1024) parts.push(chunk);
-          else {
-            const error = rejectError('response exceeds 5 MiB', 'response_too_large');
-            complete(error);
-            request.destroy();
-          }
-        });
-        page.on('end', () => {
-          const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
-          if (result.status < 200 || result.status >= 400) {
-            const error = rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
-              httpStatus: result.status,
-              retryAfter: result.headers['retry-after'] ?? null,
-              contentType: result.headers['content-type'] ?? null,
-              bytes: result.body.length,
-              contentHash: crypto.createHash('sha256').update(result.body).digest('hex'),
-              blockedReason: result.status === 403 ? 'upstream_forbidden' : result.status === 429 ? 'upstream_rate_limited' : result.status >= 500 ? 'upstream_server_error' : 'upstream_http_error',
-            });
-            complete(error);
-            request.destroy();
-            return;
-          }
-          complete(null, result);
-          request.destroy();
-        });
-        });
-        request.once('timeout', () => { request.destroy(); complete(rejectError('upstream request timed out', 'upstream_timeout')); });
-        request.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
-        request.end();
+    let downstreamRequest;
+    let tunnelSocket;
+    let connect;
+    let nextAddress = 0;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      // CONNECT hands ownership of its socket to the downstream request. Closing
+      // only the CONNECT request leaves an active origin running past deadline.
+      downstreamRequest?.destroy();
+      tunnelSocket?.destroy();
+      connect?.destroy();
+      error ? reject(error) : resolve(value);
+    };
+    const deadline = setTimeout(() => complete(rejectError('egress request timed out', 'egress_timeout')), timeoutMs);
+    const onAbort = () => complete(signal.reason ?? rejectError('dependency probe timed out', 'dependency_timeout'));
+    const complete = (error, value) => { clearTimeout(deadline); signal?.removeEventListener('abort', onAbort); finish(error, value); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); return; }
+    const attempt = () => {
+      if (settled) return;
+      const address = records[nextAddress++].address;
+      const authority = `${net.isIP(address) === 6 ? `[${address}]` : address}:${url.port || (url.protocol === 'https:' ? 443 : 80)}`;
+      const connection = connect = http.request({ host: proxyUrl.hostname, port: proxyUrl.port || 80, method: 'CONNECT', path: authority, timeout: timeoutMs });
+      let handedOff = false;
+      let failed = false;
+      const retry = error => {
+        if (settled || failed) return;
+        failed = true;
+        connection.destroy();
+        // Do not replay a downstream GET or retry TLS/policy failures. All
+        // pre-tunnel retries share the deadline and this checked DNS answer set.
+        if (!handedOff && nextAddress < records.length) attempt(); else complete(error);
       };
-      if (url.protocol === 'https:') {
-        const secure = tls.connect({ socket, servername: url.hostname, rejectUnauthorized: true });
-        secure.once('secureConnect', () => sendRequest(secure));
-        secure.once('error', error => complete(rejectError(error.message, 'tls_error', { cause: error })));
-      } else {
-        sendRequest(socket);
-      }
-    });
-    connect.end();
+      connection.once('error', error => retry(rejectError(error.message, 'egress_connect', { cause: error })));
+      connection.once('timeout', () => {
+        if (!failed) complete(rejectError('egress proxy connection timed out', 'egress_timeout'));
+      });
+      connection.once('connect', (response, socket, head) => {
+        if (settled || failed || signal?.aborted) { socket.destroy(); return; }
+        connection.setTimeout(0);
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          socket.destroy();
+          const error = rejectError(`egress proxy returned ${response.statusCode}`, 'egress_proxy_status', { httpStatus: response.statusCode, blockedReason: response.statusCode === 403 ? 'egress_proxy_blocked' : null });
+          return response.statusCode >= 500 ? retry(error) : complete(error);
+        }
+        handedOff = true;
+        tunnelSocket = socket;
+        if (head.length) socket.unshift(head);
+        const transport = url.protocol === 'https:' ? https : http;
+        const sendRequest = requestSocket => {
+          // agent:false creates a fresh Agent that ignores the per-request
+          // createConnection option, opening a connection outside the tunnel.
+          const agent = new transport.Agent({ keepAlive: false });
+          agent.createConnection = () => requestSocket;
+          const request = downstreamRequest = transport.request({
+            protocol: url.protocol, hostname: url.hostname.replace(/^\[|\]$/g, ''), port: url.port || undefined, path: `${url.pathname}${url.search}`,
+            method: 'GET', agent,
+            headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
+            timeout: timeoutMs,
+          }, page => {
+            const parts = [];
+            let total = 0;
+            page.on('data', chunk => {
+              total += chunk.length;
+              if (total <= 5 * 1024 * 1024) parts.push(chunk);
+              else {
+                const error = rejectError('response exceeds 5 MiB', 'response_too_large');
+                complete(error);
+                request.destroy();
+              }
+            });
+            page.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
+            page.on('end', () => {
+              const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
+              if (result.status < 200 || result.status >= 400) {
+                const error = rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
+                  httpStatus: result.status,
+                  retryAfter: result.headers['retry-after'] ?? null,
+                  contentType: result.headers['content-type'] ?? null,
+                  bytes: result.body.length,
+                  contentHash: crypto.createHash('sha256').update(result.body).digest('hex'),
+                  blockedReason: result.status === 403 ? 'upstream_forbidden' : result.status === 429 ? 'upstream_rate_limited' : result.status >= 500 ? 'upstream_server_error' : 'upstream_http_error',
+                });
+                complete(error);
+                request.destroy();
+                return;
+              }
+              complete(null, result);
+              request.destroy();
+            });
+          });
+          request.once('timeout', () => complete(rejectError('upstream request timed out', 'upstream_timeout')));
+          request.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
+          request.end();
+        };
+        if (url.protocol === 'https:') {
+          const hostname = url.hostname.replace(/^\[|\]$/g, '');
+          // The tunnel's numeric destination is not the website's TLS identity.
+          // IP URLs use IP SAN verification, without sending an invalid IP SNI.
+          const secure = tunnelSocket = tls.connect({ socket, host: hostname, servername: net.isIP(hostname) ? undefined : hostname, rejectUnauthorized: true,
+            // Node 22's IDNA-based checkServerIdentity can treat IPv6 as a DNS
+            // name. X509.checkIP verifies the IP SAN without that conversion.
+            checkServerIdentity: net.isIP(hostname) === 6 ? (_name, cert) => {
+              if (!new crypto.X509Certificate(cert.raw).checkIP(hostname)) return Object.assign(new Error(`certificate does not match IP ${hostname}`), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+            } : tls.checkServerIdentity,
+          });
+          secure.once('secureConnect', () => sendRequest(secure));
+          secure.once('error', error => complete(rejectError(error.message, 'tls_error', { cause: error })));
+        } else {
+          sendRequest(socket);
+        }
+      });
+      connection.end();
+    };
+    attempt();
   });
 }
 async function withHostSlot(host, job) {
@@ -191,8 +258,8 @@ async function withHostSlot(host, job) {
 async function fetchPublic(raw) {
   let current = raw;
   for (let redirects = 0; redirects <= 5; redirects++) {
-    const { url } = await resolvePublicUrl(current);
-    const response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url));
+    const { url, records } = await resolvePublicUrl(current);
+    const response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records));
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       if (!response.headers.location) throw rejectError(`upstream returned redirect ${response.status} without a location`, 'redirect_without_location', { httpStatus: response.status });
       current = new URL(response.headers.location, url).href;
@@ -283,110 +350,131 @@ async function withSlot(pool, job) {
   pool.active++;
   try { return await job(); } finally { pool.active--; }
 }
+async function readCrawlResponse(response, controller) {
+  const reader = response.body?.getReader();
+  if (!reader) throw rejectError('Crawl4AI returned an empty response', 'render_invalid_response');
+  const parts = [];
+  let total = 0;
+  try {
+    // Content-Length is not authoritative (and may describe compressed bytes).
+    // Count the entire JSON byte stream before allocating a string or parsing.
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > cfg.crawlResponseMaxBytes) {
+        const error = rejectError(`Crawl4AI response exceeds ${cfg.crawlResponseMaxBytes} bytes`, 'response_too_large');
+        controller.abort(error);
+        await reader.cancel(error).catch(() => {});
+        throw error;
+      }
+      parts.push(value);
+    }
+    return Buffer.concat(parts, total);
+  } finally {
+    reader.releaseLock();
+  }
+}
 async function callCrawl4ai(url, output) {
   return withSlot(renderSlots, async () => {
+    const controller = new AbortController();
     const response = await fetch(`${cfg.crawlUrl}/crawl`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.crawlToken}` },
       body: JSON.stringify({ urls: [url], browser_config: { type: 'BrowserConfig', params: { headless: true } }, crawler_config: { type: 'CrawlerRunConfig', params: { cache_mode: 'bypass', screenshot: output === 'screenshot', pdf: output === 'pdf' } } }),
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000)]),
     });
-    if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}: ${trimText(await response.text(), 500)}`, 'render_backend_status', { httpStatus: response.status });
-    const payload = await response.json();
-    const result = payload.results?.[0] ?? payload[0] ?? payload;
-    const markdown = result.markdown?.raw_markdown ?? result.markdown ?? result.fit_markdown ?? '';
-    return { result, markdown: typeof markdown === 'string' ? markdown : JSON.stringify(markdown) };
+    const body = await readCrawlResponse(response, controller);
+    if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}: ${body.subarray(0, 500).toString('utf8')}`, 'render_backend_status', { httpStatus: response.status });
+    let payload;
+    try { payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)); }
+    catch { throw rejectError('Crawl4AI returned invalid JSON', 'render_invalid_response'); }
+    if (!payload || typeof payload !== 'object' || ('results' in payload && !Array.isArray(payload.results))) throw rejectError('Crawl4AI returned an invalid result envelope', 'render_invalid_response');
+    const result = 'results' in payload ? payload.results[0] : Array.isArray(payload) ? payload[0] : payload;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) throw rejectError('Crawl4AI returned an invalid result', 'render_invalid_response');
+    const text = result.markdown?.raw_markdown ?? result.markdown ?? result.fit_markdown ?? '';
+    if (typeof text !== 'string') throw rejectError('Crawl4AI returned invalid Markdown', 'render_invalid_response');
+    if (Buffer.byteLength(text, 'utf8') > 5 * 1024 * 1024) throw rejectError('Crawl4AI Markdown exceeds 5 MiB', 'markdown_too_large');
+    // Validate both fields, including an unrequested artifact, before any
+    // decode or publication. Only the requested artifact is later decoded.
+    validateArtifactEncoding(result.screenshot);
+    validateArtifactEncoding(result.pdf);
+    return { result, markdown: text };
   });
+}
+function validateArtifactEncoding(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') throw rejectError('artifact must be base64 text', 'artifact_invalid');
+  const maximumEncoded = 4 * Math.ceil(cfg.artifactMaxBytes / 3);
+  // Bound the original field before stripping a bounded data-URL header.
+  if (value.length > maximumEncoded + 256) throw rejectError(`encoded artifact exceeds ${maximumEncoded} characters`, 'artifact_too_large');
+  let encoded = value;
+  if (value.startsWith('data:')) {
+    const comma = value.indexOf(',');
+    if (comma < 0 || comma > 255 || !/^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,$/i.test(value.slice(0, comma + 1))) throw rejectError('invalid artifact data URL', 'artifact_invalid');
+    encoded = value.slice(comma + 1);
+  }
+  if (encoded.length > maximumEncoded) throw rejectError(`encoded artifact exceeds ${maximumEncoded} characters`, 'artifact_too_large');
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  const decodedBytes = Math.floor(encoded.length * 3 / 4) - padding;
+  if (decodedBytes > cfg.artifactMaxBytes) throw rejectError(`artifact exceeds ${cfg.artifactMaxBytes} bytes`, 'artifact_too_large');
+  if (!encoded || encoded.length % 4 === 1 || (padding && encoded.length % 4 !== 0) || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw rejectError('invalid artifact base64', 'artifact_invalid');
+  // Node's decoder accepts noncanonical padding bits and discards invalid
+  // characters. Validate instead of letting that permissiveness hide damage.
+  const remainder = (encoded.length - padding) % 4;
+  const tail = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.indexOf(encoded[encoded.length - padding - 1]);
+  if ((remainder === 2 && (tail & 15) !== 0) || (remainder === 3 && (tail & 3) !== 0)) throw rejectError('invalid artifact base64 padding bits', 'artifact_invalid');
+  return encoded;
+}
+async function publishArtifact(content, extension) {
+  const artifact = await artifactStore.save(content, extension);
+  return { ...artifact, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(artifact.id)}` };
 }
 async function saveArtifact(value, extension) {
-  if (typeof value !== 'string' || !value) return null;
-  const content = value.startsWith('data:') ? Buffer.from(value.slice(value.indexOf(',') + 1), 'base64') : Buffer.from(value, 'base64');
-  if (content.length > cfg.artifactMaxBytes) throw rejectError(`artifact exceeds ${cfg.artifactMaxBytes} bytes`, 'artifact_too_large');
-  return withSlot(artifactSlots, async () => {
-    artifactUsagePromise ??= calculateArtifactUsage(cfg.artifactDir);
-    artifactUsage ??= await artifactUsagePromise;
-    if (artifactUsage + content.length > cfg.artifactQuotaBytes) throw rejectError('artifact quota exceeded', 'artifact_quota_exceeded');
-    const id = crypto.randomUUID();
-    const day = new Date().toISOString().slice(0, 10);
-    const relative = path.posix.join(day, `${id}.${extension}`);
-    const target = path.join(cfg.artifactDir, relative);
-    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-    await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o750 });
-    await fs.writeFile(temporary, content, { mode: 0o640, flag: 'wx' });
-    await fs.rename(temporary, target);
-    artifactUsage += content.length;
-    return { id: relative, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(relative)}`, bytes: content.length, content_type: extension === 'png' ? 'image/png' : 'application/pdf', content_hash: crypto.createHash('sha256').update(content).digest('hex') };
-  });
+  const encoded = validateArtifactEncoding(value);
+  if (encoded == null) return null;
+  return publishArtifact(Buffer.from(encoded, 'base64'), extension);
 }
-async function calculateArtifactUsage(directory) {
-  let total = 0;
-  async function visit(current) {
-    for (const entry of await fs.readdir(current, { withFileTypes: true }).catch(() => [])) {
-      const target = path.join(current, entry.name);
-      if (entry.isDirectory()) await visit(target);
-      else if (entry.isFile()) total += (await fs.stat(target)).size;
-    }
-  }
-  await visit(directory);
-  return total;
-}
-async function probeDependency(name, operation) {
-  const started = Date.now();
+async function browserScreenshot(session) {
+  // The SDK always writes screenshots to disk. Its eviction is neither atomic
+  // nor shared with crawler artifacts, so it must never write in retained storage.
+  const overlaps = (left, right) => left === right || left.startsWith(right + path.sep) || right.startsWith(left + path.sep);
+  const configured = path.resolve(cfg.browserOutputDir);
+  const retained = path.resolve(cfg.artifactDir);
+  if (overlaps(configured, retained)) throw rejectError('browser staging must be outside retained artifacts', 'artifact_invalid');
+  await fs.mkdir(configured, { recursive: true, mode: 0o700 });
+  const stagingRoot = await fs.realpath(configured);
+  const artifactRoot = await fs.realpath(retained).catch(error => { if (error.code === 'ENOENT') return retained; throw error; });
+  if (overlaps(stagingRoot, artifactRoot)) throw rejectError('browser staging must be outside retained artifacts', 'artifact_invalid');
+  const staging = await fs.mkdtemp(path.join(stagingRoot, 'gateway-screenshot-'));
+  const filename = path.join(staging, 'screenshot.png');
   try {
-    const detail = await operation();
-    return { name, ok: true, duration_ms: Date.now() - started, ...detail };
+    // An explicit filename suppresses the SDK inline image. Read the original
+    // staged bytes rather than relying on a potentially resized image response.
+    const output = await playwrightCall(session, 'browser_take_screenshot', { fullPage: true, filename });
+    if (output.isError) throw rejectError('browser screenshot failed', 'artifact_missing');
+    await browserLocation(session);
+    const handle = await fs.open(filename, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    let content;
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw rejectError('invalid staged browser artifact', 'artifact_invalid');
+      if (info.size > cfg.artifactMaxBytes) throw rejectError('artifact exceeds decoded size limit', 'artifact_too_large');
+      content = Buffer.alloc(info.size);
+      let offset = 0;
+      while (offset < content.length) {
+        const { bytesRead } = await handle.read(content, offset, content.length - offset, offset);
+        if (!bytesRead) throw rejectError('incomplete staged browser artifact', 'artifact_invalid');
+        offset += bytesRead;
+      }
+      if ((await handle.read(Buffer.alloc(1), 0, 1, offset)).bytesRead) throw rejectError('staged browser artifact changed', 'artifact_invalid');
+    } finally { await handle.close(); }
+    const artifact = await publishArtifact(content, 'png');
+    return { content: [{ type: 'text', text: 'Screenshot captured' }], artifact };
   } catch (error) {
-    return { name, ok: false, duration_ms: Date.now() - started, error: { kind: error.kind ?? 'dependency_error', message: String(error.message ?? error).slice(0, 240), ...(error.httpStatus ? { http_status: error.httpStatus } : {}) } };
-  }
-}
-function probePlaywright() {
-  return new Promise((resolve, reject) => {
-    const request = http.request({ host: '127.0.0.1', port: 8931, path: '/mcp', method: 'GET', headers: { Host: 'localhost:8931' }, timeout: 5000 }, response => {
-      response.resume();
-      response.once('end', () => resolve({ http_status: response.statusCode ?? 0 }));
-    });
-    request.once('timeout', () => request.destroy(rejectError('Playwright probe timed out', 'dependency_timeout')));
-    request.once('error', reject);
-    request.end();
-  });
-}
-async function checkReadiness() {
-  const dependencies = await Promise.all([
-    probeDependency('searxng', async () => {
-      const response = await fetch(`${cfg.searxUrl}/search?q=readyz&format=json`, { signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw rejectError(`SearXNG returned ${response.status}`, 'dependency_http_status', { httpStatus: response.status });
-      return { http_status: response.status };
-    }),
-    probeDependency('crawl4ai', async () => {
-      const response = await fetch(`${cfg.crawlUrl}/healthz`, { headers: { authorization: `Bearer ${cfg.crawlToken}` }, signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}`, 'dependency_http_status', { httpStatus: response.status });
-      return { http_status: response.status };
-    }),
-    probeDependency('playwright', async () => {
-      const result = await probePlaywright();
-      if (![200, 400, 405, 406].includes(result.http_status)) throw rejectError(`Playwright returned ${result.http_status}`, 'dependency_http_status', { httpStatus: result.http_status });
-      return result;
-    }),
-    probeDependency('egress_proxy', async () => {
-      const { url } = await resolvePublicUrl('https://example.com/');
-      const response = await requestOnce(url);
-      return { http_status: response.status };
-    }),
-  ]);
-  return { checked_at: new Date().toISOString(), ok: dependencies.every(item => item.ok), dependencies };
-}
-async function getReadiness() {
-  if (readiness.promise) return readiness.promise;
-  if (readiness.value && Date.now() - readiness.checkedAt < 10000) return readiness.value;
-  readiness.promise = checkReadiness().then(value => {
-    readiness.checkedAt = Date.now();
-    readiness.value = value;
-    readiness.promise = null;
-    return value;
-  }).catch(error => {
-    readiness.promise = null;
+    // Stop the SDK before removing our owned staging directory on failure.
+    await session.client.close().catch(() => {});
     throw error;
-  });
-  return readiness.promise;
+  } finally { await fs.rm(staging, { recursive: true, force: true }); }
 }
 async function createBrowserSession() {
   const transport = new StreamableHTTPClientTransport(new URL(cfg.playwrightUrl));
@@ -462,16 +550,24 @@ async function browserAction(session, action) {
     if (action.url && session.url !== action.url) throw rejectError('clicked link did not match the declared target', 'browser_target_mismatch', { blockedReason: 'browser_target_mismatch', host: new URL(session.url).hostname });
     return output;
   }
-  if (type === 'wait') { const output = await playwrightCall(session, 'browser_wait_for', { time: action.ms ?? 1000 }); await browserLocation(session); return output; }
+  if (type === 'wait') {
+    const seconds = (action.ms ?? 1000) / 1000;
+    // Playwright MCP 0.0.79 expects seconds but rejects zero via a truthiness guard.
+    const output = seconds === 0
+      ? { content: [{ type: 'text', text: 'Waited for 0 seconds' }] }
+      : await playwrightCall(session, 'browser_wait_for', { time: seconds });
+    await browserLocation(session);
+    return output;
+  }
   if (type === 'scroll') { const output = await playwrightCall(session, 'browser_evaluate', { function: `() => window.scrollBy(0, ${Math.max(-3000, Math.min(3000, Number(action.pixels ?? 600)))})` }); await browserLocation(session); return output; }
   if (type === 'snapshot') { const output = await playwrightCall(session, 'browser_snapshot', {}); await browserLocation(session); return output; }
-  if (type === 'screenshot') { const output = await playwrightCall(session, 'browser_take_screenshot', { fullPage: true }); await browserLocation(session); return output; }
+  if (type === 'screenshot') return browserScreenshot(session);
   throw new Error(`unsupported browser action: ${type}`);
 }
 const temporalEvidenceSchema = z.object({ kind: z.string(), value: z.string().nullable().optional(), on: z.string().nullable().optional(), precision: z.string().nullable().optional(), source: z.string() });
 const sourceSchema = z.object({ url: z.string(), host: z.string(), canonical_url: z.string().nullable().optional(), site_name: z.string().nullable().optional(), author: z.string().nullable().optional(), search_engine: z.string().nullable().optional() });
 const telemetrySchema = z.object({ first_valid_result_ms: z.number().optional(), stages_ms: z.record(z.string(), z.number()).optional() }).passthrough();
-const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), telemetry: telemetrySchema }).passthrough();
+const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), unresponsive_engines: z.unknown().optional(), telemetry: telemetrySchema }).passthrough();
 const readOutputSchema = z.object({ trace_id: z.string(), url: z.string().optional(), renderer: z.string().optional(), title: z.string().optional(), markdown: z.string().optional(), http_status: z.number().optional(), content_type: z.string().nullable().optional(), bytes: z.number().optional(), content_hash: z.string().optional(), charset: z.string().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), artifact: z.record(z.string(), z.unknown()).optional(), expires_after_days: z.number().optional(), blocked_reason: z.string().nullable().optional(), telemetry: telemetrySchema.optional() }).passthrough();
 const browserOutputSchema = z.object({ trace_id: z.string(), session_id: z.string().optional(), expires_in_seconds: z.number().optional(), url: z.string().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), outputs: z.array(z.record(z.string(), z.unknown())).optional(), closed: z.boolean().optional(), telemetry: telemetrySchema }).passthrough();
 function getServer() {
@@ -479,16 +575,18 @@ function getServer() {
   server.registerTool('web_search', { description: 'Search public web pages through the local SearXNG instance.', inputSchema: { query: z.string().min(1).max(500), categories: z.string().optional(), engines: z.string().optional(), language: z.string().optional(), time_range: z.enum(['day', 'month', 'year']).optional(), page: z.number().int().min(1).max(10).optional() }, outputSchema: searchOutputSchema }, async input => {
     const trace_id = crypto.randomUUID(); const started = Date.now();
     return executeTool('web_search', trace_id, async () => {
-      const params = new URLSearchParams({ q: input.query, format: 'json' });
-      for (const key of ['categories', 'engines', 'language', 'time_range']) if (input[key]) params.set(key, input[key]);
-      if (input.page) params.set('pageno', String(input.page));
-      const response = await fetch(`${cfg.searxUrl}/search?${params}`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw rejectError(`SearXNG returned ${response.status}`, 'search_backend_status', { httpStatus: response.status });
-      const body = await response.json();
-      const retrievedAt = new Date().toISOString();
-      const results = (body.results ?? []).slice(0, 20).map(item => normalizeSearchResult(item, retrievedAt));
+      const search = await searchSearxng({ baseUrl: cfg.searxUrl, input, signal: AbortSignal.timeout(30000) });
       const duration_ms = Date.now() - started;
-      return textResult({ trace_id, telemetry: { first_valid_result_ms: duration_ms, stages_ms: { search_ms: duration_ms } }, query: input.query, number_of_results: body.number_of_results ?? results.length, results });
+      return textResult({
+        trace_id,
+        telemetry: { first_valid_result_ms: duration_ms, stages_ms: search.stages_ms },
+        query: input.query,
+        number_of_results: search.number_of_results,
+        results: search.results,
+        ...(Object.prototype.hasOwnProperty.call(search, 'unresponsive_engines')
+          ? { unresponsive_engines: search.unresponsive_engines }
+          : {}),
+      });
     }, new URL(cfg.searxUrl).hostname);
   });
   server.registerTool('web_read', { description: 'Read a public URL as clean Markdown. Uses lightweight extraction first and Crawl4AI rendering when needed.', inputSchema: { url: z.string().url(), render: z.enum(['auto', 'never', 'always']).default('auto'), output: z.enum(['markdown', 'screenshot', 'pdf']).default('markdown') }, outputSchema: readOutputSchema }, async input => {
@@ -553,11 +651,7 @@ function getServer() {
         const output = await browserAction(session, action);
         stages_ms[`browser_${action.type}_ms`] = (stages_ms[`browser_${action.type}_ms`] ?? 0) + Date.now() - actionStarted;
         if (action.type === 'snapshot') session.snapshot = (output.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
-        if (action.type === 'screenshot') {
-          const image = output.content?.find(item => item.type === 'image');
-          const artifact = await saveArtifact(image?.data, 'png');
-          outputs.push({ content: (output.content ?? []).filter(item => item.type !== 'image'), artifact });
-        } else if (action.type === 'snapshot') {
+        if (action.type === 'snapshot') {
           outputs.push({ ...output, ...browserEvidence(session) });
         } else {
           outputs.push(output);
@@ -616,7 +710,7 @@ app.get('/api/evals/:runId/artifacts/:name', async (req, res) => {
 });
 app.use(requireToken);
 app.get('/healthz', async (_req, res) => {
-  res.json({ ok: true, render_active: renderSlots.active, browser_active: browserSlots.active, request_active: requestSlots.active, artifact_usage_bytes: artifactUsage });
+  res.json({ ok: true, render_active: renderSlots.active, browser_active: browserSlots.active, request_active: requestSlots.active, artifact_usage_bytes: artifactStore.usageBytes });
 });
 app.get('/readyz', async (_req, res) => {
   const value = await getReadiness();

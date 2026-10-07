@@ -2,65 +2,126 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import net from 'node:net';
 import { URL } from 'node:url';
+import { isPublicAddress } from './public-address.mjs';
 
 const host = process.env.EGRESS_PROXY_HOST ?? '127.0.0.1';
 const port = Number(process.env.EGRESS_PROXY_PORT ?? 7895);
 const upstream = process.env.EGRESS_UPSTREAM ?? 'http://127.0.0.1:7890';
 const connectTimeoutMs = Number(process.env.EGRESS_CONNECT_TIMEOUT_MS ?? 10000);
 const maxHostConcurrency = Number(process.env.EGRESS_MAX_HOST_CONCURRENCY ?? 8);
+const maxConnections = Number(process.env.EGRESS_MAX_CONNECTIONS ?? 32);
+if (!Number.isSafeInteger(maxConnections) || maxConnections < 1) throw new Error('EGRESS_MAX_CONNECTIONS must be a positive safe integer');
 const upstreamUrl = new URL(upstream);
+if (upstreamUrl.protocol !== 'http:' || upstreamUrl.username || upstreamUrl.password) {
+  throw new Error('EGRESS_UPSTREAM must be an unauthenticated HTTP CONNECT proxy; other transports cannot enforce address pinning');
+}
 const hostSlots = new Map();
-const isPublic = address => {
-  const value = address.toLowerCase();
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
-  if (mapped) return isPublic(mapped[1]);
-  if (value.includes(':')) return !/^(::|::1|fc|fd|fe[89ab]|ff|2001:db8:|2001:2:|2001:10:|2002:|64:ff9b:1:)/i.test(value);
+let connections = 0;
+const isPublicIPv4 = address => {
   const [a, b, c] = address.split('.').map(Number);
   return !(a === 0 || a === 10 || a === 100 && b >= 64 && b <= 127 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) || a === 198 && (b === 18 || b === 19 || b === 51) || a === 203 && b === 0 && c === 113 || a >= 224);
 };
-async function resolve(name) { const records = await dns.lookup(name, { all: true, verbatim: true }); if (!records.length || records.some(x => !isPublic(x.address))) throw new Error('blocked destination'); return records[0]; }
+const isPublic = address => isPublicAddress(address, isPublicIPv4);
+async function resolve(name) {
+  const family = net.isIP(name);
+  const records = family ? [{ address: name, family }] : await dns.lookup(name, { all: true, verbatim: true });
+  if (!records.length || records.some(x => !net.isIP(x.address) || !isPublic(x.address))) throw new Error('blocked destination');
+  return records;
+}
 function validPort(value) { return Number(value) === 80 || Number(value) === 443; }
+function parseAuthority(value) {
+  const match = /^(\[[^\]]+\]|[^:[\]\/\\?#@\s%]+):(80|443)$/.exec(value);
+  if (!match) throw new Error('invalid authority');
+  const url = new URL(`http://${value}`);
+  const name = url.hostname.replace(/^\[|\]$/g, '');
+  if (match[1].startsWith('[') && net.isIP(name) !== 6) throw new Error('invalid IPv6 authority');
+  return { name, portText: match[2] };
+}
+function formatAuthority(address, portText) { return `${net.isIP(address) === 6 ? `[${address}]` : address}:${portText}`; }
 async function tunnel(req, client, head) {
-  const [name, portText] = req.url.split(':'); if (!name || !validPort(portText)) return client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
-  try { await resolve(name); } catch { return client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); }
-  const slot = hostSlots.get(name) ?? 0;
-  if (slot >= maxHostConcurrency) return client.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n');
-  hostSlots.set(name, slot + 1);
-  const socket = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 80) });
-  let handshake = '';
+  const limited = 'HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n';
+  if (connections >= maxConnections) {
+    client.once('error', () => client.destroy());
+    return client.end(limited);
+  }
+  // Reserve before asynchronous validation so pending work cannot bypass the budget.
+  connections += 1;
+  let name, portText, checked, socket;
+  let hostReserved = false;
+  let nextAddress = 0;
   let closed = false;
-  const teardown = () => {
+  const release = () => {
     if (closed) return;
     closed = true;
     clearTimeout(timer);
-    client.destroy();
-    socket.destroy();
-    const active = (hostSlots.get(name) ?? 1) - 1;
-    if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
+    connections -= 1;
+    if (hostReserved) {
+      const active = hostSlots.get(name) - 1;
+      if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
+    }
   };
+  const teardown = () => {
+    release();
+    client.destroy();
+    socket?.destroy();
+  };
+  const reject = response => {
+    release();
+    socket?.destroy();
+    client.end(response);
+  };
+  // Validation and all checked-address retries share one deadline and reservation.
   const timer = setTimeout(teardown, connectTimeoutMs);
   client.once('error', teardown);
   client.once('close', teardown);
-  socket.once('error', teardown);
-  socket.once('close', teardown);
-  socket.once('connect', () => socket.write(`CONNECT ${name}:${portText} HTTP/1.1\r\nHost: ${name}:${portText}\r\nConnection: keep-alive\r\n\r\n`));
-  socket.on('data', chunk => {
-    if (handshake === null) return;
-    handshake += chunk.toString('latin1');
-    if (handshake.length > 16384) return teardown();
-    const end = handshake.indexOf('\r\n\r\n');
-    if (end < 0) return;
-    if (!/^HTTP\/1\.[01] 2\d\d/.test(handshake)) return teardown();
-    const rest = Buffer.from(handshake.slice(end + 4), 'latin1');
-    handshake = null;
-    clearTimeout(timer);
-    client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-    if (head.length) socket.write(head);
-    if (rest.length) client.write(rest);
-    client.pipe(socket);
-    socket.pipe(client);
-  });
+  client.once('end', teardown);
+  try { ({ name, portText } = parseAuthority(req.url)); } catch { return reject('HTTP/1.1 403 Forbidden\r\n\r\n'); }
+  const slot = hostSlots.get(name) ?? 0;
+  if (slot >= maxHostConcurrency) return reject(limited);
+  hostSlots.set(name, slot + 1);
+  hostReserved = true;
+  try { checked = await resolve(name); } catch { if (!closed) reject('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
+  if (closed) return;
+  const attempt = () => {
+    if (closed) return;
+    if (nextAddress >= checked.length) return teardown();
+    // Only numeric destinations cross the upstream boundary. The client retains
+    // its logical HTTP Host and TLS identity; the proxy does not terminate TLS.
+    const authority = formatAuthority(checked[nextAddress++].address, portText);
+    let connection;
+    try { connection = net.connect({ host: upstreamUrl.hostname.replace(/^\[|\]$/g, ''), port: Number(upstreamUrl.port || 80) }); } catch { return teardown(); }
+    socket = connection;
+    let handshake = '';
+    let failed = false;
+    const fail = () => {
+      if (failed || closed) return;
+      failed = true;
+      connection.destroy();
+      if (handshake === null) teardown(); else attempt();
+    };
+    connection.once('error', fail);
+    connection.once('close', fail);
+    connection.once('end', fail);
+    connection.once('connect', () => connection.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\nConnection: keep-alive\r\n\r\n`));
+    connection.on('data', chunk => {
+      if (failed || closed || handshake === null) return;
+      handshake += chunk.toString('latin1');
+      if (handshake.length > 16384) return teardown();
+      const end = handshake.indexOf('\r\n\r\n');
+      if (end < 0) return;
+      if (!/^HTTP\/1\.[01] 2\d\d(?: |\r)/.test(handshake)) return fail();
+      const rest = Buffer.from(handshake.slice(end + 4), 'latin1');
+      handshake = null;
+      clearTimeout(timer);
+      client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head.length) connection.write(head);
+      if (rest.length) client.write(rest);
+      client.pipe(connection);
+      connection.pipe(client);
+    });
+  };
+  attempt();
 }
-const server = http.createServer(async (req, res) => { try { const url = new URL(req.url); if (!['http:', 'https:'].includes(url.protocol) || !validPort(url.port || (url.protocol === 'https:' ? 443 : 80))) throw new Error(); await resolve(url.hostname); res.writeHead(501); res.end('CONNECT required'); } catch { res.writeHead(403); res.end('blocked destination'); } });
+const server = http.createServer(async (req, res) => { try { const url = new URL(req.url); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !validPort(url.port || (url.protocol === 'https:' ? 443 : 80))) throw new Error(); await resolve(url.hostname); res.writeHead(501); res.end('CONNECT required'); } catch { res.writeHead(403); res.end('blocked destination'); } });
 server.on('clientError', (_error, socket) => socket.destroy());
 server.on('connect', tunnel); server.listen(port, host, () => console.log(JSON.stringify({ event: 'egress_proxy_listening', host, port, upstream })));

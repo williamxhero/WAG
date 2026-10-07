@@ -9,7 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/wag-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/wag-playwright
       PLAYWRIGHT_SKIP_BROWSER_GC: '1'
     steps:
       - uses: actions/checkout@v4

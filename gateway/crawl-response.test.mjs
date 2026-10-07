@@ -64,24 +64,12 @@ async function fixture(t, env = {}) {
   const reservation = http.createServer();
   const gatewayPort = await listen(reservation);
   await new Promise(resolve => reservation.close(resolve));
-  // Inject external DNS, CONNECT transport and response metadata only in this child. All
-  // body bytes still traverse the real local HTTP stream and MCP gateway.
+  // Inject external DNS and response metadata only in this child. CONNECT uses
+  // the production pinned agent; body bytes traverse the real local HTTP stream.
   const preload = path.join(root, 'offline.mjs');
   await fs.writeFile(preload, `
     import dns from 'node:dns/promises';
-    import http from 'node:http';
     dns.lookup = async () => [{ address: '8.8.8.8', family: 4 }];
-    // Node ignores options.createConnection with agent:false. Honor the
-    // gateway's supplied CONNECT socket without allowing an Internet request.
-    const originalRequest = http.request;
-    http.request = (options, ...args) => {
-      if (options.createConnection) {
-        const agent = new http.Agent();
-        agent.createConnection = options.createConnection;
-        options = { ...options, agent };
-      }
-      return originalRequest(options, ...args);
-    };
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (...args) => {
       const response = await originalFetch(...args);

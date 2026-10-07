@@ -25,7 +25,7 @@ class ReleaseTests(unittest.TestCase):
         self.units.mkdir()
         files = subprocess.check_output(["git", "-C", str(SOURCE), "ls-files"], text=True).splitlines()
         # Include the candidate implementation before it has been committed.
-        files += [name for name in ("scripts/release.py", "scripts/searxng-overlay.py") if (SOURCE / name).exists()]
+        files += [name for name in ("scripts/release.py", "scripts/searxng-overlay.py", "proxy/public-address.mjs") if (SOURCE / name).exists()]
         for name in set(files):
             file = SOURCE / name
             if file.is_file():
@@ -552,7 +552,7 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
         self.retain_evidence(None, "prepare-incomplete-inventory", result)
 
     def test_missing_complete_release_entrypoints_rejects_staging(self):
-        for name in ("gateway/eval-core.mjs", "scripts/eval-release.sh"):
+        for name in ("gateway/eval-core.mjs", "scripts/eval-release.sh", "proxy/public-address.mjs"):
             with self.subTest(name=name):
                 file = self.source / name
                 original = file.read_bytes()

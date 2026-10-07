@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import net from 'node:net';
 import { URL } from 'node:url';
+import { isPublicAddress } from './public-address.mjs';
 
 const host = process.env.EGRESS_PROXY_HOST ?? '127.0.0.1';
 const port = Number(process.env.EGRESS_PROXY_PORT ?? 7895);
@@ -16,20 +17,11 @@ if (upstreamUrl.protocol !== 'http:' || upstreamUrl.username || upstreamUrl.pass
 }
 const hostSlots = new Map();
 let connections = 0;
-const isPublic = address => {
-  const family = net.isIP(address);
-  if (!family) return false;
-  // Canonicalize before prefix checks so expanded IPv6 cannot hide special-use ranges.
-  const value = family === 6 ? new URL(`http://[${address}]`).hostname.slice(1, -1) : address;
-  const mapped = /^::ffff:([0-9a-f]+):([0-9a-f]+)$/.exec(value);
-  if (mapped) {
-    const high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
-    return isPublic(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-  }
-  if (family === 6) return /^[23][0-9a-f]{3}:/.test(value) && !/^(2001::|2001:db8:|2001:2:|2001:10:|2001:20:|2001:30:|2002:|3fff:)/i.test(value);
+const isPublicIPv4 = address => {
   const [a, b, c] = address.split('.').map(Number);
   return !(a === 0 || a === 10 || a === 100 && b >= 64 && b <= 127 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) || a === 198 && (b === 18 || b === 19 || b === 51) || a === 203 && b === 0 && c === 113 || a >= 224);
 };
+const isPublic = address => isPublicAddress(address, isPublicIPv4);
 async function resolve(name) {
   const family = net.isIP(name);
   const records = family ? [{ address: name, family }] : await dns.lookup(name, { all: true, verbatim: true });

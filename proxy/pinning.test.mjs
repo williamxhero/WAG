@@ -118,6 +118,7 @@ test('CONNECT rejects forbidden or malformed answers and ambiguous authorities w
   const proxy = await startProxy(t, upstream.server);
   for (const authority of [
     'mixed.test:443', 'expanded-private.test:443', 'discard.test:443', 'expanded-doc.test:443', 'invalid-answer.test:443',
+    '[2001:21::1]:443', '[2001:2f:ffff:ffff:ffff:ffff:ffff:ffff]:443', '[2001:1f::1]:443', '[2001:0:1234::1]:443', 'mixed-orchid.test:443',
     '127.0.0.1:80', '2130706433:443', '0x7f000001:443', '[::1]:443', '[0:0:0:0:0:0:0:1]:443', '[::ffff:127.0.0.1]:443', '[2001:db8::1]:443',
     'navigation.test:8080', 'navigation.test:443:80', '2606:4700:4700::1111:443',
     'user@navigation.test:443', 'https://navigation.test:443', 'navigation.test:443/path', '[navigation.test]:443',

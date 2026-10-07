@@ -5,6 +5,7 @@ const calls = new Map();
 const answers = {
   'rebind.test': ['8.8.8.8'],
   'mixed.test': ['8.8.8.8', '127.0.0.1'],
+  'mixed-orchid.test': ['8.8.8.8', '2001:21::1'],
   'expanded-private.test': ['8.8.8.8', '0:0:0:0:0:0:0:1'],
   'discard.test': ['100::1'],
   'expanded-doc.test': ['2001:0db8:0:0::1'],

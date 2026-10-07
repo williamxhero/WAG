@@ -46,7 +46,7 @@ REQUIRED = ("runtime/gateway/server.mjs", "runtime/gateway/search.mjs",
             "runtime/gateway/artifact-store.mjs", "runtime/gateway/readiness.mjs",
             "runtime/gateway/evidence-metadata.mjs", "scripts/searxng-overlay.py",
             "runtime/gateway/public/evals.html", "runtime/gateway/public/evals.js", "runtime/gateway/public/evals.css",
-            "runtime/proxy/server.mjs", "runtime/crawl4ai-service/app.py", "eval/samples.json",
+            "runtime/proxy/server.mjs", "runtime/proxy/public-address.mjs", "runtime/crawl4ai-service/app.py", "eval/samples.json",
             "scripts/bootstrap-bind.py", "scripts/healthcheck.sh", "scripts/healthcheck-diagnostics.py",
             "scripts/searxng-apply-overlay.sh", "scripts/cleanup-artifacts.sh", "scripts/install-artifact-cleanup.sh",
             "config/searxng/settings-overlay.yml") + MANIFESTS + tuple("systemd/" + x for x in UNITS)

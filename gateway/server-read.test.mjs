@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { waitForListening } from './test-fixtures/wait-for-listening.mjs';
 
 async function unusedPort() {
   const server = net.createServer();
@@ -15,26 +16,6 @@ async function unusedPort() {
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
   return port;
-}
-
-function waitForListening(child) {
-  return new Promise((resolve, reject) => {
-    let output = '';
-    const timer = setTimeout(() => reject(new Error(`gateway did not start: ${output}`)), 10000);
-    const onExit = code => {
-      clearTimeout(timer);
-      reject(new Error(`gateway exited during startup (${code}): ${output}`));
-    };
-    child.once('exit', onExit);
-    child.stderr.on('data', chunk => { output += chunk; });
-    child.stdout.on('data', chunk => {
-      output += chunk;
-      if (!output.includes('web-access-gateway listening')) return;
-      clearTimeout(timer);
-      child.off('exit', onExit);
-      resolve();
-    });
-  });
 }
 
 test('web_read preserves canonical evidence and final URLs through offline redirects', { timeout: 30000 }, async t => {
@@ -57,7 +38,7 @@ test('web_read preserves canonical evidence and final URLs through offline redir
   });
   const exited = new Promise(resolve => child.once('exit', resolve));
   t.after(async () => { child.kill(); await exited; });
-  await waitForListening(child);
+  await waitForListening(child, { timeoutMs: 10000 });
   const client = new Client({ name: 'offline-read-fixture', version: '1.0.0' });
   t.after(() => client.close());
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {

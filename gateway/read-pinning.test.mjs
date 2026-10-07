@@ -267,9 +267,14 @@ test('mixed, empty, malformed and forbidden DNS answer sets are rejected before 
     'expanded.test': [['0:0:0:0:0:0:0:1']],
     'mapped.test': [['::ffff:7f00:1']],
     'docs.test': [['2001:0db8:0:0:0:0:0:1']],
+    'orchid-start.test': [['2001:21::1']],
+    'orchid-end.test': [['2001:2f:ffff:ffff:ffff:ffff:ffff:ffff']],
+    'old-orchid.test': [['2001:1f::1']],
+    'teredo.test': [['2001:0:1234::1']],
+    'mixed-orchid.test': [['8.8.8.8', '2001:21::1']],
     'valid.test': [['1.1.1.1']],
   } });
-  for (const name of ['mixed', 'empty', 'malformed', 'expanded', 'mapped', 'docs']) {
+  for (const name of ['mixed', 'empty', 'malformed', 'expanded', 'mapped', 'docs', 'orchid-start', 'orchid-end', 'old-orchid', 'teredo', 'mixed-orchid']) {
     const result = await f.read(`http://${name}.test/private`);
     assert.equal(result.isError, true);
     assert.equal(result.structuredContent.error.kind, 'ssrf_blocked', JSON.stringify(result));

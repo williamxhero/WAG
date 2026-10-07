@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { waitForListening } from './test-fixtures/wait-for-listening.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,26 +24,6 @@ async function unusedPort() {
   const port = await listen(server);
   await new Promise(resolve => server.close(resolve));
   return port;
-}
-
-function waitForListening(child) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(new Error('gateway did not start')), 5000);
-    const onOutput = chunk => {
-      if (chunk.toString().includes('web-access-gateway listening')) finish();
-    };
-    const onExit = code => finish(new Error(`gateway exited during startup: ${code}`));
-    const finish = error => {
-      clearTimeout(timer);
-      child.stdout.off('data', onOutput);
-      child.off('exit', onExit);
-      child.off('error', finish);
-      error ? reject(error) : resolve();
-    };
-    child.stdout.on('data', onOutput);
-    child.once('exit', onExit);
-    child.once('error', finish);
-  });
 }
 
 test('web_search preserves the selected SearXNG contract through HTTP/MCP', { timeout: 15000 }, async t => {

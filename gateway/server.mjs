@@ -19,6 +19,7 @@ import { extractPageEvidence, prependPublishedEvidence } from './evidence-metada
 import { searchSearxng } from './search.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
 import { createReadiness } from './readiness.mjs';
+import { isPublicAddress as classifyPublicAddress } from '../proxy/public-address.mjs';
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -95,21 +96,7 @@ const requireToken = (req, res, next) => {
   next();
 };
 
-function isPublicAddress(address) {
-  // RFC 1918, loopback, link-local, CGNAT, documentation/benchmark and all
-  // IPv6 special-use ranges are deliberately excluded.  DNS answers must all
-  // be public: selecting one answer would otherwise permit DNS rebinding.
-  const family = net.isIP(address);
-  if (!family) return false;
-  if (family === 6) {
-    const value = new URL(`http://[${address}]`).hostname.slice(1, -1);
-    const mapped = /^::ffff:([0-9a-f]+):([0-9a-f]+)$/.exec(value);
-    if (mapped) {
-      const high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
-      return isPublicAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-    }
-    return /^[23][0-9a-f]{3}:/.test(value) && !/^(2001::|2001:db8:|2001:2:|2001:10:|2001:20:|2001:30:|2002:|3fff:)/.test(value);
-  }
+function isPublicIPv4(address) {
   const octets = address.split('.').map(Number);
   if (octets.length !== 4 || octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   const [a, b, c] = octets;
@@ -119,6 +106,7 @@ function isPublicAddress(address) {
     a === 198 && (b === 18 || b === 19 || b === 51) || a === 203 && b === 0 && c === 113 ||
     a >= 224);
 }
+const isPublicAddress = address => classifyPublicAddress(address, isPublicIPv4);
 async function resolvePublicUrl(raw) {
   let url;
   try { url = new URL(raw); } catch { throw rejectError('invalid URL', 'invalid_url'); }

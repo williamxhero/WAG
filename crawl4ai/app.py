@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 TOKEN = os.environ["CRAWL4AI_TOKEN"]
@@ -16,6 +16,7 @@ MAX_CONCURRENCY = int(os.environ.get("CRAWL4AI_MAX_CONCURRENCY", "2"))
 DATA_DIR = os.environ["CRAWL4AI_DATA_DIR"]
 semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 crawler: AsyncWebCrawler | None = None
+crawler_lifecycle = "stopped"
 
 
 class CrawlRequest(BaseModel):
@@ -47,15 +48,24 @@ def check_token(authorization: str | None) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global crawler
-    browser = BrowserConfig(headless=True, verbose=False, proxy_config={"server": EGRESS_PROXY}, extra_args=["--disable-quic", "--disable-features=ServiceWorker"])
-    crawler = AsyncWebCrawler(config=browser, base_directory=DATA_DIR, thread_safe=True)
-    await crawler.start()
+    global crawler, crawler_lifecycle
+    crawler_lifecycle = "starting"
+    instance = None
     try:
+        browser = BrowserConfig(headless=True, verbose=False, proxy_config={"server": EGRESS_PROXY}, extra_args=["--disable-quic", "--disable-features=ServiceWorker"])
+        instance = AsyncWebCrawler(config=browser, base_directory=DATA_DIR, thread_safe=True)
+        await instance.start()
+        crawler = instance
+        crawler_lifecycle = "ready"
         yield
     finally:
-        if crawler is not None:
-            await crawler.close()
+        crawler = None
+        crawler_lifecycle = "stopping"
+        try:
+            if instance is not None:
+                await instance.close()
+        finally:
+            crawler_lifecycle = "stopped"
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -64,6 +74,14 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok", "concurrency": MAX_CONCURRENCY}
+
+
+@app.get("/readyz")
+async def readyz(response: Response, authorization: str | None = Header(default=None)):
+    check_token(authorization)
+    initialized = crawler is not None and crawler_lifecycle == "ready"
+    response.status_code = 200 if initialized else 503
+    return {"ok": initialized, "initialized": initialized, "lifecycle": crawler_lifecycle}
 
 
 @app.post("/crawl")

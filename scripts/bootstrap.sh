@@ -125,6 +125,7 @@ systemctl restart web-access-crawl4ai.service
 systemctl restart web-access-playwright.service
 systemctl restart web-access-gateway.service
 systemctl start web-access-healthcheck.timer
+WAG_ROOT="$ROOT" "$ROOT/scripts/install-artifact-cleanup.sh"
 
 echo "Installed native Crawl4AI, native Playwright MCP, and the authenticated gateway."
 echo "Read the token locally with: ssh yosef-server 'sudo cat $ROOT/secrets/gateway.env'"

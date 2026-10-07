@@ -31,8 +31,12 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("ROOT=/data/web-access-gateway", script)
         script = script.replace("ROOT=/data/web-access-gateway", 'ROOT="$TEST_ROOT"', 1)
         (self.source / "scripts/bootstrap.sh").write_text(script, newline="\n")
-        for file in (SOURCE / "scripts").glob("bootstrap-bind.py"):
-            shutil.copy2(file, self.source / "scripts" / file.name)
+        for name in ("bootstrap-bind.py", "install-artifact-cleanup.sh"):
+            file = self.source / "scripts" / name
+            shutil.copy2(SOURCE / "scripts" / name, file)
+            file.chmod(0o755)
+        for file in (SOURCE / "systemd").glob("web-access-artifact-cleanup.*"):
+            shutil.copy2(file, self.source / "systemd" / file.name)
         (self.source / "gateway/server.mjs").write_text("// installation fixture\n")
         (self.source / "crawl4ai/app.py").write_text("# installation fixture\n")
         self.stub("id", 'case "$1" in -u) printf "0\\n";; -gn) printf "dummy\\n";; *) exit 91;; esac')
@@ -50,7 +54,7 @@ class BootstrapTests(unittest.TestCase):
                     if not key.startswith(("GATEWAY_", "CRAWL4AI_"))}
         self.env.update(PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                         TEST_ROOT=self.root.as_posix(), TEST_EFFECTS=self.effects.as_posix(),
-                        SUDO_USER="dummy")
+                        SUDO_USER="dummy", WAG_SYSTEMD_DIR=(self.base / "systemd").as_posix())
         self.env.pop("MSYS_NO_PATHCONV", None)
         self.env.pop("MSYS2_ARG_CONV_EXCL", None)
         # Stub only the OS DNS boundary for reserved fixture names. Never ask

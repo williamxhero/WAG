@@ -16,6 +16,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import * as z from 'zod/v4';
 import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
+import { createArtifactStore } from './artifact-store.mjs';
+import { createReadiness } from './readiness.mjs';
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -49,10 +51,18 @@ const browserSlots = { active: 0, limit: 2 };
 const requestSlots = { active: 0, limit: Number(process.env.GATEWAY_REQUEST_CONCURRENCY ?? 16) };
 const hostSlots = new Map();
 const tokenRequests = new Map();
-const artifactSlots = { active: 0, limit: 1 };
-let artifactUsage = null;
-let artifactUsagePromise = null;
-const readiness = { checkedAt: 0, value: null, promise: null };
+const artifactStore = createArtifactStore({ root: cfg.artifactDir,
+  maxBytes: cfg.artifactMaxBytes, quotaBytes: cfg.artifactQuotaBytes });
+const getReadiness = createReadiness({
+  searxUrl: cfg.searxUrl, crawlUrl: cfg.crawlUrl, crawlToken: cfg.crawlToken, playwrightUrl: cfg.playwrightUrl,
+  secrets: Object.entries(process.env).filter(([key]) => /token|secret|password|api[_-]?key|authorization|credential|private[_-]?key|access[_-]?key/i.test(key)).map(([, value]) => value),
+  egressProbe: async signal => {
+    const { url } = await resolvePublicUrl('https://example.com/');
+    signal.throwIfAborted();
+    const response = await requestOnce(url, signal);
+    return { http_status: response.status };
+  },
+});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const tokenEqual = value => {
   const supplied = Buffer.from(value ?? '');
@@ -112,7 +122,7 @@ async function resolvePublicUrl(raw) {
   return { url, records };
 }
 const proxyUrl = new URL(cfg.egressProxy);
-function requestOnce(url) {
+function requestOnce(url, signal) {
   const timeoutMs = 30000;
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -130,11 +140,14 @@ function requestOnce(url) {
     };
     const connect = http.request({ host: proxyUrl.hostname, port: proxyUrl.port || 80, method: 'CONNECT', path: `${url.hostname}:${url.port || (url.protocol === 'https:' ? 443 : 80)}`, timeout: timeoutMs });
     const deadline = setTimeout(() => complete(rejectError('egress request timed out', 'egress_timeout')), timeoutMs);
-    const complete = (error, value) => { clearTimeout(deadline); finish(error, value); };
+    const onAbort = () => complete(signal.reason ?? rejectError('dependency probe timed out', 'dependency_timeout'));
+    const complete = (error, value) => { clearTimeout(deadline); signal?.removeEventListener('abort', onAbort); finish(error, value); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); return; }
     connect.once('error', error => complete(rejectError(error.message, 'egress_connect', { cause: error })));
     connect.once('timeout', () => { connect.destroy(); complete(rejectError('egress proxy connection timed out', 'egress_timeout')); });
     connect.once('connect', (response, socket, head) => {
-      if (settled) { socket.destroy(); return; }
+      if (settled || signal?.aborted) { socket.destroy(); return; }
       tunnelSocket = socket;
       connect.setTimeout(0);
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -319,93 +332,8 @@ async function callCrawl4ai(url, output) {
 async function saveArtifact(value, extension) {
   if (typeof value !== 'string' || !value) return null;
   const content = value.startsWith('data:') ? Buffer.from(value.slice(value.indexOf(',') + 1), 'base64') : Buffer.from(value, 'base64');
-  if (content.length > cfg.artifactMaxBytes) throw rejectError(`artifact exceeds ${cfg.artifactMaxBytes} bytes`, 'artifact_too_large');
-  return withSlot(artifactSlots, async () => {
-    artifactUsagePromise ??= calculateArtifactUsage(cfg.artifactDir);
-    artifactUsage ??= await artifactUsagePromise;
-    if (artifactUsage + content.length > cfg.artifactQuotaBytes) throw rejectError('artifact quota exceeded', 'artifact_quota_exceeded');
-    const id = crypto.randomUUID();
-    const day = new Date().toISOString().slice(0, 10);
-    const relative = path.posix.join(day, `${id}.${extension}`);
-    const target = path.join(cfg.artifactDir, relative);
-    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-    await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o750 });
-    await fs.writeFile(temporary, content, { mode: 0o640, flag: 'wx' });
-    await fs.rename(temporary, target);
-    artifactUsage += content.length;
-    return { id: relative, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(relative)}`, bytes: content.length, content_type: extension === 'png' ? 'image/png' : 'application/pdf', content_hash: crypto.createHash('sha256').update(content).digest('hex') };
-  });
-}
-async function calculateArtifactUsage(directory) {
-  let total = 0;
-  async function visit(current) {
-    for (const entry of await fs.readdir(current, { withFileTypes: true }).catch(() => [])) {
-      const target = path.join(current, entry.name);
-      if (entry.isDirectory()) await visit(target);
-      else if (entry.isFile()) total += (await fs.stat(target)).size;
-    }
-  }
-  await visit(directory);
-  return total;
-}
-async function probeDependency(name, operation) {
-  const started = Date.now();
-  try {
-    const detail = await operation();
-    return { name, ok: true, duration_ms: Date.now() - started, ...detail };
-  } catch (error) {
-    return { name, ok: false, duration_ms: Date.now() - started, error: { kind: error.kind ?? 'dependency_error', message: String(error.message ?? error).slice(0, 240), ...(error.httpStatus ? { http_status: error.httpStatus } : {}) } };
-  }
-}
-function probePlaywright() {
-  return new Promise((resolve, reject) => {
-    const request = http.request({ host: '127.0.0.1', port: 8931, path: '/mcp', method: 'GET', headers: { Host: 'localhost:8931' }, timeout: 5000 }, response => {
-      response.resume();
-      response.once('end', () => resolve({ http_status: response.statusCode ?? 0 }));
-    });
-    request.once('timeout', () => request.destroy(rejectError('Playwright probe timed out', 'dependency_timeout')));
-    request.once('error', reject);
-    request.end();
-  });
-}
-async function checkReadiness() {
-  const dependencies = await Promise.all([
-    probeDependency('searxng', async () => {
-      const response = await fetch(`${cfg.searxUrl}/search?q=readyz&format=json`, { signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw rejectError(`SearXNG returned ${response.status}`, 'dependency_http_status', { httpStatus: response.status });
-      return { http_status: response.status };
-    }),
-    probeDependency('crawl4ai', async () => {
-      const response = await fetch(`${cfg.crawlUrl}/healthz`, { headers: { authorization: `Bearer ${cfg.crawlToken}` }, signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}`, 'dependency_http_status', { httpStatus: response.status });
-      return { http_status: response.status };
-    }),
-    probeDependency('playwright', async () => {
-      const result = await probePlaywright();
-      if (![200, 400, 405, 406].includes(result.http_status)) throw rejectError(`Playwright returned ${result.http_status}`, 'dependency_http_status', { httpStatus: result.http_status });
-      return result;
-    }),
-    probeDependency('egress_proxy', async () => {
-      const { url } = await resolvePublicUrl('https://example.com/');
-      const response = await requestOnce(url);
-      return { http_status: response.status };
-    }),
-  ]);
-  return { checked_at: new Date().toISOString(), ok: dependencies.every(item => item.ok), dependencies };
-}
-async function getReadiness() {
-  if (readiness.promise) return readiness.promise;
-  if (readiness.value && Date.now() - readiness.checkedAt < 10000) return readiness.value;
-  readiness.promise = checkReadiness().then(value => {
-    readiness.checkedAt = Date.now();
-    readiness.value = value;
-    readiness.promise = null;
-    return value;
-  }).catch(error => {
-    readiness.promise = null;
-    throw error;
-  });
-  return readiness.promise;
+  const artifact = await artifactStore.save(content, extension);
+  return { ...artifact, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(artifact.id)}` };
 }
 async function createBrowserSession() {
   const transport = new StreamableHTTPClientTransport(new URL(cfg.playwrightUrl));
@@ -645,7 +573,7 @@ app.get('/api/evals/:runId/artifacts/:name', async (req, res) => {
 });
 app.use(requireToken);
 app.get('/healthz', async (_req, res) => {
-  res.json({ ok: true, render_active: renderSlots.active, browser_active: browserSlots.active, request_active: requestSlots.active, artifact_usage_bytes: artifactUsage });
+  res.json({ ok: true, render_active: renderSlots.active, browser_active: browserSlots.active, request_active: requestSlots.active, artifact_usage_bytes: artifactStore.usageBytes });
 });
 app.get('/readyz', async (_req, res) => {
   const value = await getReadiness();

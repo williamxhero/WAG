@@ -225,13 +225,43 @@ directory and snapshots: active dependency/venv links reference its candidate
 (the venv is deliberately not relocated). Do not garbage-collect releases whose
 candidates or snapshots are still referenced.
 
-The #25 coordinator must take its overlay snapshot before applying the overlay,
-apply/verify it after runtime prepare, and restore it on **every** downstream
-activation/commit/abort failure or interruption. Runtime snapshots do not restore
-SearXNG. Runtime-only staging or commit is not complete #9 release consistency,
-#26 acceptance, or authorization for live deployment. Offline fixtures use only
-temporary installation/unit roots and stub dependency/service/readiness commands:
-`python3 scripts/deploy.test.py` (Linux).
+For the coordinated #25 contract, add `--searxng-settings SETTINGS_FILE` to
+`prepare`. The reviewed candidate overlay is merged **between** prepare and
+runtime activation. Prepare snapshots the existing settings into `TX/searxng/`
+before returning (no settings mutation/restart during prepare). Engines merge by
+name; unrelated settings/engines, backend selections, and existing global or
+per-engine proxy maps are preserved. The repository proxy default fills an absent
+map only. Standalone `scripts/searxng-apply-overlay.sh` uses the same helper and
+exclusive `overlay-<stamp>` backup convention; its `--settings`, `--backup-root`
+and `--stamp` options allow entirely temporary fixtures.
+
+`provenance.json.searxng` records canonical SHA-256 digests of parsed, relevant
+**effective** engine and outgoing configuration, plus the existing PyYAML tool
+version. It never hashes entire settings or env files, proxy credentials, keys,
+or arbitrary settings. Activation verifies installed effective settings and a
+bounded listener/nonempty JSON search check; commit repeats those checks, not
+just a copied overlay/revision check. Changing proxy endpoints or engine state
+invalidates commit. The runtime inventory explicitly requires the independent
+evidence helper, selected-response search implementation and overlay helper.
+
+Abort, explicit restore of the latest committed transaction, downstream runtime
+activation/commit failures and catchable interruptions restore **both** settings
+and runtime. Settings bytes, permissions/ownership/timestamp and previous service
+activity are restored. A failure attempts both sides and retains a pending,
+retryable `restore_failed` journal; `status TX` exposes fixed classifications via
+`restore_errors`/`overlay_restore_errors`, never raw service output or settings.
+After an uncatchable interruption use `status` then `abort`; retained snapshots
+must not be removed. Runtime-only transactions still do not restore SearXNG.
+Neither offline staging nor commit is #9/#26 acceptance or live-deploy permission.
+
+Offline fixtures use only temporary roots/settings and stub service/dependency/
+readiness commands: provision gateway packages separately with `npm --prefix
+gateway ci --ignore-scripts`, then run `python3 scripts/deploy.test.py` (Linux,
+Node 22 and the already-pinned PyYAML prerequisite). The complete offline rehearsal
+copies those local locked packages and runs the unchanged search/evidence tests
+against the provenance-matched committed candidate; it never installs browsers
+or uses network credentials. CI serializes test files while preserving explicit
+in-test concurrency scenarios.
 
 ### 产物生命周期
 

@@ -19,7 +19,7 @@ import * as z from 'zod/v4';
 import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
-import { createReadiness } from './readiness.mjs';
+import { createReadiness, DEFAULT_PROBE_TIMEOUT_MS } from './readiness.mjs';
 import { isPublicAddress as classifyPublicAddress } from '../proxy/public-address.mjs';
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
@@ -33,6 +33,7 @@ const cfg = Object.freeze({
   crawlUrl: process.env.CRAWL4AI_URL ?? 'http://127.0.0.1:11235',
   crawlToken: process.env.CRAWL4AI_TOKEN ?? '',
   searxUrl: process.env.SEARXNG_URL ?? 'http://yosef-server:8801',
+  probeTimeoutMs: Number(process.env.GATEWAY_PROBE_TIMEOUT_MS ?? DEFAULT_PROBE_TIMEOUT_MS),
   playwrightUrl: process.env.PLAYWRIGHT_MCP_URL ?? 'http://localhost:8931/mcp',
   artifactDir: process.env.ARTIFACT_DIR ?? '/data/web-access-gateway/artifacts',
   browserOutputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? '/data/web-access-gateway/data/playwright/output',
@@ -53,6 +54,7 @@ if (!['0', '1'].includes(process.env.GATEWAY_ALLOW_ANONYMOUS ?? '0')) throw new 
 if (!cfg.allowAnonymous && cfg.token.length < 32) throw new Error('GATEWAY_TOKEN must be at least 32 characters');
 if (!Number.isSafeInteger(cfg.crawlResponseMaxBytes) || cfg.crawlResponseMaxBytes <= 0) throw new Error('CRAWL4AI_RESPONSE_MAX_BYTES must be a positive safe integer');
 if (!Number.isSafeInteger(cfg.artifactMaxBytes) || cfg.artifactMaxBytes <= 0) throw new Error('ARTIFACT_MAX_BYTES must be a positive safe integer');
+if (!Number.isSafeInteger(cfg.probeTimeoutMs) || cfg.probeTimeoutMs <= 0) throw new Error('GATEWAY_PROBE_TIMEOUT_MS must be a positive safe integer');
 
 const browserSessions = new Map();
 const renderSlots = { active: 0, limit: 2 };
@@ -64,6 +66,7 @@ const artifactStore = createArtifactStore({ root: cfg.artifactDir,
   maxBytes: cfg.artifactMaxBytes, quotaBytes: cfg.artifactQuotaBytes });
 const getReadiness = createReadiness({
   searxUrl: cfg.searxUrl, crawlUrl: cfg.crawlUrl, crawlToken: cfg.crawlToken, playwrightUrl: cfg.playwrightUrl,
+  probeTimeoutMs: cfg.probeTimeoutMs,
   secrets: Object.entries(process.env).filter(([key]) => /token|secret|password|api[_-]?key|authorization|credential|private[_-]?key|access[_-]?key/i.test(key)).map(([, value]) => value),
   egressProbe: async signal => {
     const { url, records } = await resolvePublicUrl('https://example.com/');

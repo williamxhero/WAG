@@ -50,18 +50,29 @@ check_http() {
   diagnose "$layer" "$status" "$validation"
 }
 
+# Probe the local listener, not the logical/public hostname. Keep the Host
+# header independent so the same production host allowlist is still exercised.
+probe_host="${GATEWAY_HEALTHCHECK_HOST:-${GATEWAY_BIND_HOST:-127.0.0.1}}"
+probe_host="${probe_host#[}"; probe_host="${probe_host%]}"
+case "$probe_host" in 0.0.0.0) probe_host=127.0.0.1;; ::) probe_host=::1;; esac
+[[ "$probe_host" != *:* ]] || probe_host="[$probe_host]"
+logical_host="${GATEWAY_HOST:-yosef-server}"
+if [[ "$logical_host" == *:* && "$logical_host" != \[*\] ]]; then logical_host="[$logical_host]"; fi
+gateway_url="http://$probe_host:$GATEWAY_PORT"
+gateway_host_header="Host: $logical_host:$GATEWAY_PORT"
+
 check_command process systemctl is-active --quiet web-access-egress-proxy.service web-access-crawl4ai.service web-access-playwright.service web-access-gateway.service
-check_http gateway http -H "Authorization: Bearer $GATEWAY_TOKEN" "http://$GATEWAY_HOST:$GATEWAY_PORT/healthz"
+check_http gateway http --noproxy '*' -H "$gateway_host_header" -H "Authorization: Bearer $GATEWAY_TOKEN" "$gateway_url/healthz"
 check_http crawl4ai http http://127.0.0.1:11235/healthz
 check_http playwright playwright -H 'Host: localhost:8931' http://127.0.0.1:8931/mcp
 if [[ "$mode" == --core-only ]]; then
   # Public search/egress degradation must not trigger deployment rollback.
-  check_http gateway-ready ready-core -H "Authorization: Bearer $GATEWAY_TOKEN" "http://$GATEWAY_HOST:$GATEWAY_PORT/readyz"
+  check_http gateway-ready ready-core --noproxy '*' -H "$gateway_host_header" -H "Authorization: Bearer $GATEWAY_TOKEN" "$gateway_url/readyz"
   exit 0
 fi
 
 degraded=0
-if check_http gateway-ready ready -H "Authorization: Bearer $GATEWAY_TOKEN" "http://$GATEWAY_HOST:$GATEWAY_PORT/readyz"; then :; else
+if check_http gateway-ready ready --noproxy '*' -H "$gateway_host_header" -H "Authorization: Bearer $GATEWAY_TOKEN" "$gateway_url/readyz"; then :; else
   status=$?
   [[ "$status" == 2 ]] || exit 1
   degraded=1

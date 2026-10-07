@@ -34,14 +34,11 @@ node --test *.test.mjs
 
 ## 应用、验证与回滚
 
-### 1. 复制文件
+### 1. 使用当前安装契约
 
-把以下两个文件复制到小电脑的临时目录，保持 overlay 文件和脚本都可读：
+本报告记录的是历史诊断，不是当前部署操作手册。不要只复制 overlay 与 shell 脚本两个文件：当前入口还依赖 `scripts/searxng-overlay.py`、`scripts/release.py` 和锁定环境中的 PyYAML。
 
-```text
-config/searxng/settings-overlay.yml
-scripts/searxng-apply-overlay.sh
-```
+安装、协调 runtime/overlay 事务、验证与回滚以 [README 的 Runtime release transaction](../README.md#runtime-release-transaction-offline-preparation-contract) 为准；独立 overlay 操作也必须使用完整的已审阅安装布局。下面的小电脑应用示例只说明历史调用形式，不替代当前 prepare/activate/commit/restore 契约，也不授权 live 部署。
 
 ### 2. 在小电脑上应用
 

@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyTransientFailure, dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
+import { deadlineKind, classifyTransientFailure, dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
+
+test('deadline taxonomy is exact and preserves underlying typed causes', () => {
+  for (const kind of ['timeout', 'upstream_timeout', 'egress_timeout']) {
+    assert.equal(deadlineKind({ kind }), kind);
+    assert.equal(deadlineKind({ kind: 'request', cause: { kind } }), kind);
+    assert.equal(deadlineKind({ payload: { error: { kind } } }), kind);
+    assert.equal(deadlineKind({ error: { kind: 'quality', cause: { kind } } }), kind);
+  }
+  for (const kind of ['dependency_timeout', 'TimeoutError', 'upstream_timeouts', 'not_timeout', 'abort']) {
+    assert.equal(deadlineKind({ kind, message: 'timeout timed out abort' }), null);
+  }
+  const cycle = { kind: 'request' }; cycle.cause = cycle;
+  assert.equal(deadlineKind(cycle), null);
+});
 
 test('latestSnapshotText ignores stale refs from earlier browser actions', () => {
   const outputs = [
@@ -22,6 +36,41 @@ test('case summary reports success, quality and timeout rates', () => {
   assert.equal(summary.success_rate_pct, 50);
   assert.equal(summary.quality_rate_pct, 50);
   assert.equal(summary.timeout_rate_pct, 50);
+});
+
+test('operational deadlines count only availability, with explicit eligible denominator', () => {
+  const cases = [
+    { status: 'passed', quality: { passed: true } },
+    ...['timeout', 'upstream_timeout', 'egress_timeout'].map(kind => ({ status: 'failed', quality: { passed: false }, error: { kind } })),
+    { status: 'failed', quality: { passed: false }, error: { kind: 'request', cause: { kind: 'upstream_timeout' } } },
+    { status: 'failed', quality: { passed: false }, error: { kind: 'dependency_timeout' } },
+    { status: 'passed', quality: { passed: true }, expectation: 'expected_timeout', error: { kind: 'egress_timeout' } },
+    { status: 'passed', quality: { passed: true }, expectation: 'expected_security', error: { kind: 'ssrf_blocked' } },
+    { status: 'failed', quality: { passed: false }, expectation: 'expected_security', error: { kind: 'upstream_timeout' } },
+  ];
+  const summary = summarizeCases(cases);
+  assert.equal(summary.timeout_cases, 4);
+  assert.equal(summary.timeout_eligible_cases, 6);
+  assert.equal(summary.timeout_rate_pct, 66.67);
+  assert.equal(summary.expected_outcomes_total, 3);
+  assert.equal(summary.expected_outcomes_passed, 2);
+  assert.equal(summary.expected_outcomes_failed, 1);
+  assert.equal(summary.success_rate_pct, 33.33);
+  assert.equal(summary.quality_rate_pct, 33.33);
+});
+
+test('empty and negative-only suites have no availability measurement and cannot pass', () => {
+  for (const cases of [[], [{ expectation: 'expected_timeout', status: 'passed', quality: { passed: true }, error: { kind: 'timeout' } }]]) {
+    const summary = summarizeCases(cases);
+    assert.equal(summary.timeout_eligible_cases, 0);
+    assert.equal(summary.timeout_cases, 0);
+    assert.equal(summary.timeout_rate_pct, null);
+    assert.equal(summary.availability_success_rate_pct, null);
+    assert.equal(summary.availability_coverage, 'empty');
+    assert.equal(evaluationStatus(cases), 'failed');
+  }
+  assert.equal(summarizeCases([]).success_rate_pct, null);
+  assert.equal(summarizeCases([]).quality_rate_pct, null);
 });
 
 test('transient failures retry with visible attempt evidence', async () => {

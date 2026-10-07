@@ -15,18 +15,67 @@ const reportDirectory = path.join(root, 'reports');
 const samplePath = process.env.WAG_EVAL_SAMPLES ?? path.join(root, 'eval', 'samples.json');
 const gatewayUrl = process.env.GATEWAY_EVAL_URL ?? `http://yosef-server:${process.env.GATEWAY_PORT ?? '8930'}/mcp`;
 const token = process.env.GATEWAY_TOKEN ?? '';
-if (token.length < 32) throw new Error('GATEWAY_TOKEN is required for evaluation');
-
+// Gateway operations allow 30s egress and 90s rendering/queueing; retain a
+// bounded 5s evaluator overhead rather than relying on the SDK's defaults.
+const connectionBudgetMs = 30000 + 5000;
+const operationBudgetMs = 30000 + 90000 + 5000;
+const cleanupBudgetMs = 1000;
+const reportBudgetMs = 1000;
+const defaultDeadlineMs = connectionBudgetMs + ((suite === 'release' ? 15 : 11) * operationBudgetMs + 2 * operationBudgetMs) * 3;
 const now = () => performance.now();
+const lifecycle = createLifecycle();
+
+function deadlineError(label) {
+  return Object.assign(new Error(`${label} deadline exceeded`), { kind: 'lifecycle_timeout' });
+}
+function createLifecycle() {
+  const configured = Number(process.env.WAG_EVAL_DEADLINE_MS ?? defaultDeadlineMs);
+  const budgetMs = Number.isSafeInteger(configured) && configured > 0 && configured <= defaultDeadlineMs ? configured : defaultDeadlineMs;
+  const controller = new AbortController();
+  const connections = [];
+  const browserSessions = new Set();
+  const timer = setTimeout(() => controller.abort(deadlineError('evaluation')), budgetMs);
+  // Abort/close normally lets Node exit naturally. Non-cancellable native I/O
+  // or a broken transport must not hold a scheduled evaluator open forever.
+  // This unref'ed last resort never keeps an otherwise cleaned-up run alive.
+  setTimeout(() => {
+    console.error('Evaluation termination guard expired after bounded cleanup/report attempts');
+    process.exit(1);
+  }, budgetMs + cleanupBudgetMs + reportBudgetMs + 250).unref();
+  return {
+    budgetMs, controller, connections, browserSessions, networkSignal: controller.signal,
+    async run(label, operation, timeoutMs = operationBudgetMs, signal = controller.signal) {
+      signal?.throwIfAborted();
+      const scope = new AbortController();
+      const abort = () => scope.abort(signal.reason);
+      signal?.addEventListener('abort', abort, { once: true });
+      const timeout = setTimeout(() => scope.abort(deadlineError(label)), timeoutMs);
+      let rejectAbort;
+      const aborted = new Promise((_, reject) => {
+        rejectAbort = () => reject(scope.signal.reason);
+        scope.signal.addEventListener('abort', rejectAbort, { once: true });
+      });
+      try { return await Promise.race([Promise.resolve().then(() => { scope.signal.throwIfAborted(); return operation(scope.signal); }), aborted]); }
+      finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abort);
+        scope.signal.removeEventListener('abort', rejectAbort);
+      }
+    },
+    stop() { clearTimeout(timer); controller.abort(deadlineError('evaluation finished')); },
+  };
+}
 const elapsed = started => Math.round(now() - started);
-const exec = (command, args) => new Promise(resolve => execFile(command, args, { timeout: 5000 }, (error, stdout) => resolve(error ? '' : stdout.trim())));
+const exec = (command, args) => new Promise(resolve => execFile(command, args, { timeout: 5000, signal: lifecycle.controller.signal }, (error, stdout) => resolve(error ? '' : stdout.trim())));
 
 function parseToolResult(result) {
   const text = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
   try { return JSON.parse(text); } catch { return { raw_text: text }; }
 }
 function errorInfo(error) {
-  const message = String(error?.message ?? error ?? 'unknown failure');
+  let message = String(error?.message ?? error ?? 'unknown failure');
+  if (token) message = message.replaceAll(token, '[redacted]');
+  message = message.replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [redacted]').replace(/(https?:\/\/)[^/\s@]+@/gi, '$1[redacted]@');
   return { kind: error?.kind ?? (/timeout|timed out|abort/i.test(message) ? 'timeout' : /unauthorized|401/i.test(message) ? 'authentication' : 'request'), message: message.slice(0, 500) };
 }
 function assertQuality(checks) {
@@ -81,16 +130,50 @@ async function pruneExpiredReports(directory) {
   }));
 }
 async function createClient() {
-  const transport = new StreamableHTTPClientTransport(new URL(gatewayUrl), { requestInit: { headers: { authorization: `Bearer ${token}` } } });
+  const transport = new StreamableHTTPClientTransport(new URL(gatewayUrl), {
+    requestInit: { headers: { authorization: `Bearer ${token}` } },
+    fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([init.signal, lifecycle.networkSignal].filter(Boolean)) }),
+  });
   const client = new Client({ name: 'web-access-gateway-evaluator', version: '1.0.0' });
-  await client.connect(transport);
+  // Own the pair before initialization, so failed/partial connects are closed.
+  lifecycle.connections.push({ client, transport });
+  await lifecycle.run('gateway connection', signal => client.connect(transport, { signal, timeout: connectionBudgetMs }), connectionBudgetMs);
   return { client, transport };
 }
-async function callTool(client, name, args) {
+async function terminateMcpSession(transport, signal) {
+  if (!transport.sessionId) return;
+  // The SDK closes its transport when initialize validation fails. Use a
+  // cleanup-only transport so that its already-aborted signal cannot prevent
+  // terminating a server session allocated by a partial initialization.
+  const cleanupTransport = new StreamableHTTPClientTransport(new URL(gatewayUrl), {
+    sessionId: transport.sessionId,
+    requestInit: { headers: { authorization: `Bearer ${token}` } },
+    fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([signal, init.signal].filter(Boolean)) }),
+  });
+  if (transport.protocolVersion) cleanupTransport.setProtocolVersion(transport.protocolVersion);
+  try { await cleanupTransport.start(); await cleanupTransport.terminateSession(); }
+  finally { await cleanupTransport.close(); }
+}
+function fetchEvaluation(url, init = {}) {
+  lifecycle.controller.signal.throwIfAborted();
+  return fetch(url, { ...init, signal: AbortSignal.any([lifecycle.controller.signal, AbortSignal.timeout(10000)]) });
+}
+async function requestTool(client, name, args, signal = lifecycle.controller.signal, timeoutMs = operationBudgetMs) {
+  return lifecycle.run(`tool ${name}`, requestSignal => client.callTool({ name, arguments: args }, undefined, { signal: requestSignal, timeout: timeoutMs }), timeoutMs, signal);
+}
+async function closeBrowserSession(client, sessionId, signal = lifecycle.controller.signal, timeoutMs = cleanupBudgetMs) {
+  const closed = await callTool(client, 'web_browser', { session_id: sessionId, actions: [{ type: 'close' }] }, signal, timeoutMs);
+  if (closed.payload.closed !== true) throw new Error('browser session close was not acknowledged');
+  lifecycle.browserSessions.delete(sessionId);
+  return closed;
+}
+async function callTool(client, name, args, signal = lifecycle.controller.signal, timeoutMs = operationBudgetMs) {
   const start = now();
-  const result = await client.callTool({ name, arguments: args });
+  const result = await requestTool(client, name, args, signal, timeoutMs);
   const totalMs = elapsed(start);
   const payload = parseToolResult(result);
+  // A failed browser action can still expose the session it allocated.
+  if (name === 'web_browser' && typeof payload.session_id === 'string') lifecycle.browserSessions.add(payload.session_id);
   if (result.isError) {
     const error = new Error(payload.error?.message ?? payload.raw_text ?? 'MCP tool returned an error');
     error.payload = payload;
@@ -102,10 +185,12 @@ async function callTool(client, name, args) {
   return { payload, total_ms: totalMs, first_valid_result_ms: telemetry.first_valid_result_ms ?? totalMs, stages_ms: { mcp_round_trip_ms: totalMs, ...(telemetry.stages_ms ?? {}) } };
 }
 async function runCase(cases, artifacts, definition) {
+  lifecycle.controller.signal.throwIfAborted();
   const started = now();
   try {
     const attempted = await runWithRetries(async () => {
-      const outcome = await definition.run();
+      const outcome = await lifecycle.run(`case ${definition.id}`, () => definition.run(), definition.category === 'browser' ? 3 * operationBudgetMs : operationBudgetMs);
+      lifecycle.controller.signal.throwIfAborted();
       const quality = definition.quality ? definition.quality(outcome.payload, outcome) : assertQuality([{ name: 'request-completed', passed: true }]);
       return { outcome, quality };
     }, {
@@ -119,6 +204,7 @@ async function runCase(cases, artifacts, definition) {
     if (outcome.artifact) { artifacts.push(outcome.artifact); record.artifact = outcome.artifact.name; }
     cases.push(record);
   } catch (error) {
+    lifecycle.controller.signal.throwIfAborted();
     const expectedPayload = error.payload;
     const expectedOutcome = definition.errorQuality ? definition.errorQuality(expectedPayload ?? {}) : null;
     if (expectedOutcome?.passed) {
@@ -129,29 +215,50 @@ async function runCase(cases, artifacts, definition) {
   }
 }
 async function main() {
-  const samples = JSON.parse(await fs.readFile(samplePath, 'utf8'));
-  const cases = []; const artifacts = []; const resourceStart = await resourceSnapshot(); const resourceSamples = [resourceStart];
-  const resourceTimer = setInterval(() => resourceSnapshot().then(snapshot => resourceSamples.push(snapshot)).catch(() => {}), 1000);
-  const { client, transport } = await createClient();
+  const cases = []; const artifacts = []; const resourceSamples = [];
+  let resourceStart = {}; let resourceEnd = {}; let resourceTimer;
+  let completed = false; let failure;
+  const cleanupErrors = [];
   try {
+    await lifecycle.run('evaluation', async () => {
+      if (token.length < 32) throw new Error('GATEWAY_TOKEN is required for evaluation');
+      const samples = JSON.parse(await fs.readFile(samplePath, { encoding: 'utf8', signal: lifecycle.controller.signal }));
+      lifecycle.controller.signal.throwIfAborted();
+      resourceStart = await resourceSnapshot(); resourceSamples.push(resourceStart);
+      lifecycle.controller.signal.throwIfAborted();
+      let polling = false;
+      resourceTimer = setInterval(() => {
+        if (polling || lifecycle.controller.signal.aborted) return;
+        polling = true;
+        resourceSnapshot().then(snapshot => resourceSamples.push(snapshot)).catch(() => {}).finally(() => { polling = false; });
+      }, 1000);
+      const { client } = await createClient();
     await runCase(cases, artifacts, { id: 'search-public', name: 'Public search returns results', category: 'search', dimension: 'connectivity', retry: true, retryQuality: true, tool: 'web_search', run: () => callTool(client, 'web_search', { query: samples.search.query }), quality: payload => assertQuality([{ name: 'has-results', passed: Array.isArray(payload.results) && payload.results.length > 0 }, { name: 'expected-domain', passed: (payload.results ?? []).some(item => String(item.url ?? '').includes(samples.search.expected_domain)) }, { name: 'search-provenance', passed: (payload.results ?? []).length > 0 && payload.results.every(item => item.source?.url === item.url && Boolean(item.source?.host) && Boolean(item.retrieved_at) && item.temporal_evidence?.some(record => record.kind === 'retrieved_at' && record.value === item.retrieved_at && record.source === 'gateway.clock')) }]) });
     await runCase(cases, artifacts, { id: 'read-static', name: 'Static page extraction', category: 'read', dimension: 'connectivity', retry: true, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' }), quality: payload => assertQuality([{ name: 'expected-title', passed: String(payload.title ?? '').includes(samples.static.expected_text) }, { name: 'minimum-body', passed: String(payload.markdown ?? '').length >= 40 }, ...evidenceChecks(payload)]) });
     await runCase(cases, artifacts, { id: 'read-rendered', name: 'JavaScript-rendered page extraction', category: 'render', dimension: 'connectivity', retry: true, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.render.url, render: 'always', output: 'markdown' }), quality: payload => assertQuality([{ name: 'expected-text', passed: String(payload.markdown ?? '').includes(samples.render.expected_text) }, ...evidenceChecks(payload)]) });
     await runCase(cases, artifacts, { id: 'browser-snapshot-click', name: 'Browser snapshot and safe link click', category: 'browser', dimension: 'connectivity', retry: true, tool: 'web_browser', run: async () => {
       const initial = await callTool(client, 'web_browser', { actions: [{ type: 'navigate', url: samples.browser.url }, { type: 'snapshot' }] });
-      const snapshot = latestSnapshotText(initial.payload.outputs);
-      const ref = /\blink\b[^\n]*\[ref=([^\]]+)\]/i.exec(snapshot)?.[1]
-        ?? /\[ref=([^\]]+)\][^\n]*\blink\b/i.exec(snapshot)?.[1];
-      if (!ref || !initial.payload.session_id) throw new Error('browser snapshot did not expose a link reference');
-      const clicked = await callTool(client, 'web_browser', { session_id: initial.payload.session_id, actions: [{ type: 'click', ref, element: 'link' }, { type: 'snapshot' }] });
-      const closed = await callTool(client, 'web_browser', { session_id: initial.payload.session_id, actions: [{ type: 'close' }] });
-      return { payload: { initial: initial.payload, clicked: clicked.payload, closed: closed.payload.closed === true }, total_ms: initial.total_ms + clicked.total_ms + closed.total_ms, first_valid_result_ms: initial.first_valid_result_ms, stages_ms: { navigate_snapshot_ms: initial.total_ms, click_snapshot_ms: clicked.total_ms, close_ms: closed.total_ms } };
+      const sessionId = initial.payload.session_id;
+      if (sessionId) lifecycle.browserSessions.add(sessionId);
+      try {
+        const snapshot = latestSnapshotText(initial.payload.outputs);
+        const ref = /\blink\b[^\n]*\[ref=([^\]]+)\]/i.exec(snapshot)?.[1]
+          ?? /\[ref=([^\]]+)\][^\n]*\blink\b/i.exec(snapshot)?.[1];
+        if (!ref || !sessionId) throw new Error('browser snapshot did not expose a link reference');
+        const clicked = await callTool(client, 'web_browser', { session_id: sessionId, actions: [{ type: 'click', ref, element: 'link' }, { type: 'snapshot' }] });
+        const closed = await closeBrowserSession(client, sessionId);
+        return { payload: { initial: initial.payload, clicked: clicked.payload, closed: closed.payload.closed === true }, total_ms: initial.total_ms + clicked.total_ms + closed.total_ms, first_valid_result_ms: initial.first_valid_result_ms, stages_ms: { navigate_snapshot_ms: initial.total_ms, click_snapshot_ms: clicked.total_ms, close_ms: closed.total_ms } };
+      } finally {
+        if (sessionId && lifecycle.browserSessions.has(sessionId) && !lifecycle.controller.signal.aborted) {
+          await closeBrowserSession(client, sessionId).catch(error => cleanupErrors.push(errorInfo(error)));
+        }
+      }
     }, quality: payload => assertQuality([{ name: 'snapshot-and-click-completed', passed: payload.clicked?.outputs?.length > 0 }, { name: 'browser-evidence', passed: Boolean(payload.initial?.url && payload.initial?.source?.host && payload.initial?.retrieved_at && payload.initial?.temporal_evidence?.some(record => record.kind === 'retrieved_at')) }, { name: 'session-closed', passed: payload.closed === true }]) });
     for (const output of ['screenshot', 'pdf']) await runCase(cases, artifacts, { id: `read-${output}`, name: `Rendered ${output}`, category: 'artifact', dimension: 'connectivity', retry: true, tool: 'web_read', run: async () => { const result = await callTool(client, 'web_read', { url: samples.static.url, render: 'always', output }); const artifact = artifactFrom(result.payload, output, `read-${output}`); if (!artifact) throw new Error(`missing ${output} artifact`); return { ...result, artifact }; }, quality: (_payload, outcome) => assertQuality([{ name: 'non-empty-artifact', passed: Number(outcome.artifact?.bytes) > 100 }]) });
-    await runCase(cases, artifacts, { id: 'gateway-health', name: 'Authenticated gateway health', category: 'health', tool: 'health', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz'), { headers: { authorization: `Bearer ${token}` } }); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }]) });
-    await runCase(cases, artifacts, { id: 'gateway-ready', name: 'Dependency readiness', category: 'health', tool: 'ready', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/readyz'), { headers: { authorization: `Bearer ${token}` } }); const body = await response.json(); const totalMs = elapsed(start); return { payload: { status: response.status, body }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }, { name: 'all-dependencies-ready', passed: payload.body?.ok === true && (payload.body.dependencies ?? []).every(item => item.ok === true) }]) });
-    await runCase(cases, artifacts, { id: 'eval-api-auth', name: 'Evaluation API rejects missing token', category: 'security', expectation: 'expected_security', tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/api/evals')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
-    await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
+    await runCase(cases, artifacts, { id: 'gateway-health', name: 'Authenticated gateway health', category: 'health', tool: 'health', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/healthz'), { headers: { authorization: `Bearer ${token}` } }); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }]) });
+    await runCase(cases, artifacts, { id: 'gateway-ready', name: 'Dependency readiness', category: 'health', tool: 'ready', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/readyz'), { headers: { authorization: `Bearer ${token}` } }); const body = await response.json(); const totalMs = elapsed(start); return { payload: { status: response.status, body }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }, { name: 'all-dependencies-ready', passed: payload.body?.ok === true && (payload.body.dependencies ?? []).every(item => item.ok === true) }]) });
+    await runCase(cases, artifacts, { id: 'eval-api-auth', name: 'Evaluation API rejects missing token', category: 'security', expectation: 'expected_security', tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/api/evals')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
+    await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
     await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', expectation: 'expected_security', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.loopback_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); const payload = result.structuredContent ?? parseToolResult(result); return { payload: { blocked: result.isError === true, blocked_reason: payload.blocked_reason, error_kind: payload.error?.kind }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'blocked', passed: payload.blocked === true }, { name: 'ssrf-reason', passed: payload.blocked_reason === 'non_public_address' }]) });
     if (suite === 'release') {
       const baseline = cases.find(item => item.id === 'read-static')?.total_ms ?? 1;
@@ -159,19 +266,58 @@ async function main() {
       await runCase(cases, artifacts, { id: 'ssrf-redirect', name: 'Private redirect target is rejected', category: 'security', expectation: 'expected_security', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.redirect_to_loopback_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); const payload = result.structuredContent ?? parseToolResult(result); return { payload: { blocked: result.isError === true, blocked_reason: payload.blocked_reason, error_kind: payload.error?.kind }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'blocked', passed: payload.blocked === true }, { name: 'redirect-reason', passed: payload.blocked_reason === 'non_public_address' }]) });
       await runCase(cases, artifacts, { id: 'read-timeout', name: 'Slow upstream request times out', category: 'timeout', expectation: 'expected_timeout', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.slow_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); const payload = result.structuredContent ?? parseToolResult(result); return { payload: { timed_out: result.isError === true, error_kind: payload.error?.kind }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, errorQuality: payload => assertQuality([{ name: 'timed-out', passed: payload?.error?.kind === 'upstream_timeout' || payload?.error?.kind === 'egress_timeout' }, { name: 'timeout-reason', passed: ['upstream_timeout', 'egress_timeout'].includes(payload?.error?.kind) }]) });
     }
-  } finally { clearInterval(resourceTimer); await client.close().catch(() => {}); await transport.close().catch(() => {}); }
+      lifecycle.controller.signal.throwIfAborted();
+      resourceEnd = await resourceSnapshot(); resourceSamples.push(resourceEnd);
+      lifecycle.controller.signal.throwIfAborted();
+      completed = true;
+    }, lifecycle.budgetMs);
+  } catch (error) {
+    failure = errorInfo(error);
+    console.error(`Evaluation failed: ${failure.kind}: ${failure.message}`);
+  } finally {
+    clearInterval(resourceTimer);
+    lifecycle.stop();
+    await lifecycle.run('cleanup', async signal => {
+      lifecycle.networkSignal = signal;
+      try {
+        const client = lifecycle.connections[0]?.client;
+        // Reserve half of cleanup for MCP termination even if browser close stalls.
+        if (client) await Promise.all([...lifecycle.browserSessions].map(sessionId => closeBrowserSession(client, sessionId, signal, cleanupBudgetMs / 2).catch(error => cleanupErrors.push(errorInfo(error)))));
+        signal.throwIfAborted();
+        await Promise.all(lifecycle.connections.map(({ transport }) => terminateMcpSession(transport, signal).catch(error => cleanupErrors.push(errorInfo(error)))));
+      } finally {
+        await Promise.all(lifecycle.connections.flatMap(({ client, transport }) => [
+          client.close().catch(error => cleanupErrors.push(errorInfo(error))),
+          transport.close().catch(error => cleanupErrors.push(errorInfo(error))),
+        ]));
+      }
+    }, cleanupBudgetMs, null).catch(error => cleanupErrors.push(errorInfo(error)));
+  }
   const completedAt = new Date(); const summary = summarizeCases(cases);
-  const resourceEnd = await resourceSnapshot(); resourceSamples.push(resourceEnd);
-  const status = evaluationStatus(cases);
+  const status = !completed || failure || cleanupErrors.length ? 'failed' : evaluationStatus(cases);
   const proxyRestartsStart = resourceStart['web-access-egress-proxy.service']?.restarts ?? 0;
   const proxyRestartsEnd = resourceEnd['web-access-egress-proxy.service']?.restarts ?? 0;
-  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, status, thresholds: suite === 'smoke' ? { success_rate_pct: 100, quality_rate_pct: 100 } : { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
-  await fs.mkdir(reportDirectory, { recursive: true, mode: 0o750 });
-  await pruneExpiredReports(reportDirectory);
+  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, status, lifecycle: { completed, deadline_ms: lifecycle.budgetMs, cleanup_tolerance_ms: cleanupBudgetMs, report_tolerance_ms: reportBudgetMs, ...(failure ? { error: failure } : {}), cleanup_errors: cleanupErrors }, thresholds: suite === 'smoke' ? { success_rate_pct: 100, quality_rate_pct: 100 } : { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
+  if (report.status === 'failed') process.exitCode = 1;
   const reportPath = path.join(reportDirectory, `${runId}.json`); const temporaryPath = `${reportPath}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o640 });
-  await fs.chmod(temporaryPath, 0o644);
-  await fs.rename(temporaryPath, reportPath);
-  console.log(reportPath); if (report.status === 'failed') process.exitCode = 1;
+  try {
+    await lifecycle.run('report publication', async signal => {
+      await fs.mkdir(reportDirectory, { recursive: true, mode: 0o750 });
+      signal.throwIfAborted();
+      await pruneExpiredReports(reportDirectory);
+      signal.throwIfAborted();
+      await fs.writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o640, signal });
+      signal.throwIfAborted();
+      await fs.chmod(temporaryPath, 0o644);
+      signal.throwIfAborted();
+      await fs.rename(temporaryPath, reportPath);
+    }, reportBudgetMs - 250, null);
+    console.log(reportPath);
+  } catch (error) {
+    process.exitCode = 1;
+    const diagnostic = errorInfo(error);
+    console.error(`Report publication failed: ${diagnostic.kind}: ${diagnostic.message}`);
+    await lifecycle.run('temporary report cleanup', () => fs.unlink(temporaryPath).catch(() => {}), 250, null).catch(() => {});
+  }
 }
-main().catch(error => { console.error(error.stack ?? error); process.exitCode = 1; });
+main().catch(error => { lifecycle.stop(); const diagnostic = errorInfo(error); console.error(`Evaluation failed: ${diagnostic.kind}: ${diagnostic.message}`); process.exitCode = 1; });

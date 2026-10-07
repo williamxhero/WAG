@@ -45,7 +45,7 @@ async function fixture(t, handler) {
   return { root, url, requests, sockets, server };
 }
 
-async function runEvaluator(t, fixture, overrides = {}, nodeArgs = []) {
+async function runEvaluator(t, fixture, overrides = {}, nodeArgs = [], expectedCode = 1) {
   const started = performance.now();
   const child = spawn(process.execPath, [...nodeArgs, path.join(moduleDir, 'eval-runner.mjs'), 'smoke'], {
     cwd: moduleDir,
@@ -59,7 +59,7 @@ async function runEvaluator(t, fixture, overrides = {}, nodeArgs = []) {
   const timer = setTimeout(() => { killed = true; child.kill(); }, externalBoundMs);
   const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); }).finally(() => clearTimeout(timer));
   assert.equal(killed, false, `evaluator required external termination: ${stderr}`);
-  assert.equal(code, 1, `non-passing evaluator must exit 1: ${stdout}\n${stderr}`);
+  assert.equal(code, expectedCode, `unexpected evaluator exit: ${stdout}\n${stderr}`);
   assert.doesNotMatch(stderr, /termination guard expired/, 'abort/cleanup should permit natural exit without the last-resort guard');
   assert.ok(performance.now() - started < externalBoundMs);
   const names = await fs.readdir(path.join(fixture.root, 'reports')).catch(() => []);
@@ -67,6 +67,33 @@ async function runEvaluator(t, fixture, overrides = {}, nodeArgs = []) {
   const report = reportName ? JSON.parse(await fs.readFile(path.join(fixture.root, 'reports', reportName), 'utf8')) : null;
   return { report, stderr, stdout };
 }
+
+test('completed offline smoke retains a passed report and releases owned sessions', async t => {
+  const retrievedAt = '2026-10-07T00:00:00Z';
+  const page = url => ({ url, source: { url, host: new URL(url).host }, retrieved_at: retrievedAt, temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }], http_status: 200, content_type: 'text/html', bytes: 100, content_hash: 'a'.repeat(64), title: 'Example Domain', markdown: 'Quotes to Scrape. A controlled offline page with enough evidence text for extraction quality.' });
+  const f = await fixture(t, (_request, response, message) => {
+    if (message?.method !== 'tools/call') return false;
+    const { name, arguments: args } = message.params;
+    let payload; let isError = false;
+    if (name === 'web_search') payload = { results: [page('https://searxng.org/')] };
+    else if (name === 'web_browser') {
+      payload = args.actions[0].type === 'close' ? { closed: true } : { ...page('https://example.com/'), session_id: 'happy-browser', outputs: [{ content: [{ type: 'text', text: '- link "fixture" [ref=e1]' }] }] };
+    } else if (args.url.startsWith('http://127.0.0.1')) {
+      isError = true;
+      payload = { blocked_reason: 'non_public_address', error: { kind: 'ssrf_blocked', message: 'non_public_address' } };
+    } else if (['screenshot', 'pdf'].includes(args.output)) {
+      payload = { artifact: { id: `2026-10-07/123e4567-e89b-12d3-a456-426614174000.${args.output === 'pdf' ? 'pdf' : 'png'}`, bytes: 200 } };
+    } else payload = page(args.url);
+    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: JSON.stringify(payload) }], isError } }));
+    return true;
+  });
+  const { report, stderr } = await runEvaluator(t, f, {}, [], 0);
+  assert.equal(report?.status, 'passed');
+  assert.equal(report?.lifecycle?.completed, true);
+  assert.deepEqual(report?.lifecycle?.cleanup_errors, []);
+  assert.equal(stderr, '');
+  assert.ok(f.requests.some(request => request.method === 'DELETE'));
+});
 
 test('unreachable gateway publishes a failed startup report and exits without hanging', async t => {
   const f = await fixture(t);

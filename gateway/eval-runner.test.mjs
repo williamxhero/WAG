@@ -143,6 +143,26 @@ test('connectivity-only command exits nonzero even when configured gates permit 
   assert.equal(report.thresholds.success_rate_pct, 90);
 });
 
+test('a recovered connectivity deadline still breaches the configured command timeout gate', async t => {
+  let searchCalls = 0;
+  const f = await passingFixture(t, (_request, response, message) => {
+    if (message?.params?.name !== 'web_search' || ++searchCalls !== 1) return false;
+    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id,
+      result: { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { kind: 'egress_timeout', message: 'origin timed out' } }) }] } }));
+    return true;
+  });
+  const { report } = await runEvaluator(t, f, await samplesWithThresholds(f, { timeout_rate_pct: 2 }));
+  const recovered = report.cases.find(item => item.id === 'search-public');
+  assert.equal(recovered.status, 'passed');
+  assert.equal(recovered.attempts, 2);
+  assert.equal(recovered.first_error, 'origin timed out');
+  assert.equal(recovered.attempt_outcomes[0].error.kind, 'egress_timeout');
+  assert.equal(report.summary.success_rate_pct, 100);
+  assert.equal(report.summary.timeout_cases, 1);
+  assert.equal(report.gates.timeout_rate_pct.value, 12.5);
+  assert.deepEqual(report.failing_gates, ['timeout_rate_pct']);
+});
+
 test('release command rejects concurrency based on a failed static-read baseline', async t => {
   let staticReads = 0;
   const f = await passingFixture(t, (_request, response, message) => {
@@ -393,6 +413,25 @@ test('startup diagnostics redact credentials echoed by a failed dependency', asy
   assert.ok(report?.lifecycle?.error?.message.includes('upstream failed'));
   assert.ok(!JSON.stringify(report).includes(credential));
   assert.ok(!stderr.includes(credential));
+});
+
+test('case diagnostics redact a credential crossing the truncation boundary before publication', async t => {
+  const credential = 'SYNTHETIC_GW_CREDENTIAL_'.padEnd(64, 'z');
+  const f = await passingFixture(t, (_request, response, message) => {
+    if (message?.params?.name !== 'web_search') return false;
+    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+      jsonrpc: '2.0', id: message.id, result: { isError: true, content: [{ type: 'text', text: JSON.stringify({
+        error: { kind: 'fixture', message: `${'x'.repeat(480)}${credential}` },
+      }) }] },
+    }));
+    return true;
+  });
+  const { report, stderr } = await runEvaluator(t, f, { GATEWAY_TOKEN: credential });
+  const search = report.cases.find(item => item.id === 'search-public');
+  assert.equal(search.status, 'failed');
+  assert.match(search.error.message, /\[redacted\]/);
+  assert.ok(search.error.message.length <= 500);
+  assert.ok(!(JSON.stringify(report) + stderr).includes(credential.slice(0, 20)));
 });
 
 test('fatal setup failures produce failed reports before connecting', async t => {

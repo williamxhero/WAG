@@ -192,6 +192,7 @@ async function runCase(cases, artifacts, definition) {
   lifecycle.controller.signal.throwIfAborted();
   const record = await evaluateCase({
     ...definition,
+    sanitizeMessage: message => errorInfo({ message }).message,
     run: async () => {
       lifecycle.controller.signal.throwIfAborted();
       const outcome = await lifecycle.run(`case ${definition.id}`, () => definition.run(), definition.category === 'browser' ? 3 * operationBudgetMs : operationBudgetMs);

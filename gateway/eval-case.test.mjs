@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { evaluateCase } from './eval-case.mjs';
+import { evaluateGates, summarizeCases } from './eval-core.mjs';
 
 test('security negatives require the precise reason or HTTP rejection on both error paths', async () => {
   for (const thrown of [false, true]) {
@@ -101,6 +102,35 @@ test('availability quality retries and persistent deadline failures preserve exi
   assert.equal(failure.status, 'failed');
   assert.equal(failure.quality.passed, false);
   assert.equal(failure.error.kind, 'egress_timeout');
+});
+
+test('recovered typed deadlines remain measured once per eligible case and fail the timeout gate', async () => {
+  for (const kind of ['egress_timeout', 'upstream_timeout']) {
+    for (const thrown of [false, true]) {
+      let attempts = 0;
+      const record = await evaluateCase({ id: 'recovered', retry: true, run: async () => {
+        if (++attempts < 3) {
+          const error = { kind, message: 'origin timed out' };
+          if (thrown) throw Object.assign(new Error(error.message), error);
+          return { payload: { error } };
+        }
+        return { payload: { ok: true }, total_ms: 10 };
+      } });
+      assert.equal(record.status, 'passed');
+      assert.equal(record.attempts, 3);
+      assert.equal(record.first_error, 'origin timed out');
+      const negative = await evaluateCase({ ...timeoutCase, run: async () => ({ payload: { error: { kind } } }) });
+      const summary = summarizeCases([record, negative]);
+      assert.equal(summary.passed_cases, 2);
+      assert.equal(summary.timeout_eligible_cases, 1);
+      assert.equal(summary.timeout_cases, 1, 'repeated attempts count the affected case once');
+      assert.equal(summary.timeout_rate_pct, 100);
+      const gates = evaluateGates([record, negative], { suite: 'smoke', thresholds: { timeout_rate_pct: 2 } });
+      assert.equal(gates.status, 'failed');
+      assert.deepEqual(gates.failing_gates, ['timeout_rate_pct']);
+      assert.deepEqual(record.attempt_outcomes.map(item => item.error?.kind ?? null), [kind, kind, null]);
+    }
+  }
 });
 
 const timeoutCase = {

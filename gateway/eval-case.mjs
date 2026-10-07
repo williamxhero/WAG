@@ -1,9 +1,10 @@
 import { deadlineKind, runWithRetries } from './eval-core.mjs';
 
-export function evaluationErrorInfo(error) {
+export function evaluationErrorInfo(error, sanitizeMessage = message => message) {
   const payload = error?.payload ?? error;
   const detail = payload?.error ?? error;
-  const message = String(detail?.message ?? error?.message ?? error ?? 'unknown failure');
+  // Sanitization must see the whole credential before a diagnostic is bounded.
+  const message = sanitizeMessage(String(detail?.message ?? error?.message ?? error ?? 'unknown failure'));
   return {
     kind: deadlineKind(error) ?? detail?.kind ?? 'request',
     message: message.slice(0, 500),
@@ -31,6 +32,7 @@ export async function evaluateCase(definition) {
   const started = performance.now();
   const elapsed = () => Math.round(performance.now() - started);
   const negative = (definition.expectation ?? 'availability') !== 'availability';
+  const errorInfo = error => evaluationErrorInfo(error, definition.sanitizeMessage);
   const base = {
     id: definition.id, name: definition.name, category: definition.category,
     dimension: definition.dimension ?? 'core', expectation: definition.expectation ?? 'availability',
@@ -44,11 +46,11 @@ export async function evaluateCase(definition) {
         outcome = await definition.run();
         const httpStatus = outcome.payload?.http_status ?? outcome.payload?.status;
         if (outcome.payload?.error || outcome.isError === true || Number(httpStatus) >= 400) {
-          error = evaluationErrorInfo({ ...outcome.payload, ...(httpStatus != null ? { http_status: httpStatus } : {}) });
+          error = errorInfo({ ...outcome.payload, ...(httpStatus != null ? { http_status: httpStatus } : {}) });
         }
       } catch (caught) {
         if (!negative) throw caught;
-        error = evaluationErrorInfo(caught);
+        error = errorInfo(caught);
         outcome = { payload: caught.payload ?? {}, total_ms: elapsed() };
       }
       if (error && !negative) throw Object.assign(new Error(error.message), { ...error });
@@ -65,6 +67,7 @@ export async function evaluateCase(definition) {
     const status = quality.passed ? 'passed' : 'failed';
     return {
       ...base, status, attempts: attempted.attempts, degraded: attempted.degraded,
+      attempt_outcomes: attempted.attempt_outcomes,
       ...(attempted.first_error ? { first_error: attempted.first_error } : {}),
       total_ms: outcome.total_ms ?? elapsed(),
       first_valid_result_ms: negative && status !== 'passed' ? null : outcome.first_valid_result_ms ?? outcome.total_ms ?? elapsed(),
@@ -76,10 +79,11 @@ export async function evaluateCase(definition) {
   } catch (error) {
     return {
       ...base, status: 'failed', attempts: error.attempts ?? 1,
+      attempt_outcomes: error.attempt_outcomes,
       ...(error.first_error ? { first_error: error.first_error } : {}),
       total_ms: elapsed(), first_valid_result_ms: null, stages_ms: {},
       quality: qualityResult([{ name: 'request-completed', passed: false }]),
-      error: evaluationErrorInfo(error),
+      error: errorInfo(error),
     };
   }
 }

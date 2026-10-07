@@ -80,7 +80,8 @@ test('transient failures retry with visible attempt evidence', async () => {
     if (calls === 1) throw new Error('read ECONNRESET');
     return { value: 'ok' };
   }, { delayMs: 0 });
-  assert.deepEqual(result, { value: 'ok', attempts: 2, degraded: true, first_error: 'read ECONNRESET' });
+  assert.deepEqual(result, { value: 'ok', attempts: 2, degraded: true, first_error: 'read ECONNRESET',
+    attempt_outcomes: [{ attempt: 1, status: 'failed', error: { kind: 'request' } }, { attempt: 2, status: 'passed' }] });
   assert.equal(classifyTransientFailure(new Error('unauthorized')), false);
 });
 

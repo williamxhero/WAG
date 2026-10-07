@@ -31,17 +31,24 @@ export async function runWithRetries(operation, options = {}) {
   const shouldRetryError = options.shouldRetryError ?? classifyTransientFailure;
   const shouldRetryResult = options.shouldRetryResult ?? (() => false);
   let firstError = null;
+  const attemptOutcomes = [];
+  const errorOutcome = error => ({ kind: deadlineKind(error) ?? error?.kind ?? 'request' });
   for (let attempts = 1; attempts <= maximumAttempts; attempts++) {
     try {
       const result = await operation(attempts);
+      attemptOutcomes.push({ attempt: attempts, status: result.quality?.passed === false ? 'failed' : 'passed',
+        ...(result.error ? { error: errorOutcome(result.error) } : {}) });
       if (attempts < maximumAttempts && shouldRetryResult(result)) {
         firstError ??= options.resultError?.(result) ?? 'transient result failure';
       } else {
-        return { ...result, attempts, degraded: attempts > 1, ...(firstError ? { first_error: firstError } : {}) };
+        return { ...result, attempts, degraded: attempts > 1, attempt_outcomes: attemptOutcomes,
+          ...(firstError ? { first_error: firstError } : {}) };
       }
     } catch (error) {
+      attemptOutcomes.push({ attempt: attempts, status: 'failed', error: errorOutcome(error) });
       firstError ??= String(error?.message ?? error);
       if (attempts === maximumAttempts || !shouldRetryError(error)) {
+        error.attempt_outcomes = attemptOutcomes;
         error.attempts = attempts;
         error.first_error = firstError;
         throw error;
@@ -78,7 +85,10 @@ export function summarizeCases(cases) {
   const passed = cases.filter(item => item.status === 'passed').length;
   const qualityPassed = cases.filter(item => item.quality?.passed === true).length;
   const availability = cases.filter(item => (item.expectation ?? 'availability') === 'availability');
-  const timedOut = availability.filter(item => deadlineKind(item.error) !== null).length;
+  // A recovered request is still timeout-affected; retries do not erase deadlines.
+  // Count cases, not attempts, and keep deliberate negative proofs excluded.
+  const timedOut = availability.filter(item => deadlineKind(item.error) !== null ||
+    Array.isArray(item.attempt_outcomes) && item.attempt_outcomes.some(attempt => deadlineKind(attempt.error) !== null)).length;
   const expected = cases.filter(item => (item.expectation ?? 'availability') !== 'availability');
   const availabilityPassed = availability.filter(item => item.status === 'passed').length;
   const expectedPassed = expected.filter(item => item.status === 'passed').length;

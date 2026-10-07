@@ -29,6 +29,7 @@ const cfg = Object.freeze({
   bindHost: process.env.GATEWAY_BIND_HOST ?? process.env.GATEWAY_HOST ?? 'yosef-server',
   port: Number(process.env.GATEWAY_PORT ?? 8930),
   token: process.env.GATEWAY_TOKEN ?? '',
+  allowAnonymous: process.env.GATEWAY_ALLOW_ANONYMOUS === '1',
   crawlUrl: process.env.CRAWL4AI_URL ?? 'http://127.0.0.1:11235',
   crawlToken: process.env.CRAWL4AI_TOKEN ?? '',
   searxUrl: process.env.SEARXNG_URL ?? 'http://yosef-server:8801',
@@ -48,7 +49,8 @@ const cfg = Object.freeze({
   allowedHosts: (process.env.GATEWAY_ALLOWED_HOSTS ?? 'yosef-server').split(',').map(v => v.trim()),
 });
 
-if (cfg.token.length < 32) throw new Error('GATEWAY_TOKEN must be at least 32 characters');
+if (!['0', '1'].includes(process.env.GATEWAY_ALLOW_ANONYMOUS ?? '0')) throw new Error('GATEWAY_ALLOW_ANONYMOUS must be unset, 0 or 1');
+if (!cfg.allowAnonymous && cfg.token.length < 32) throw new Error('GATEWAY_TOKEN must be at least 32 characters');
 if (!Number.isSafeInteger(cfg.crawlResponseMaxBytes) || cfg.crawlResponseMaxBytes <= 0) throw new Error('CRAWL4AI_RESPONSE_MAX_BYTES must be a positive safe integer');
 if (!Number.isSafeInteger(cfg.artifactMaxBytes) || cfg.artifactMaxBytes <= 0) throw new Error('ARTIFACT_MAX_BYTES must be a positive safe integer');
 
@@ -83,9 +85,11 @@ function rejectError(message, kind, extra = {}) {
   return error;
 }
 const requireToken = (req, res, next) => {
-  const match = /^Bearer\s+(.+)$/i.exec(req.get('authorization') ?? '');
-  if (!match || !tokenEqual(match[1])) return res.status(401).json({ error: 'unauthorized' });
-  const key = crypto.createHash('sha256').update(match[1]).digest('hex').slice(0, 16);
+  const authorization = req.get('authorization');
+  const anonymous = cfg.allowAnonymous && authorization === undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(authorization ?? '');
+  if (!anonymous && (!match || !tokenEqual(match[1]))) return res.status(401).json({ error: 'unauthorized' });
+  const key = cfg.allowAnonymous ? req.socket.remoteAddress : crypto.createHash('sha256').update(match[1]).digest('hex').slice(0, 16);
   const now = Date.now();
   const recent = (tokenRequests.get(key) ?? []).filter(value => value > now - cfg.tokenRateWindowMs);
   if (recent.length >= cfg.tokenRateLimit) {
@@ -729,4 +733,7 @@ app.post('/mcp', async (req, res) => {
   catch (error) { console.error(error); if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'internal server error' }, id: null }); }
 });
 app.all('/mcp', (_req, res) => res.status(405).json({ error: 'method not allowed' }));
-app.listen(cfg.port, cfg.bindHost, () => console.log(`web-access-gateway listening on ${cfg.host}:${cfg.port}`));
+app.listen(cfg.port, cfg.bindHost, () => {
+  if (cfg.allowAnonymous) console.warn('WARNING: GATEWAY_ALLOW_ANONYMOUS=1 — gateway is running WITHOUT authentication.');
+  console.log(`web-access-gateway listening on ${cfg.host}:${cfg.port}`);
+});

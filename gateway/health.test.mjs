@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { createReadiness } from './readiness.mjs';
+import { waitForListening } from './test-fixtures/wait-for-listening.mjs';
 
 const token = 'offline-gateway-token-'.repeat(3);
 const crawlToken = 'offline-crawler-secret-'.repeat(3);
@@ -17,7 +18,7 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false } = {}) {
+async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, env = {} } = {}) {
   const counts = { search: 0, crawler: 0, crawl: 0 };
   const backend = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
@@ -47,7 +48,7 @@ async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, i
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(import.meta.dirname, 'server.mjs')], {
-    env: { ...process.env, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1', GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(port), GATEWAY_TOKEN: token, CRAWL4AI_TOKEN: crawlToken, CRAWL4AI_URL: backendUrl, SEARXNG_URL: backendUrl, PLAYWRIGHT_MCP_URL: `${backendUrl}/mcp`, EGRESS_PROXY: proxyUrl },
+    env: { ...process.env, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1', GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(port), GATEWAY_TOKEN: token, GATEWAY_ALLOW_ANONYMOUS: undefined, CRAWL4AI_TOKEN: crawlToken, CRAWL4AI_URL: backendUrl, SEARXNG_URL: backendUrl, PLAYWRIGHT_MCP_URL: `${backendUrl}/mcp`, EGRESS_PROXY: proxyUrl, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -64,11 +65,8 @@ async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, i
   });
   const base = `http://127.0.0.1:${port}`;
   const request = (route, authenticated = true) => fetch(`${base}${route}`, { headers: authenticated ? { authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(8000) });
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try { await request('/healthz'); return { request, counts, proxyState }; }
-    catch { if (child.exitCode !== null) throw new Error(`Gateway exited: ${logs}`); await new Promise(resolve => setTimeout(resolve, 25)); }
-  }
-  throw new Error(`Gateway did not start: ${logs}`);
+  await waitForListening(child);
+  return { base, request, counts, proxyState, logs: () => logs };
 }
 
 test('gateway rejects empty search even when the backend returns HTTP 200', async t => {
@@ -93,6 +91,85 @@ test('gateway liveness is authenticated and does not evaluate dependencies', asy
   assert.equal(first.core_ok, true);
   assert.equal(first.status, 'degraded'); // Only the offline public-egress fixture fails.
   assert.deepEqual(counts, { search: 1, crawler: 1, crawl: 0 });
+});
+
+test('default and explicit authenticated modes retain token validation and authorization', async t => {
+  for (const flag of [undefined, '0']) {
+    await t.test(flag === undefined ? 'unset' : flag, async t => {
+      for (const value of [undefined, 'short']) {
+        await t.test(value === undefined ? 'missing token' : 'short token', async t => {
+          await assert.rejects(gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: flag, GATEWAY_TOKEN: value } }), /GATEWAY_TOKEN must be at least 32 characters/);
+        });
+      }
+      const { base, request, logs } = await gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: flag } });
+      assert.equal((await request('/readyz', false)).status, 401);
+      const wrong = await fetch(`${base}/healthz`, { headers: { authorization: 'Bearer wrong' }, signal: AbortSignal.timeout(8000) });
+      assert.equal(wrong.status, 401);
+      assert.equal((await request('/healthz')).status, 200);
+      assert.ok(!logs().includes('WITHOUT authentication'));
+    });
+  }
+});
+
+test('gateway rejects anonymous flag values other than unset, 0 or 1', async t => {
+  for (const value of ['', 'true', '2']) {
+    await t.test(JSON.stringify(value), async t => {
+      await assert.rejects(gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: value } }), /GATEWAY_ALLOW_ANONYMOUS must be unset, 0 or 1/);
+    });
+  }
+});
+
+test('anonymous gateway starts without a token and serves unauthenticated readiness', async t => {
+  const { request } = await gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: '1', GATEWAY_TOKEN: undefined } });
+  const response = await request('/readyz', false);
+  assert.equal(response.status, 503); // The offline egress fixture makes readiness degraded.
+  const readiness = await response.json();
+  assert.equal(readiness.core_ok, true);
+  assert.equal(readiness.status, 'degraded');
+});
+
+test('anonymous gateway accepts empty and short tokens but rejects incorrect authorization', async t => {
+  for (const value of [undefined, '', 'short', token]) {
+    await t.test(value === undefined ? 'missing token' : value === '' ? 'empty token' : value === token ? 'valid token' : 'short token', async t => {
+      const { base, request } = await gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: '1', GATEWAY_TOKEN: value } });
+      assert.equal((await request('/healthz', false)).status, 200);
+      for (const authorization of ['Bearer wrong', 'Basic wrong', 'Bearer', '']) {
+        const response = await fetch(`${base}/healthz`, { headers: { authorization }, signal: AbortSignal.timeout(8000) });
+        assert.equal(response.status, 401, JSON.stringify(authorization));
+        assert.deepEqual(await response.json(), { error: 'unauthorized' });
+      }
+      if (value) {
+        const response = await fetch(`${base}/healthz`, { headers: { authorization: `Bearer ${value}` }, signal: AbortSignal.timeout(8000) });
+        assert.equal(response.status, 200);
+      }
+    });
+  }
+});
+
+test('anonymous gateway rate limits the client address even with changing forwarding or authorization headers', async t => {
+  for (const value of [undefined, token]) {
+    await t.test(value === undefined ? 'missing token' : 'configured token', async t => {
+      const { base } = await gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: '1', GATEWAY_TOKEN: value, GATEWAY_TOKEN_RATE_LIMIT: '2', GATEWAY_TOKEN_RATE_WINDOW_MS: '60000' } });
+      const request = headers => fetch(`${base}/healthz`, { headers, signal: AbortSignal.timeout(8000) });
+      assert.equal((await request({ authorization: 'Bearer wrong' })).status, 401);
+      assert.equal((await request({ 'x-forwarded-for': '192.0.2.1' })).status, 200);
+      assert.equal((await request({ 'x-forwarded-for': '192.0.2.2', ...(value ? { authorization: `Bearer ${value}` } : {}) })).status, 200);
+      const response = await request({ 'x-forwarded-for': '192.0.2.3' });
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get('retry-after'), '60');
+      assert.deepEqual(await response.json(), { error: 'rate limit exceeded', blocked_reason: 'token_rate_limit' });
+      assert.equal((await request({ authorization: 'Bearer wrong' })).status, 401);
+    });
+  }
+});
+
+test('anonymous gateway emits exactly one prominent startup warning', async t => {
+  const { request, logs } = await gatewayFixture(t, { env: { GATEWAY_ALLOW_ANONYMOUS: '1' } });
+  await request('/healthz', false);
+  await request('/healthz', false);
+  const warnings = logs().split('\n').filter(line => line.includes('WITHOUT authentication'));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /WARNING.*GATEWAY_ALLOW_ANONYMOUS=1/);
 });
 
 test('gateway readiness aborts a stalled CONNECT at its bounded deadline and caches the outcome', async t => {

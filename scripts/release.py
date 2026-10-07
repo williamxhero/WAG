@@ -589,7 +589,8 @@ def restore_runtime(tx, state, root, unit_dir, finalize=True):
     errors = []
     for unit in RUNTIME + TIMERS:
         try:
-            run(["systemctl", "stop", unit], "rollback stop")
+            # Exit 5 means the unit is not loaded; other failures still block restoration.
+            run(["systemctl", "stop", unit], "rollback stop", allowed=(0, 5))
         except (ReleaseError, OSError):
             errors.append("service_stop")
     if errors:
@@ -745,7 +746,8 @@ def activation(tx, state, root, unit_dir):
             overlay_command(tx, "apply")
         write_state(tx, state, "activating")
         for unit in RUNTIME + TIMERS:
-            run(["systemctl", "stop", unit], "activation stop")
+            # First deployments may not have every unit installed yet (exit 5).
+            run(["systemctl", "stop", unit], "activation stop", allowed=(0, 5))
         for name in state["obsolete"]:
             remove(root / name)
         for name, item in state["inventory"].items():

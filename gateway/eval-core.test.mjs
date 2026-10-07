@@ -204,6 +204,16 @@ test('historical structured reports retain status with explicit suite threshold 
   assert.deepEqual(normalizeReport({ suite: 'release', health: { ok: true }, private_proxy_status: 403 }).thresholds, { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 });
 });
 
+test('historical report index retains normalized identity and compatibility defaults', () => {
+  const report = normalizeReport({ suite: 'smoke', at: '2026-08-28T01:09:39Z', health: { ok: true }, private_proxy_status: 403 }, 'smoke-20260828T010939Z.json');
+  const summary = publicRunSummary(report);
+  assert.equal(summary.id, 'smoke-20260828T010939Z');
+  assert.equal(summary.completed_at, '2026-08-28T01:09:39Z');
+  assert.equal(summary.status, 'passed');
+  assert.equal(summary.summary.success_rate_pct, 100);
+  assert.equal(summary.legacy, true);
+});
+
 test('only WAG-owned screenshot and PDF identifiers are accepted', () => {
   assert.equal(safeArtifactId('2026-08-28/123e4567-e89b-12d3-a456-426614174000.png'), true);
   assert.equal(safeArtifactId('../secrets/gateway.env'), false);

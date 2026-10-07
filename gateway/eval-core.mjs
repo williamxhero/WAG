@@ -199,7 +199,7 @@ function reportThresholds(raw) {
 }
 
 export function normalizeReport(raw, fileName = '') {
-  if (raw?.schema_version === REPORT_VERSION && Array.isArray(raw.cases)) {
+  if ((raw?.schema_version === REPORT_VERSION || raw?.schema_version === 0 && raw?.legacy === true) && Array.isArray(raw.cases)) {
     return { ...raw, ...reportThresholds(raw), dimensions: raw.dimensions ?? dimensionSummaries(raw.cases) };
   }
   const health = raw?.health ?? {};

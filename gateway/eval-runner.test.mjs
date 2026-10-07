@@ -216,6 +216,19 @@ test('stalled session termination reports cleanup failure without holding the pr
   assert.ok(report?.lifecycle?.cleanup_errors.some(error => error.kind === 'lifecycle_timeout'));
 });
 
+for (const mode of ['stalled', 'failed']) test(`${mode} client close cannot prevent transport teardown or failure reporting`, async t => {
+  const f = await fixture(t);
+  const preload = path.join(f.root, 'client-close.mjs');
+  const sdkClient = pathToFileURL(path.join(moduleDir, 'node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js')).href;
+  await fs.writeFile(preload, `import { Client } from ${JSON.stringify(sdkClient)};
+Client.prototype.close = async () => { ${mode === 'stalled' ? 'await new Promise(() => {});' : "throw new Error('fixture client close failed');"} };
+`);
+  const { report } = await runEvaluator(t, f, {}, ['--import', pathToFileURL(preload).href]);
+  assert.equal(report?.status, 'failed');
+  assert.ok(report?.lifecycle?.cleanup_errors.some(error => mode === 'stalled' ? error.kind === 'lifecycle_timeout' : error.message === 'fixture client close failed'));
+  assert.ok(f.requests.some(request => request.method === 'DELETE'));
+});
+
 test('failed report destination preserves the original startup diagnostic', async t => {
   const f = await fixture(t);
   await new Promise(resolve => f.server.close(resolve));

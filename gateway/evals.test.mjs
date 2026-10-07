@@ -124,6 +124,63 @@ async function viewer(t, f, intercept = (_url, _options, send) => send()) {
   return { window, $, submit, requests, activeURLs, revoked, intervals, errors };
 }
 
+test('dashboard and retained report APIs use each report policy and exact gate results', async t => {
+  const f = await fixture(t);
+  const thresholds = { success_rate_pct: 80, quality_rate_pct: 85, timeout_rate_pct: 7, concurrency_degradation_pct: 25 };
+  const configured = { ...report, status: 'failed', thresholds, summary: { success_rate_pct: 80, quality_rate_pct: 85, timeout_rate_pct: 7 }, cases: [{ id: 'concurrency-two', name: 'Concurrency', status: 'passed', metrics: { degradation_pct: 25 } }], artifacts: [], gates: { success_rate_pct: { passed: false, reason: 'below_minimum' }, quality_rate_pct: { passed: true }, timeout_rate_pct: { passed: true }, concurrency_degradation_pct: { passed: true } }, failing_gates: ['success_rate_pct'], reasons: [{ gate: 'success_rate_pct', reason: 'below_minimum' }] };
+  await fs.writeFile(path.join(f.reports, `${RUN_ID}.json`), JSON.stringify(configured));
+  const list = await (await fetch(f.base + '/api/evals', auth)).json();
+  const detail = await (await fetch(`${f.base}/api/evals/${RUN_ID}`, auth)).json();
+  assert.deepEqual(list.latest.thresholds, thresholds);
+  assert.deepEqual(list.latest.failing_gates, ['success_rate_pct']);
+  assert.deepEqual(list.latest.gates, detail.gates);
+  const ui = await viewer(t, f);
+  ui.submit(TOKEN);
+  await waitFor(() => !ui.$('#content').hidden, 'configured threshold dashboard');
+  const tiles = [...ui.window.document.querySelectorAll('.kpi')];
+  for (const [index, label, tone] of [[1, '≥80%', 'failed'], [2, '≥85%', 'passed'], [5, '≤7%', 'passed'], [6, '≤25%', 'passed']]) {
+    assert.ok(tiles[index].textContent.includes(label), tiles[index].textContent);
+    assert.ok(tiles[index].classList.contains(tone), 'exact reported gate overrides rounded displayed rates');
+  }
+  assert.ok(ui.$('#latest-meta').textContent.includes('success_rate_pct'));
+  assert.ok(ui.$('#latest-meta').textContent.includes('below_minimum'));
+  ui.$('[data-run="smoke-20260828T010939Z"]').click();
+  await waitFor(() => !ui.$('#content').hidden && ui.$('#latest-meta').textContent.includes('兼容旧格式'), 'legacy threshold defaults');
+  assert.ok(ui.$('#latest-meta').textContent.includes('历史默认门限'));
+  assert.ok(ui.$('#kpis').textContent.includes('≥100%'));
+  assert.ok(!ui.$('#kpis').textContent.includes('≤2%'), 'smoke does not invent release-only gates');
+  assert.deepEqual(ui.errors, []);
+});
+
+test('dashboard gate tiles distinguish inclusive boundaries, breaches, and absent measurements', async t => {
+  const f = await fixture(t), ui = await viewer(t, f);
+  const thresholds = { success_rate_pct: 100, quality_rate_pct: 100, timeout_rate_pct: 2, concurrency_degradation_pct: 50 };
+  const boundary = { ...report, thresholds, summary: { success_rate_pct: 100, quality_rate_pct: 100, timeout_rate_pct: 2 }, cases: [{ id: 'concurrency-two', name: 'Concurrency', status: 'passed', metrics: { degradation_pct: 50 } }], artifacts: [] };
+  const show = async value => {
+    await fs.writeFile(path.join(f.reports, `${RUN_ID}.json`), JSON.stringify(value));
+    ui.submit(TOKEN);
+    await waitFor(() => !ui.$('#content').hidden, 'gate tile fixture');
+    return [...ui.window.document.querySelectorAll('.kpi')];
+  };
+  const tiles = await show(boundary);
+  for (const index of [1, 2, 5, 6]) assert.ok(tiles[index].classList.contains('passed'));
+  for (const [index, value] of [
+    [1, { ...boundary, summary: { ...boundary.summary, success_rate_pct: 99.99 } }],
+    [2, { ...boundary, summary: { ...boundary.summary, quality_rate_pct: 99.99 } }],
+    [5, { ...boundary, summary: { ...boundary.summary, timeout_rate_pct: 2.001 } }],
+    [6, { ...boundary, cases: [{ ...boundary.cases[0], metrics: { degradation_pct: 50.001 } }] }],
+    [2, { ...boundary, summary: { ...boundary.summary, quality_rate_pct: null } }],
+    [5, { ...boundary, summary: { ...boundary.summary, timeout_rate_pct: null } }],
+    [6, { ...boundary, cases: [] }],
+    [2, { ...boundary, summary: { ...boundary.summary, quality_rate_pct: 101 } }],
+    [5, { ...boundary, summary: { ...boundary.summary, timeout_rate_pct: -1 } }],
+    [1, { ...boundary, thresholds: { ...thresholds, success_rate_pct: -1 } }],
+  ]) {
+    assert.ok((await show(value))[index].classList.contains('failed'));
+  }
+  assert.deepEqual(ui.errors, []);
+});
+
 test('viewer recovers from 401 and clears protected data on credential replacement and clearing', async t => {
   const f = await fixture(t), ui = await viewer(t, f);
   assert.equal(ui.requests.length, 0, 'public shell does not query protected APIs without explicit entry');

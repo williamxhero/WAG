@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
+import { dimensionSummaries, evaluateGates, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
 import { evaluateCase } from './eval-case.mjs';
 
 const root = process.env.WAG_ROOT ?? '/data/web-access-gateway';
@@ -208,12 +208,15 @@ async function runCase(cases, artifacts, definition) {
 async function main() {
   const cases = []; const artifacts = []; const resourceSamples = [];
   let resourceStart = {}; let resourceEnd = {}; let resourceTimer;
-  let completed = false; let failure;
+  let completed = false; let failure; let thresholds;
+  const expectedCaseIds = ['search-public', 'read-static', 'read-rendered', 'browser-snapshot-click', 'read-screenshot', 'read-pdf', 'gateway-health', 'gateway-ready', 'eval-api-auth', 'auth-required', 'ssrf-loopback', ...(suite === 'release' ? ['concurrency-two', 'ssrf-redirect'] : [])];
   const cleanupErrors = [];
   try {
     await lifecycle.run('evaluation', async () => {
       if (token.length < 32) throw new Error('GATEWAY_TOKEN is required for evaluation');
       const samples = JSON.parse(await fs.readFile(samplePath, { encoding: 'utf8', signal: lifecycle.controller.signal }));
+      if (Object.hasOwn(samples, 'thresholds') && (!samples.thresholds || typeof samples.thresholds !== 'object' || Array.isArray(samples.thresholds))) throw new Error('evaluation thresholds must be an object');
+      thresholds = samples.thresholds;
       lifecycle.controller.signal.throwIfAborted();
       resourceStart = await resourceSnapshot(); resourceSamples.push(resourceStart);
       lifecycle.controller.signal.throwIfAborted();
@@ -252,8 +255,15 @@ async function main() {
     await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
     await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: 'non_public_address' }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.security.loopback_url, render: 'never', output: 'markdown' }) });
     if (suite === 'release') {
-      const baseline = cases.find(item => item.id === 'read-static')?.total_ms ?? 1;
-      await runCase(cases, artifacts, { id: 'concurrency-two', name: 'Two concurrent reads', category: 'concurrency', tool: 'web_read', run: async () => { const start = now(); const [a, b] = await Promise.all([callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' }), callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' })]); const totalMs = elapsed(start); const degradation = Math.round((Math.max(a.total_ms, b.total_ms) / baseline - 1) * 100); return { payload: { both_completed: true, degradation_pct: degradation }, metrics: { degradation_pct: degradation, queue_ms: Math.max(0, totalMs - Math.max(a.total_ms, b.total_ms)) }, total_ms: totalMs, first_valid_result_ms: Math.min(a.first_valid_result_ms, b.first_valid_result_ms), stages_ms: { parallel_wall_ms: totalMs, request_a_ms: a.total_ms, request_b_ms: b.total_ms } }; }, quality: payload => assertQuality([{ name: 'both-completed', passed: payload.both_completed === true }, { name: 'degradation-limit', passed: payload.degradation_pct <= 50 }]) });
+      const baseline = cases.find(item => item.id === 'read-static');
+      await runCase(cases, artifacts, { id: 'concurrency-two', name: 'Two concurrent reads', category: 'concurrency', tool: 'web_read', run: async () => {
+        if (baseline?.status !== 'passed' || !Number.isFinite(baseline.total_ms) || baseline.total_ms <= 0) throw Object.assign(new Error('concurrency requires a successful measured static-read baseline'), { kind: 'invalid_baseline' });
+        const start = now();
+        const [a, b] = await Promise.all([callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' }), callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' })]);
+        const totalMs = elapsed(start);
+        const degradation = (Math.max(a.total_ms, b.total_ms) / baseline.total_ms - 1) * 100;
+        return { payload: { both_completed: true }, metrics: { degradation_pct: degradation, baseline_ms: baseline.total_ms, queue_ms: Math.max(0, totalMs - Math.max(a.total_ms, b.total_ms)) }, total_ms: totalMs, first_valid_result_ms: Math.min(a.first_valid_result_ms, b.first_valid_result_ms), stages_ms: { parallel_wall_ms: totalMs, request_a_ms: a.total_ms, request_b_ms: b.total_ms } };
+      }, quality: payload => assertQuality([{ name: 'both-completed', passed: payload.both_completed === true }]) });
       await runCase(cases, artifacts, { id: 'ssrf-redirect', name: 'Private redirect target is rejected', category: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: 'non_public_address' }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.security.redirect_to_loopback_url, render: 'never', output: 'markdown' }) });
       // Deadline proof is the offline controlled-origin gateway fixture, not a
       // public delay endpoint whose JSON response can fail on content type.
@@ -286,11 +296,11 @@ async function main() {
     }, cleanupBudgetMs, null).catch(error => cleanupErrors.push(errorInfo(error)));
   }
   const completedAt = new Date(); const summary = summarizeCases(cases);
-  const status = !completed || failure || cleanupErrors.length ? 'failed' : evaluationStatus(cases);
+  const policy = evaluateGates(cases, { suite, thresholds, complete: completed && !failure && cleanupErrors.length === 0, expected_case_ids: expectedCaseIds });
   const proxyRestartsStart = resourceStart['web-access-egress-proxy.service']?.restarts ?? 0;
   const proxyRestartsEnd = resourceEnd['web-access-egress-proxy.service']?.restarts ?? 0;
-  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, status, lifecycle: { completed, deadline_ms: lifecycle.budgetMs, cleanup_tolerance_ms: cleanupBudgetMs, report_tolerance_ms: reportBudgetMs, ...(failure ? { error: failure } : {}), cleanup_errors: cleanupErrors }, thresholds: suite === 'smoke' ? { success_rate_pct: 100, quality_rate_pct: 100 } : { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
-  if (report.status === 'failed') process.exitCode = 1;
+  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, ...policy, thresholds_source: 'report', lifecycle: { completed, deadline_ms: lifecycle.budgetMs, cleanup_tolerance_ms: cleanupBudgetMs, report_tolerance_ms: reportBudgetMs, ...(failure ? { error: failure } : {}), cleanup_errors: cleanupErrors }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
+  if (report.status !== 'passed') process.exitCode = 1;
   const reportPath = path.join(reportDirectory, `${runId}.json`); const temporaryPath = `${reportPath}.${crypto.randomUUID()}.tmp`;
   try {
     await lifecycle.run('report publication', async signal => {

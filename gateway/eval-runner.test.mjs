@@ -45,9 +45,9 @@ async function fixture(t, handler) {
   return { root, url, requests, sockets, server };
 }
 
-async function runEvaluator(t, fixture, overrides = {}, nodeArgs = [], expectedCode = 1) {
+async function runEvaluator(t, fixture, overrides = {}, nodeArgs = [], expectedCode = 1, suite = 'smoke') {
   const started = performance.now();
-  const child = spawn(process.execPath, [...nodeArgs, path.join(moduleDir, 'eval-runner.mjs'), 'smoke'], {
+  const child = spawn(process.execPath, [...nodeArgs, path.join(moduleDir, 'eval-runner.mjs'), suite], {
     cwd: moduleDir,
     env: { ...process.env, WAG_ROOT: fixture.root, WAG_EVAL_SAMPLES: path.join(moduleDir, '../eval/samples.json'), GATEWAY_EVAL_URL: fixture.url, GATEWAY_TOKEN: 'offline-test-credential-not-a-secret'.repeat(2), WAG_EVAL_DEADLINE_MS: '5000', ...overrides },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -68,17 +68,18 @@ async function runEvaluator(t, fixture, overrides = {}, nodeArgs = [], expectedC
   return { report, stderr, stdout };
 }
 
-test('completed offline smoke retains a passed report and releases owned sessions', async t => {
+async function passingFixture(t, handler) {
   const retrievedAt = '2026-10-07T00:00:00Z';
   const page = url => ({ url, source: { url, host: new URL(url).host }, retrieved_at: retrievedAt, temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }], http_status: 200, content_type: 'text/html', bytes: 100, content_hash: 'a'.repeat(64), title: 'Example Domain', markdown: 'Quotes to Scrape. A controlled offline page with enough evidence text for extraction quality.' });
-  const f = await fixture(t, (_request, response, message) => {
+  const f = await fixture(t, (request, response, message) => {
+    if (handler?.(request, response, message) === true) return true;
     if (message?.method !== 'tools/call') return false;
     const { name, arguments: args } = message.params;
     let payload; let isError = false;
     if (name === 'web_search') payload = { results: [page('https://searxng.org/')] };
     else if (name === 'web_browser') {
       payload = args.actions[0].type === 'close' ? { closed: true } : { ...page('https://example.com/'), session_id: 'happy-browser', outputs: [{ content: [{ type: 'text', text: '- link "fixture" [ref=e1]' }] }] };
-    } else if (args.url.startsWith('http://127.0.0.1')) {
+    } else if (args.url.startsWith('http://127.0.0.1') || args.url.includes('redirect-to?url=')) {
       isError = true;
       payload = { blocked_reason: 'non_public_address', error: { kind: 'ssrf_blocked', message: 'non_public_address' } };
     } else if (['screenshot', 'pdf'].includes(args.output)) {
@@ -87,12 +88,97 @@ test('completed offline smoke retains a passed report and releases owned session
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: JSON.stringify(payload) }], isError } }));
     return true;
   });
+  return f;
+}
+
+test('completed offline smoke retains a passed report and releases owned sessions', async t => {
+  const f = await passingFixture(t);
   const { report, stderr } = await runEvaluator(t, f, {}, [], 0);
   assert.equal(report?.status, 'passed');
   assert.equal(report?.lifecycle?.completed, true);
   assert.deepEqual(report?.lifecycle?.cleanup_errors, []);
   assert.equal(stderr, '');
   assert.ok(f.requests.some(request => request.method === 'DELETE'));
+});
+
+async function samplesWithThresholds(f, thresholds) {
+  const samples = JSON.parse(await fs.readFile(path.join(moduleDir, '../eval/samples.json'), 'utf8'));
+  const sampleFile = path.join(f.root, 'gate-samples.json');
+  await fs.writeFile(sampleFile, JSON.stringify({ ...samples, thresholds }));
+  return { WAG_EVAL_SAMPLES: sampleFile };
+}
+
+function toolError(response, message, kind = 'fixture') {
+  response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: { kind, message: 'offline gate fixture failure' } }) }], isError: true } }));
+  return true;
+}
+
+test('connectivity-only command exits nonzero even when configured gates permit degradation', async t => {
+  const f = await passingFixture(t, (_request, response, message) => message?.params?.name === 'web_search' ? toolError(response, message) : false);
+  const config = await samplesWithThresholds(f, { success_rate_pct: 90, quality_rate_pct: 90 });
+  const { report } = await runEvaluator(t, f, config);
+  assert.equal(report.status, 'degraded');
+  assert.deepEqual(report.failing_gates, []);
+  assert.deepEqual(report.reasons, [{ gate: 'connectivity', reason: 'non_passing_cases', case_ids: ['search-public'] }]);
+  assert.equal(report.thresholds.success_rate_pct, 90);
+});
+
+test('release command rejects concurrency based on a failed static-read baseline', async t => {
+  let staticReads = 0;
+  const f = await passingFixture(t, (_request, response, message) => {
+    const args = message?.params?.arguments;
+    if (message?.params?.name === 'web_read' && args.render === 'never' && args.url === 'https://example.com/') {
+      staticReads++;
+      if (staticReads === 1) return toolError(response, message);
+    }
+    return false;
+  });
+  const config = await samplesWithThresholds(f, { success_rate_pct: 0, quality_rate_pct: 0, concurrency_degradation_pct: 100000 });
+  const { report } = await runEvaluator(t, f, config, [], 1, 'release');
+  assert.equal(report.status, 'failed');
+  assert.equal(report.gates.concurrency_degradation_pct.reason, 'invalid_baseline');
+  assert.equal(report.cases.find(item => item.id === 'concurrency-two').status, 'failed');
+  assert.equal(report.cases.find(item => item.id === 'concurrency-two').error.kind, 'invalid_baseline');
+});
+
+for (const [name, thresholds, failureKind, expectedGate] of [
+  ['default smoke success', undefined, 'fixture', 'success_rate_pct'],
+  ['independent quality', { success_rate_pct: 0, quality_rate_pct: 100 }, 'fixture', 'quality_rate_pct'],
+  ['operational timeout', { success_rate_pct: 0, quality_rate_pct: 0, timeout_rate_pct: 2 }, 'egress_timeout', 'timeout_rate_pct'],
+  ['invalid required threshold', { quality_rate_pct: null }, null, 'quality_rate_pct'],
+]) test(`command fails ${name} gate with retained reasons`, async t => {
+  const f = await passingFixture(t, (_request, response, message) => failureKind && message?.params?.name === 'web_search' ? toolError(response, message, failureKind) : false);
+  const config = thresholds ? await samplesWithThresholds(f, thresholds) : {};
+  const { report } = await runEvaluator(t, f, config);
+  assert.equal(report.status, 'failed');
+  assert.ok(report.failing_gates.includes(expectedGate));
+  assert.ok(report.reasons.some(item => item.gate === expectedGate));
+  assert.equal(report.lifecycle.completed, true);
+});
+
+test('core failure overrides permissive aggregate command thresholds', async t => {
+  const f = await passingFixture(t, (request, response) => {
+    if (request.url !== '/readyz') return false;
+    response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, dependencies: [] }));
+    return true;
+  });
+  const { report } = await runEvaluator(t, f, await samplesWithThresholds(f, { success_rate_pct: 0, quality_rate_pct: 0 }));
+  assert.equal(report.status, 'failed');
+  assert.ok(report.failing_gates.includes('core_cases'));
+  assert.deepEqual(report.gates.core_cases.case_ids, ['gateway-ready']);
+});
+
+for (const [threshold, code] of [[100, 0], [99.99, 1]]) test(`release command enforces concurrency boundary ${threshold}% with a controlled clock`, async t => {
+  const f = await passingFixture(t);
+  const clock = path.join(f.root, 'clock.mjs');
+  // Only the elapsed-time boundary is replaced in this child. Real MCP and HTTP
+  // requests, case outcomes, gates, report publication and exits remain intact.
+  await fs.writeFile(clock, "let tick = 0; Object.defineProperty(performance, 'now', { value: () => tick += 10 });\n");
+  const config = await samplesWithThresholds(f, { concurrency_degradation_pct: threshold });
+  const { report } = await runEvaluator(t, f, config, ['--import', pathToFileURL(clock).href], code, 'release');
+  assert.equal(report.cases.find(item => item.id === 'concurrency-two').metrics.degradation_pct, 100);
+  assert.equal(report.gates.concurrency_degradation_pct.passed, code === 0);
+  assert.equal(report.status, code === 0 ? 'passed' : 'failed');
 });
 
 test('unreachable gateway publishes a failed startup report and exits without hanging', async t => {

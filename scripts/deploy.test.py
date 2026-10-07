@@ -754,6 +754,54 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
             self.assertEqual(list((self.root / "releases").iterdir()), [])
             self.assertFalse((self.root / ".release-pending").exists())
 
+    def test_gateway_endpoint_drift_blocks_commit_without_overwriting_operator_env(self):
+        self.previous_runtime()
+        file = self.root / "secrets/gateway.env"
+        original = file.read_text()
+        for key, endpoint in (("SEARXNG_URL", "http://search.fixture.test:8801/search"),
+                              ("CRAWL4AI_URL", "http://127.0.0.1:11235/crawl"),
+                              ("EGRESS_PROXY", "http://127.0.0.1:7895"),
+                              ("PLAYWRIGHT_MCP_URL", "http://localhost:8931/mcp")):
+            with self.subTest(endpoint=key):
+                file.write_text(original + f'{key}="{endpoint}"\n')
+                before = self.snapshot()
+                tx = self.prepare()
+                self.assertEqual(self.command("activate", tx).returncode, 0)
+                changed = file.read_text().replace(endpoint, endpoint + "/different-route")
+                file.write_text(changed)
+                result = self.command("commit", tx)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("safe configuration changed", result.stderr)
+                self.assertEqual(file.read_text(), changed)
+                expected = dict(before)
+                entry = before["root/secrets/gateway.env"]
+                expected["root/secrets/gateway.env"] = ("file", changed.encode(), entry[2])
+                self.assertEqual(self.snapshot(), expected)
+                self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "restored")
+                self.retain_evidence(tx, "gateway-endpoint-" + key.lower())
+        file.write_text(original)
+
+    def test_gateway_endpoint_projection_is_credential_insensitive_and_parsed(self):
+        file = self.root / "secrets/gateway.env"
+        original = file.read_text()
+        file.write_text(original + '''export SEARXNG_URL="https://dummy-user:dummy-password@SEARCH.fixture.test:443/search?token=dummy-query#secret"
+CRAWL4AI_URL='http://127.0.0.1:11235'
+PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp
+EGRESS_PROXY=http://dummy-user:dummy-password@127.0.0.1:7895
+''')
+        tx = self.prepare()
+        first = (tx / "provenance.json").read_bytes()
+        self.assertIn("safe_configuration_digest", json.loads(first))
+        self.assertEqual(self.command("abort", tx).returncode, 0)
+        file.write_text(file.read_text().replace("dummy-password", "rotated-password").replace("dummy-query", "rotated-query").replace("#secret", "#rotated")
+                        .replace("export SEARXNG_URL=", "SEARXNG_URL=").replace("SEARCH.fixture.test:443", "search.fixture.test")
+                        .replace("CRAWL4AI_URL='http://127.0.0.1:11235'", "CRAWL4AI_URL=http://127.0.0.1:11235/"))
+        tx = self.prepare()
+        self.assertEqual(first, (tx / "provenance.json").read_bytes())
+        for secret in ("dummy-password", "rotated-password", "dummy-user", "dummy-query", "rotated-query"):
+            self.assertNotIn(secret, first.decode())
+        self.assertEqual(self.command("abort", tx).returncode, 0)
+
     def test_provenance_is_deterministic_and_does_not_hash_env_or_report_data(self):
         tx = self.prepare()
         first = (tx / "provenance.json").read_bytes()

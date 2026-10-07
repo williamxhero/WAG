@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -295,6 +296,40 @@ def safe_configuration(root, candidate, env):
     bind, _ = run(["python3", candidate / "scripts/bootstrap-bind.py", root / "secrets/gateway.env",
                    candidate / "config/gateway.env.template"], "approved bind preflight", env=env, timeout=15)
     result = {"gateway_bind": bind}
+    # Match gateway defaults; EnvironmentFile overrides the unit's Environment.
+    # Parse only these effective endpoints, without executing the secret file.
+    endpoints = {"SEARXNG_URL": "http://yosef-server:8801",
+                 "CRAWL4AI_URL": "http://127.0.0.1:11235",
+                 "EGRESS_PROXY": "http://127.0.0.1:7895",
+                 "PLAYWRIGHT_MCP_URL": "http://localhost:8931/mcp"}
+    for line in (root / "secrets/gateway.env").read_text().splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, raw = line.partition("=")
+        key = key.strip()
+        if not separator or key not in endpoints:
+            continue
+        try:
+            values = shlex.split(raw, comments=True, posix=True)
+        except ValueError:
+            raise ReleaseError("invalid gateway endpoint configuration") from None
+        if len(values) != 1:
+            raise ReleaseError("invalid gateway endpoint configuration")
+        endpoints[key] = values[0]
+    projection = {}
+    for key, raw in endpoints.items():
+        try:
+            value = urlsplit(raw)
+            if value.scheme not in {"http", "https"} or not value.hostname or any(c in raw for c in "\r\n\t"):
+                raise ValueError()
+            projection[key] = {"scheme": value.scheme, "hostname": value.hostname,
+                               "port": value.port or (443 if value.scheme == "https" else 80),
+                               "path": value.path or "/"}
+        except ValueError:
+            raise ReleaseError("invalid gateway endpoint configuration") from None
+    # Userinfo, query and fragment (often credential-bearing) never enter hashes.
+    result["gateway_endpoints"] = projection
     # Only a reviewed allowlist of parsed, non-secret fields. Never hash an env
     # file, even if this particular fixture or shipped default contains no token.
     file = root / "config/playwright.env"

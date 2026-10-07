@@ -237,4 +237,10 @@ systemctl is-active web-access-healthcheck.timer
 sudo ss -ltnp '( sport = :8930 or sport = :8931 or sport = :11235 )'
 ```
 
+评测门禁默认值：smoke 成功率/质量通过率均至少 100%；release 均至少 95%，普通可用性案例的超时率至多 2%，并发退化至多 50%。边界相等通过；比较使用未取整的测量值。可在 `WAG_EVAL_SAMPLES` 指定的 JSON 样本文件中提供 `thresholds` 对象覆盖当前套件的门限（键为 `success_rate_pct`、`quality_rate_pct`、`timeout_rate_pct`、`concurrency_degradation_pct`）；无效门限或缺失必需测量不会通过。故意超时/安全拒绝案例不进入普通可用性超时分母。
+
+核心案例失败或任一门禁失败，结论为 `failed`；仅公网连接案例不通过且没有失败门禁时为 `degraded`。两者的评测命令退出码均为非零，不改变部署脚本独立的核心/公网 readiness 回滚策略。报告增量提供 `gates`、`failing_gates` 和 `reasons`；空/不完整套件及失败的并发基线均不能通过。
+
+看板从每次报告读取并显示门限，不使用独立常量。历史结构化及旧格式报告的原有结论保留；缺少门限时按 suite 使用以上默认值，未知 suite 使用 smoke 默认值，标记 `thresholds_source: legacy_defaults`。这是兼容显示，不是重新认证历史报告。
+
 验收还应覆盖：MCP 鉴权、SearXNG 搜索、静态页面正文、JS 渲染、浏览器快照/点击、截图/PDF、两个并发任务、超时，以及私网 URL 拦截。评测结果页为 [http://yosef-server:8930/evals](http://yosef-server:8930/evals)，仅展示已完成的评测报告；报告保留 30 天，截图/PDF 保留 7 天。MCP、健康检查和通用产物接口仍要求 Token。

@@ -125,16 +125,82 @@ export function dimensionSummaries(cases) {
   return Object.fromEntries([...groups].map(([dimension, items]) => [dimension, summarizeCases(items)]));
 }
 
-export function evaluationStatus(cases) {
+export function defaultThresholds(suite) {
+  return suite === 'release'
+    ? { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 }
+    : { success_rate_pct: 100, quality_rate_pct: 100 };
+}
+
+export function evaluateGates(cases, options = {}) {
+  const thresholds = { ...defaultThresholds(options.suite), ...options.thresholds };
+  const summary = summarizeCases(cases);
+  const coreFailures = cases.filter(item => (item.dimension ?? 'core') === 'core' && item.status !== 'passed');
+  const connectivityFailures = cases.filter(item => item.dimension === 'connectivity' && item.status !== 'passed');
+  const expectedIds = options.expected_case_ids;
+  const complete = options.complete !== false && (!expectedIds || (cases.length === expectedIds.length
+    && new Set(cases.map(item => item.id)).size === cases.length && expectedIds.every(id => cases.some(item => item.id === id))));
+  const validCases = cases.every(item => ['passed', 'failed'].includes(item.status)
+    && typeof item.quality?.passed === 'boolean' && ['core', 'connectivity'].includes(item.dimension ?? 'core'));
+  const gates = {
+    completion: { passed: complete, reason: complete ? null : 'incomplete_suite' },
+    eligible_cases: { passed: summary.timeout_eligible_cases > 0, reason: summary.timeout_eligible_cases > 0 ? null : 'empty_availability_suite' },
+    case_measurements: { passed: validCases, reason: validCases ? null : 'invalid_case_measurement' },
+    core_cases: { passed: coreFailures.length === 0, reason: coreFailures.length ? 'non_passing_cases' : null, case_ids: coreFailures.map(item => item.id) },
+  };
+  // Compare unrounded measurements: display rounding must not certify a breach.
+  function rateGate(name, numerator, denominator, comparison = 'minimum') {
+    const value = denominator > 0 ? numerator / denominator * 100 : null;
+    const threshold = thresholds[name];
+    const validThreshold = Number.isFinite(threshold) && threshold >= 0 && threshold <= 100;
+    const met = comparison === 'minimum' ? value >= threshold : value <= threshold;
+    gates[name] = {
+      passed: Number.isFinite(value) && validThreshold && met,
+      value, threshold, comparison,
+      reason: !validThreshold ? 'invalid_threshold' : !Number.isFinite(value) ? 'missing_measurement' : !met ? comparison === 'minimum' ? 'below_minimum' : 'above_maximum' : null,
+    };
+  }
+  rateGate('success_rate_pct', summary.passed_cases, cases.length);
+  rateGate('quality_rate_pct', cases.filter(item => item.quality?.passed === true).length, cases.length);
+  if (Object.hasOwn(thresholds, 'timeout_rate_pct')) rateGate('timeout_rate_pct', summary.timeout_cases, summary.timeout_eligible_cases, 'maximum');
+  if (Object.hasOwn(thresholds, 'concurrency_degradation_pct')) {
+    const concurrent = cases.find(item => item.id === 'concurrency-two');
+    const baseline = cases.find(item => item.id === 'read-static');
+    const value = concurrent?.metrics?.degradation_pct;
+    const threshold = thresholds.concurrency_degradation_pct;
+    const validThreshold = Number.isFinite(threshold) && threshold >= 0;
+    const validBaseline = Number.isFinite(concurrent?.metrics?.baseline_ms) && concurrent.metrics.baseline_ms > 0
+      && (!baseline || (baseline.status === 'passed' && Number.isFinite(baseline.total_ms) && baseline.total_ms > 0));
+    const measured = concurrent?.status === 'passed' && validBaseline && Number.isFinite(value) && value >= -100;
+    gates.concurrency_degradation_pct = {
+      passed: validThreshold && measured && value <= threshold,
+      value: Number.isFinite(value) ? value : null, threshold, comparison: 'maximum',
+      reason: !validThreshold ? 'invalid_threshold' : !validBaseline ? 'invalid_baseline' : !measured ? 'missing_measurement' : value > threshold ? 'above_maximum' : null,
+    };
+  }
+  const failing_gates = Object.keys(gates).filter(name => !gates[name].passed);
+  const reasons = failing_gates.map(gate => ({ gate, reason: gates[gate].reason, ...(gates[gate].case_ids ? { case_ids: gates[gate].case_ids } : {}) }));
+  if (connectivityFailures.length) reasons.push({ gate: 'connectivity', reason: 'non_passing_cases', case_ids: connectivityFailures.map(item => item.id) });
+  return { status: failing_gates.length ? 'failed' : connectivityFailures.length ? 'degraded' : 'passed', thresholds, gates, failing_gates, reasons };
+}
+
+export function evaluationStatus(cases, options) {
+  if (options) return evaluateGates(cases, options).status;
   if (!cases.some(item => (item.expectation ?? 'availability') === 'availability')) return 'failed';
   if (cases.some(item => (item.dimension ?? 'core') === 'core' && item.status !== 'passed')) return 'failed';
   if (cases.some(item => item.dimension === 'connectivity' && item.status !== 'passed')) return 'degraded';
   return 'passed';
 }
 
+function reportThresholds(raw) {
+  return {
+    thresholds: { ...defaultThresholds(raw?.suite), ...raw?.thresholds },
+    thresholds_source: raw?.thresholds_source ?? (raw?.thresholds ? 'report' : 'legacy_defaults'),
+  };
+}
+
 export function normalizeReport(raw, fileName = '') {
   if ((raw?.schema_version === REPORT_VERSION || raw?.schema_version === 0 && raw?.legacy === true) && Array.isArray(raw.cases)) {
-    return { ...raw, dimensions: raw.dimensions ?? dimensionSummaries(raw.cases) };
+    return { ...raw, ...reportThresholds(raw), dimensions: raw.dimensions ?? dimensionSummaries(raw.cases) };
   }
   const health = raw?.health ?? {};
   const blocked = String(raw?.private_proxy_status ?? '') === '403';
@@ -146,6 +212,7 @@ export function normalizeReport(raw, fileName = '') {
     schema_version: 0,
     id: fileName.replace(/\.json$/, '') || 'legacy-report',
     suite: raw?.suite ?? 'unknown',
+    ...reportThresholds(raw),
     started_at: raw?.at ?? null,
     completed_at: raw?.at ?? null,
     status: cases.every(item => item.status === 'passed') ? 'passed' : 'failed',
@@ -171,6 +238,11 @@ export function publicRunSummary(report) {
     legacy: normalized.legacy === true,
     summary: normalized.summary,
     dimensions: normalized.dimensions,
+    thresholds: normalized.thresholds,
+    thresholds_source: normalized.thresholds_source,
+    ...(normalized.gates ? { gates: normalized.gates } : {}),
+    ...(normalized.failing_gates ? { failing_gates: normalized.failing_gates } : {}),
+    ...(normalized.reasons ? { reasons: normalized.reasons } : {}),
   };
 }
 

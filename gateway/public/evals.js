@@ -2,12 +2,37 @@ const $ = (selector, root=document) => root.querySelector(selector);
 let index = null, selectedId = null;
 let token = '', generation = 0, pending = null;
 const artifactURLs = new Set();
-const pct = value => value == null ? '—' : `${Number(value).toFixed(value % 1 ? 1 : 0)}%`;
+const pct = value => !Number.isFinite(value) ? '—' : `${value.toFixed(value % 1 ? 1 : 0)}%`;
 const ms = value => value == null ? '—' : value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}s` : `${Math.round(value)}ms`;
 const date = value => value ? new Intl.DateTimeFormat('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value)) : '未知时间';
 const escape = text => String(text ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 function kpi(label, value, tone=''){ return `<div class="kpi ${tone}"><label>${label}</label><b>${value}</b></div>`; }
-function renderLatest(run){const s=run.summary; const degradation=(run.cases??[]).find(item=>item.id==='concurrency-two')?.metrics?.degradation_pct; const conclusion=run.status==='passed'?'通过':run.status==='degraded'?'公网降级':'未通过'; $('#latest-meta').textContent=`${run.suite.toUpperCase()} · ${date(run.completed_at)} · ${run.legacy?'兼容旧格式':'结构化报告'}`; $('#kpis').innerHTML=[kpi('结论',conclusion,run.status),kpi('成功率',pct(s.success_rate_pct),s.success_rate_pct>=95?'passed':'failed'),kpi('质量通过率',pct(s.quality_rate_pct),s.quality_rate_pct>=95?'passed':'failed'),kpi('首个有效结果 p95',ms(s.first_valid_result?.p95_ms)),kpi('总延迟 p95',ms(s.total_latency?.p95_ms)),kpi('超时率',pct(s.timeout_rate_pct),s.timeout_rate_pct<=2?'passed':'warn'),kpi('并发 2 退化',degradation==null?'—':pct(degradation),degradation<=50?'passed':'warn')].join('');}
+function gateKpi(run, name, label, value, minimum = true) {
+  const threshold = run.thresholds?.[name];
+  if (!Object.hasOwn(run.thresholds ?? {}, name)) return kpi(`${label} · 未配置门禁`, pct(value));
+  const concurrency = name === 'concurrency_degradation_pct';
+  const validThreshold = Number.isFinite(threshold) && threshold >= 0 && (concurrency || threshold <= 100);
+  const validValue = Number.isFinite(value) && (concurrency ? value >= -100 : value >= 0 && value <= 100);
+  const passed = validThreshold && validValue && (run.gates?.[name]?.passed ?? (minimum ? value >= threshold : value <= threshold));
+  const policy = validThreshold ? `${minimum ? '≥' : '≤'}${pct(threshold)}` : '无效门限';
+  return kpi(`${label} · ${policy}`, pct(value), passed ? 'passed' : 'failed');
+}
+function renderLatest(run) {
+  const s = run.summary;
+  const degradation = (run.cases ?? []).find(item => item.id === 'concurrency-two')?.metrics?.degradation_pct;
+  const conclusion = run.status === 'passed' ? '通过' : run.status === 'degraded' ? '公网降级' : '未通过';
+  const reasons = (run.reasons ?? []).map(item => `${item.gate}: ${item.reason}`).join('; ');
+  $('#latest-meta').textContent = `${run.suite.toUpperCase()} · ${date(run.completed_at)} · ${run.legacy ? '兼容旧格式' : '结构化报告'}${run.thresholds_source === 'legacy_defaults' ? ' · 历史默认门限（非重新认证）' : ''}${reasons ? ` · ${reasons}` : ''}`;
+  $('#kpis').innerHTML = [
+    kpi('结论', conclusion, run.status),
+    gateKpi(run, 'success_rate_pct', '成功率', s.success_rate_pct),
+    gateKpi(run, 'quality_rate_pct', '质量通过率', s.quality_rate_pct),
+    kpi('首个有效结果 p95', ms(s.first_valid_result?.p95_ms)),
+    kpi('总延迟 p95', ms(s.total_latency?.p95_ms)),
+    gateKpi(run, 'timeout_rate_pct', '超时率', s.timeout_rate_pct, false),
+    gateKpi(run, 'concurrency_degradation_pct', '并发 2 退化', degradation, false),
+  ].join('');
+}
 function renderTrend(runs){const values=[...runs].reverse().slice(-30); if(!values.length){$('#trend').textContent='没有可绘制的历史数据';return;} const width=720,height=160,pad=12; const point=(run,i)=>`${pad+i*(width-pad*2)/Math.max(values.length-1,1)},${height-pad-(Number(run.summary.success_rate_pct??0)/100)*(height-pad*2)}`; const points=values.map(point).join(' '); $('#trend').innerHTML=`<span class="axis">成功率</span><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><path d="M${pad},${pad}V${height-pad}H${width-pad}" stroke="#2a353a" fill="none"/><polyline points="${points}" stroke="#82e8ea" stroke-width="2" fill="none"/>${values.map((r,i)=>{const [x,y]=point(r,i).split(',');const color=r.status==='passed'?'#b6e06e':r.status==='degraded'?'#f4cc72':'#ff827b';return `<circle cx="${x}" cy="${y}" r="3" fill="${color}"><title>${escape(r.id)}: ${pct(r.summary.success_rate_pct)}</title></circle>`}).join('')}</svg>`;}
 function renderRuns(runs){$('#runs').innerHTML=runs.map(run=>`<button class="run ${run.status} ${run.id===selectedId?'selected':''}" data-run="${escape(run.id)}"><span class="dot"></span><span>${escape(run.suite)} · ${escape(run.id.replace(/^.*?-/,''))}</span><time>${date(run.completed_at)}</time></button>`).join(''); $('#runs').querySelectorAll('[data-run]').forEach(button=>button.onclick=()=>loadRun(button.dataset.run));}
 function renderTools(tools={}){$('#tools').innerHTML=Object.entries(tools).map(([name,summary])=>`<div class="tool"><label>${escape(name)}</label><p>${pct(summary.success_rate_pct)} 成功 · p95 ${ms(summary.total_latency?.p95_ms)}<br>${summary.total_cases} 个案例</p></div>`).join('')||'<p class="muted">此旧报告没有工具矩阵。</p>';}

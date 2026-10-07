@@ -87,7 +87,9 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
   "http://$GATEWAY_HOST:$GATEWAY_PORT/healthz"
 ```
 
-`/healthz` 只表示网关进程已响应，不触发依赖探测；`/readyz` 会检查 SearXNG 非空有效标准化结果、Crawl4AI 已初始化生命周期、Playwright 和统一公网出口。每个探测最多 5 秒（包括响应体），结果缓存 10 秒，进行中的检查合并复用；诊断响应体限制为 64 KiB，错误与引擎详情会脱敏。两个网关接口都需要 Bearer Token；Crawl4AI 的 `/readyz` 使用 `CRAWL4AI_TOKEN`，不执行实际抓取。
+`/healthz` 只表示网关进程已响应，不触发依赖探测；`/readyz` 会检查 SearXNG 搜索能力、Crawl4AI 已初始化生命周期、Playwright 和统一公网出口。每个探测默认最多 10 秒（包括响应体），可通过 `GATEWAY_PROBE_TIMEOUT_MS` 配置正安全整数毫秒值；结果缓存 10 秒，进行中的检查合并复用；诊断响应体限制为 64 KiB，错误与引擎详情会脱敏。两个网关接口都需要 Bearer Token；Crawl4AI 的 `/readyz` 使用 `CRAWL4AI_TOKEN`，不执行实际抓取。
+
+SearXNG 返回有效标准化结果即可证明搜索能力，但不能将已报告失败引擎的结果作为证据。零命中也可以健康：响应必须包含合法的 `results: []` 和 `unresponsive_engines` 数组，且同一响应的 `Server-Timing` 中至少有一个未被报告失败的引擎完成记录（`total_<index>_<engine>;dur=<非负毫秒数>`）。SearXNG 在引擎成功完成搜索时才添加该记录，零命中也会记录；聚合 `total` / `render` 或仅 `load` 记录不算证据。空/非法响应、全部引擎失败以及无法证明引擎完成的空结果仍不健康，不把“没有失败列表”当作成功。若中间代理移除了 `Server-Timing`，零命中会保守地报告不健康；无需修改引擎集合或额外请求 `/config`。
 
 就绪响应保留 `ok` 与 `dependencies`，并添加 `core_ok`、`public_connectivity_ok`、`status`（`passed` / `degraded` / `failed`）。核心能力失败返回 503；仅搜索或公网出口失败也返回 503，但分类为公网连通性退化。`healthcheck.sh --core-only` 只根据核心能力决定部署回滚；完整健康检查会对公网退化返回非零，并保留脱敏的 curl / 后端错误分类。整个脚本默认最多 45 秒，另有最多 2 秒的终止宽限。实际抓取能力由发布验收验证，而非反复运行的存活探针。
 

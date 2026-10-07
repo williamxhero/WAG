@@ -196,6 +196,43 @@ systemctl status web-access-healthcheck.timer
 systemctl list-timers web-access-healthcheck.timer
 ```
 
+### Runtime release transaction (offline preparation contract)
+
+`scripts/deploy.sh` has no implicit installation or systemd destination. Its CLI is
+`prepare SOURCE --target ROOT --units UNIT_DIR`, then `activate TRANSACTION`,
+`commit TRANSACTION`, `abort TRANSACTION`, or `restore TRANSACTION`. `status
+TRANSACTION` reads the journal. Both destination directories must already exist;
+prepare requires a clean, committed production inventory in a Git source tree.
+
+Prepare installs with `npm ci --omit=dev --ignore-scripts` and the existing fully
+pinned Python requirements (`pip install --no-deps --requirement ...`), checks
+runtime/import/browser prerequisites, and captures runtime, unit, and service
+snapshots before mutation. Existing browser caches are read-only prerequisites:
+this transaction does not download browsers or runtimes. Inventory discovery
+covers tracked production helpers/assets under the owned source roots, excluding
+tests, fixtures, caches and runtime data. Unknown operator configuration and
+existing runtime environment files are preserved; secret-bearing environment
+files are never hashed (safe-configuration digests use parsed non-secret fields).
+`provenance.json` records revision, inventory/code/manifest/safe-configuration
+digests and installed versions. Dependency-manager output is not printed.
+
+Activation leaves an **uncommitted** release and rolls back on core readiness
+failure, explicit command failure, or catchable interruption; public degradation
+is recorded separately. After an uncatchable interruption, use `status` and
+`abort` against the retained journal. `restore` also supports the latest committed
+release; failed restoration remains nonzero and retryable. Retain the transaction
+directory and snapshots: active dependency/venv links reference its candidate
+(the venv is deliberately not relocated). Do not garbage-collect releases whose
+candidates or snapshots are still referenced.
+
+The #25 coordinator must take its overlay snapshot before applying the overlay,
+apply/verify it after runtime prepare, and restore it on **every** downstream
+activation/commit/abort failure or interruption. Runtime snapshots do not restore
+SearXNG. Runtime-only staging or commit is not complete #9 release consistency,
+#26 acceptance, or authorization for live deployment. Offline fixtures use only
+temporary installation/unit roots and stub dependency/service/readiness commands:
+`python3 scripts/deploy.test.py` (Linux).
+
 ### 产物生命周期
 
 仓库中的 `systemd/web-access-artifact-cleanup.service` 和 `.timer` 是权威来源；初始安装与部署通过 `scripts/install-artifact-cleanup.sh` 安装并启用每日定时器（`OnCalendar=daily`、`Persistent=true`），本次离线代码验证不代表已在小电脑启用。

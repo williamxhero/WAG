@@ -36,9 +36,13 @@ test('offline installer links authoritative cleanup units and enables the daily 
   assert.match(timer, /^Persistent=true$/m);
   const service = await fs.readFile(path.join(units, 'web-access-artifact-cleanup.service'), 'utf8');
   assert.match(service, /^ExecStart=\/data\/web-access-gateway\/scripts\/cleanup-artifacts.sh$/m);
-  for (const installer of ['bootstrap.sh', 'deploy.sh']) {
-    assert.match(await fs.readFile(path.join(repository, 'scripts', installer), 'utf8'), /"\$ROOT\/scripts\/install-artifact-cleanup.sh"/);
-  }
+  assert.match(await fs.readFile(path.join(repository, 'scripts/bootstrap.sh'), 'utf8'), /"\$ROOT\/scripts\/install-artifact-cleanup.sh"/);
+  // Deployment now delegates to the transaction CLI; retain the invariant that
+  // both installation paths reuse the authoritative cleanup installer.
+  assert.match(await fs.readFile(path.join(repository, 'scripts/deploy.sh'), 'utf8'), /exec python3 "\$SCRIPT_DIR\/release.py"/);
+  const transaction = await fs.readFile(path.join(repository, 'scripts/release.py'), 'utf8');
+  assert.match(transaction, /run\(\["bash", root \/ "scripts\/install-artifact-cleanup.sh"\], "artifact cleanup installation", env=env\)/);
+  assert.match(transaction, /WAG_ROOT=str\(root\), WAG_SYSTEMD_DIR=str\(unit_dir\)/);
 });
 
 test('the scheduled cleanup command uses configured ARTIFACT_DIR and leaves reports untouched', async t => {

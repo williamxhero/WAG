@@ -46,6 +46,15 @@ class ReleaseTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.source), "-c", "user.name=Fixture", "-c",
                         "user.email=fixture@example.invalid", "commit", "-qm", "Fixture\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>"], check=True)
         self.stub("systemctl", '''printf 'service %s\n' "$*" >> "$TEST_EFFECTS"
+if [[ "$1" == stop && "${FAIL_STOP_UNIT:-}" == "${2:-}" ]]; then printf 'dummy-sensitive-output' >&2; exit 1; fi
+if [[ -n "${ABSENT_UNIT:-}" && "$ABSENT_UNIT" == "${2:-}" && ! -e "$TEST_UNIT_DIR/$2" ]]; then
+  case "$1" in
+    is-active) printf 'unknown\n'; exit 4;;
+    is-enabled) printf 'not-found\n'; exit 4;;
+    stop) exit 5;;
+  esac
+fi
+if [[ "$1" == stop && "${NOT_LOADED_UNIT:-}" == "${2:-}" ]]; then exit 5; fi
 case "$1" in
   is-active) printf 'inactive\n'; exit 3;;
   is-enabled) printf 'disabled\n'; exit 1;;
@@ -718,6 +727,112 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
         self.assertIn("web-access-artifact-cleanup.timer", self.effects.read_text())
         result = self.command("abort", tx)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_absent_cleanup_timer_activates_installs_and_commits(self):
+        unit = "web-access-artifact-cleanup.timer"
+        self.env["ABSENT_UNIT"] = unit
+        self.assertFalse((self.units / unit).exists())
+        tx = self.prepare()
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["services"][unit], {"active": False, "enabled": "not-found"})
+        result = self.command("activate", tx)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "activated")
+        for name in ("web-access-artifact-cleanup.service", unit):
+            self.assertTrue((self.units / name).is_file(), name)
+            self.assertEqual(os.readlink(self.units / name), str(self.root / "systemd" / name))
+        self.assertIn("service enable --now " + unit, self.effects.read_text(),
+                      "the real cleanup installer must install and start the timer")
+        self.assertEqual(self.command("commit", tx).returncode, 0)
+        self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "committed")
+
+    def test_not_loaded_units_allow_activation(self):
+        self.previous_runtime()
+        before = self.snapshot()
+        units = ("web-access-egress-proxy.service", "web-access-crawl4ai.service",
+                 "web-access-playwright.service", "web-access-gateway.service",
+                 "web-access-healthcheck.timer", "web-access-artifact-cleanup.timer")
+        for unit in units:
+            with self.subTest(unit=unit):
+                tx = self.prepare()
+                result = self.command("activate", tx, NOT_LOADED_UNIT=unit)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["status"], "activated")
+                result = self.command("restore", tx)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                state = json.loads((tx / "state.json").read_text())
+                self.assertEqual(state["status"], "restored")
+                self.assertNotIn("service_stop", state.get("restore_errors", []))
+                self.assertFalse((self.root / ".release-pending").exists())
+                self.assertEqual(self.snapshot(), before)
+
+    def test_not_loaded_units_allow_explicit_restore(self):
+        self.previous_runtime()
+        before = self.snapshot()
+        units = ("web-access-egress-proxy.service", "web-access-crawl4ai.service",
+                 "web-access-playwright.service", "web-access-gateway.service",
+                 "web-access-healthcheck.timer", "web-access-artifact-cleanup.timer")
+        for unit in units:
+            with self.subTest(unit=unit):
+                tx = self.prepare()
+                self.assertEqual(self.command("activate", tx).returncode, 0)
+                result = self.command("restore", tx, NOT_LOADED_UNIT=unit)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                state = json.loads((tx / "state.json").read_text())
+                self.assertEqual(state["status"], "restored")
+                self.assertNotIn("service_stop", state.get("restore_errors", []))
+                self.assertFalse((self.root / ".release-pending").exists())
+                self.assertEqual(self.snapshot(), before)
+
+    def test_absent_cleanup_timer_does_not_block_automatic_rollback(self):
+        self.previous_runtime()
+        self.env["ABSENT_UNIT"] = "web-access-artifact-cleanup.timer"
+        before = self.snapshot()
+        tx = self.prepare()
+        result = self.command("activate", tx, FAIL_SERVICE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("activation restart failed", result.stderr)
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restored")
+        self.assertNotIn("service_stop", state.get("restore_errors", []))
+        self.assertFalse((self.root / ".release-pending").exists())
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.effects.read_text().count(
+            "service stop web-access-artifact-cleanup.timer"), 2)
+
+    def test_genuine_stop_failure_aborts_activation_and_records_restore_error(self):
+        before = self.snapshot()
+        tx = self.prepare()
+        result = self.command("activate", tx, FAIL_STOP_UNIT="web-access-artifact-cleanup.timer")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("snapshot restoration failed: service_stop", result.stderr)
+        self.assertNotIn("dummy-sensitive-output", result.stdout + result.stderr)
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restore_failed")
+        self.assertEqual(state["restore_errors"], ["service_stop"])
+        self.assertTrue((self.root / ".release-pending").exists())
+        self.assertNotIn("service restart", self.effects.read_text())
+        self.assertEqual(self.effects.read_text().count(
+            "service stop web-access-artifact-cleanup.timer"), 2)
+        self.assertEqual(self.command("restore", tx).returncode, 0)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_genuine_stop_failure_blocks_explicit_restore_and_can_retry(self):
+        before = self.snapshot()
+        tx = self.prepare()
+        self.assertEqual(self.command("activate", tx).returncode, 0)
+        result = self.command("restore", tx, FAIL_STOP_UNIT="web-access-gateway.service")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("dummy-sensitive-output", result.stdout + result.stderr)
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restore_failed")
+        self.assertEqual(state["restore_errors"], ["service_stop"])
+        self.assertTrue((self.root / ".release-pending").exists())
+        self.assertEqual(self.command("restore", tx).returncode, 0)
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restored")
+        self.assertNotIn("restore_errors", state)
         self.assertEqual(self.snapshot(), before)
 
     def test_readiness_and_interruption_abort_but_public_degradation_can_commit(self):

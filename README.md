@@ -175,10 +175,9 @@ journalctl -u web-access-playwright -n 200 --no-pager
 sudo systemctl start web-access-healthcheck.service
 systemctl show -p Result --value web-access-healthcheck.service
 
-# 清理 7 天前的截图、PDF 和 HTML 产物
-sudo find /data/web-access-gateway/artifacts -type f \
-  \( -name '*.png' -o -name '*.pdf' -o -name '*.html' \) -mtime +7 -print -delete
-sudo find /data/web-access-gateway/artifacts -type d -empty -delete
+# 已授权运维时手动运行同一产物保留策略（会删除过期的已完成产物）
+sudo systemctl start web-access-artifact-cleanup.service
+systemctl list-timers web-access-artifact-cleanup.timer
 ```
 
 健康检查定时器：
@@ -186,6 +185,26 @@ sudo find /data/web-access-gateway/artifacts -type d -empty -delete
 ```bash
 systemctl status web-access-healthcheck.timer
 systemctl list-timers web-access-healthcheck.timer
+```
+
+### 产物生命周期
+
+仓库中的 `systemd/web-access-artifact-cleanup.service` 和 `.timer` 是权威来源；初始安装与部署通过 `scripts/install-artifact-cleanup.sh` 安装并启用每日定时器（`OnCalendar=daily`、`Persistent=true`），本次离线代码验证不代表已在小电脑启用。
+
+七天截止定义只有一个：**已完成文件的 `mtime <= 清理开始时刻 - 604800000 毫秒`**，边界相等时删除；不是按日历日期，也不是 `find -mtime +7` 的取整规则。网关使用完成发布时刻作为 mtime。清理读取与网关相同的 `ARTIFACT_DIR`，默认 `/data/web-access-gateway/artifacts`，并只删除：
+
+- 网关的 `YYYY-MM-DD/<UUID>.png` / `.pdf`；
+- 专属 `playwright/`、`crawl4ai/` 子树中的已完成 `.png` / `.pdf` / `.html`。
+
+临时/隐藏/进行中名称（包括 `.tmp`、`.part`、`in-progress`）、近期文件、未知类型、符号链接和多重硬链接均保留；不删除目录。外部产物写入者应先写临时名称，再原子发布最终名称。配置根目录必须是规范路径，不能是文件系统根或符号链接；Linux 使用打开的目录句柄与不跟随符号链接的遍历防止目录替换造成越界删除。评测报告的 30 天保留策略独立且不变。
+
+网关产物写入串行、临时文件原子重命名发布，默认上限仍为单产物 25 MiB、总存储 1 GiB。清理后重新统计，且**每次写入准入前**统计根目录中的实际普通文件（也包括临时/未知文件与外部 Playwright 产物），因此外部添加、删除或定时清理释放的空间无需重启即可生效；统计错误不会被当成零用量。Playwright 是独立写入者，已存在的输出计入网关准入，不能把扫描当作跨进程磁盘预留。
+
+离线验证只使用自动创建并回收的临时树与 mocked `systemctl`：
+
+```bash
+node --test gateway/artifact-store.test.mjs gateway/artifact-cleanup-install.test.mjs
+for script in scripts/cleanup-artifacts.sh scripts/install-artifact-cleanup.sh scripts/bootstrap.sh scripts/deploy.sh; do bash -n "$script" || exit; done
 ```
 
 ## 版本与升级

@@ -17,4 +17,5 @@ jobs:
       - run: node --check gateway/eval-runner.mjs
       - run: node --check proxy/server.mjs
       - run: node --test gateway/eval-core.test.mjs proxy/server.test.mjs
-      - run: bash -n scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh
+      - run: node --test gateway/artifact-store.test.mjs gateway/artifact-cleanup-install.test.mjs
+      - run: for script in scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh scripts/cleanup-artifacts.sh scripts/install-artifact-cleanup.sh scripts/bootstrap.sh; do bash -n "$script" || exit; done

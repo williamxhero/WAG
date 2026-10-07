@@ -44,5 +44,6 @@ for attempt in $(seq 1 12); do
 done
 if [[ "$ready" != true ]]; then echo "Core readiness did not pass within 60 seconds" >&2; exit 1; fi
 "$ROOT/scripts/healthcheck.sh" || echo "Deployment succeeded with public-connectivity degradation" >&2
+WAG_ROOT="$ROOT" "$ROOT/scripts/install-artifact-cleanup.sh"
 trap - ERR
 echo "Deployment complete; rollback snapshot: $backup"

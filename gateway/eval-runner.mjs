@@ -4,11 +4,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { dimensionSummaries, evaluateGates, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
+import { DEADLINE_KINDS, dimensionSummaries, evaluateGates, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
 import { evaluateCase } from './eval-case.mjs';
 
 const root = process.env.WAG_ROOT ?? '/data/web-access-gateway';
 const suite = process.argv[2] === 'release' ? 'release' : 'smoke';
+const offline = process.argv.includes('--offline');
+const acceptanceScope = offline ? { acceptance_scope: 'deterministic_offline', deferred_checks: ['live_public_connectivity', 'provenance_matched_live_rollout'] } : {};
 const startedAt = new Date();
 const stamp = startedAt.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
 const runId = `${suite}-${stamp}`;
@@ -209,7 +211,7 @@ async function main() {
   const cases = []; const artifacts = []; const resourceSamples = [];
   let resourceStart = {}; let resourceEnd = {}; let resourceTimer;
   let completed = false; let failure; let thresholds;
-  const expectedCaseIds = ['search-public', 'read-static', 'read-rendered', 'browser-snapshot-click', 'read-screenshot', 'read-pdf', 'gateway-health', 'gateway-ready', 'eval-api-auth', 'auth-required', 'ssrf-loopback', ...(suite === 'release' ? ['concurrency-two', 'ssrf-redirect'] : [])];
+  const expectedCaseIds = ['search-public', 'read-static', 'read-rendered', 'browser-snapshot-click', 'read-screenshot', 'read-pdf', 'gateway-health', 'gateway-ready', 'eval-api-auth', 'auth-required', 'ssrf-loopback', ...(suite === 'release' ? ['concurrency-two', 'ssrf-redirect'] : []), ...(offline ? ['read-timeout'] : [])];
   const cleanupErrors = [];
   try {
     await lifecycle.run('evaluation', async () => {
@@ -217,6 +219,23 @@ async function main() {
       const samples = JSON.parse(await fs.readFile(samplePath, { encoding: 'utf8', signal: lifecycle.controller.signal }));
       if (Object.hasOwn(samples, 'thresholds') && (!samples.thresholds || typeof samples.thresholds !== 'object' || Array.isArray(samples.thresholds))) throw new Error('evaluation thresholds must be an object');
       thresholds = samples.thresholds;
+      if (offline) {
+        const endpoint = new URL(gatewayUrl);
+        if (suite !== 'release' || !process.env.WAG_ROOT || !process.env.WAG_EVAL_SAMPLES || !process.env.GATEWAY_EVAL_URL
+            || endpoint.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(endpoint.hostname) || endpoint.username || endpoint.password) {
+          throw new Error('offline release requires explicit fixture root, samples and loopback gateway');
+        }
+        let origin;
+        try { origin = new URL(samples.timeout?.url); } catch { /* A missing fixture must fail, never skip-pass. */ }
+        if (!origin || origin.protocol !== 'http:' || !origin.hostname.endsWith('.fixture.test') || origin.username || origin.password || origin.port) {
+          throw new Error('offline release requires a controlled timeout origin under .fixture.test');
+        }
+        const fixtureUrls = [samples.static?.url, samples.render?.url, samples.browser?.url, samples.security?.redirect_to_loopback_url];
+        if (fixtureUrls.some(value => {
+          try { const url = new URL(value); return !['http:', 'https:'].includes(url.protocol) || !url.hostname.endsWith('.fixture.test') || Boolean(url.username || url.password || url.port); }
+          catch { return true; }
+        })) throw new Error('offline release requires controlled fixture URLs, not public samples');
+      }
       lifecycle.controller.signal.throwIfAborted();
       resourceStart = await resourceSnapshot(); resourceSamples.push(resourceStart);
       lifecycle.controller.signal.throwIfAborted();
@@ -254,6 +273,7 @@ async function main() {
     await runCase(cases, artifacts, { id: 'eval-api-auth', name: 'Evaluation API rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/api/evals')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
     await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
     await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: 'non_public_address' }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.security.loopback_url, render: 'never', output: 'markdown' }) });
+    if (offline) await runCase(cases, artifacts, { id: 'read-timeout', name: 'Controlled origin exceeds gateway read deadline', category: 'timeout', expectation: 'expected_timeout', expected_outcome: { kinds: DEADLINE_KINDS }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.timeout.url, render: 'never', output: 'markdown' }) });
     if (suite === 'release') {
       const baseline = cases.find(item => item.id === 'read-static');
       await runCase(cases, artifacts, { id: 'concurrency-two', name: 'Two concurrent reads', category: 'concurrency', tool: 'web_read', run: async () => {
@@ -299,7 +319,7 @@ async function main() {
   const policy = evaluateGates(cases, { suite, thresholds, complete: completed && !failure && cleanupErrors.length === 0, expected_case_ids: expectedCaseIds });
   const proxyRestartsStart = resourceStart['web-access-egress-proxy.service']?.restarts ?? 0;
   const proxyRestartsEnd = resourceEnd['web-access-egress-proxy.service']?.restarts ?? 0;
-  const report = { schema_version: REPORT_VERSION, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, ...policy, thresholds_source: 'report', lifecycle: { completed, deadline_ms: lifecycle.budgetMs, cleanup_tolerance_ms: cleanupBudgetMs, report_tolerance_ms: reportBudgetMs, ...(failure ? { error: failure } : {}), cleanup_errors: cleanupErrors }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
+  const report = { schema_version: REPORT_VERSION, ...acceptanceScope, id: runId, suite, started_at: startedAt.toISOString(), completed_at: completedAt.toISOString(), duration_ms: completedAt - startedAt, ...policy, thresholds_source: 'report', lifecycle: { completed, deadline_ms: lifecycle.budgetMs, cleanup_tolerance_ms: cleanupBudgetMs, report_tolerance_ms: reportBudgetMs, ...(failure ? { error: failure } : {}), cleanup_errors: cleanupErrors }, summary, dimensions: dimensionSummaries(cases), tools: toolSummaries(cases), cases, artifacts, resources: { start: resourceStart, end: resourceEnd, peak: peakResources(resourceSamples), sample_count: resourceSamples.length, proxy_restart_increase: Math.max(0, proxyRestartsEnd - proxyRestartsStart) } };
   if (report.status !== 'passed') process.exitCode = 1;
   const reportPath = path.join(reportDirectory, `${runId}.json`); const temporaryPath = `${reportPath}.${crypto.randomUUID()}.tmp`;
   try {

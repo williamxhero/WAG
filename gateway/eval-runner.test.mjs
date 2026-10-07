@@ -45,9 +45,9 @@ async function fixture(t, handler) {
   return { root, url, requests, sockets, server };
 }
 
-async function runEvaluator(t, fixture, overrides = {}, nodeArgs = [], expectedCode = 1, suite = 'smoke') {
+async function runEvaluator(t, fixture, overrides = {}, nodeArgs = [], expectedCode = 1, suite = 'smoke', offline = false) {
   const started = performance.now();
-  const child = spawn(process.execPath, [...nodeArgs, path.join(moduleDir, 'eval-runner.mjs'), suite], {
+  const child = spawn(process.execPath, [...nodeArgs, path.join(moduleDir, 'eval-runner.mjs'), suite, ...(offline ? ['--offline'] : [])], {
     cwd: moduleDir,
     env: { ...process.env, WAG_ROOT: fixture.root, WAG_EVAL_SAMPLES: path.join(moduleDir, '../eval/samples.json'), GATEWAY_EVAL_URL: fixture.url, GATEWAY_TOKEN: 'offline-test-credential-not-a-secret'.repeat(2), WAG_EVAL_DEADLINE_MS: '5000', ...overrides },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -99,6 +99,26 @@ test('completed offline smoke retains a passed report and releases owned session
   assert.deepEqual(report?.lifecycle?.cleanup_errors, []);
   assert.equal(stderr, '');
   assert.ok(f.requests.some(request => request.method === 'DELETE'));
+});
+
+test('offline release refuses missing controlled-timeout samples and cannot certify public connectivity', async t => {
+  const f = await passingFixture(t);
+  const { report } = await runEvaluator(t, f, {}, [], 1, 'release', true);
+  assert.equal(report.status, 'failed');
+  assert.equal(report.acceptance_scope, 'deterministic_offline');
+  assert.deepEqual(report.deferred_checks, ['live_public_connectivity', 'provenance_matched_live_rollout']);
+  assert.equal(report.lifecycle.completed, false);
+  assert.match(report.lifecycle.error.message, /controlled timeout/);
+});
+
+test('offline release rejects public sample URLs before sending any tool requests', async t => {
+  const f = await passingFixture(t);
+  const samples = JSON.parse(await fs.readFile(path.join(moduleDir, '../eval/samples.json'), 'utf8'));
+  const file = path.join(f.root, 'offline-samples.json');
+  await fs.writeFile(file, JSON.stringify({ ...samples, timeout: { url: 'http://deadline.fixture.test/stall' } }));
+  const { report } = await runEvaluator(t, f, { WAG_EVAL_SAMPLES: file }, [], 1, 'release', true);
+  assert.match(report.lifecycle.error.message, /controlled fixture URLs/);
+  assert.equal(f.requests.filter(request => request.message?.method === 'tools/call').length, 0);
 });
 
 async function samplesWithThresholds(f, thresholds) {

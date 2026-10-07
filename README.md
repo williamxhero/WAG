@@ -254,14 +254,76 @@ After an uncatchable interruption use `status` then `abort`; retained snapshots
 must not be removed. Runtime-only transactions still do not restore SearXNG.
 Neither offline staging nor commit is #9/#26 acceptance or live-deploy permission.
 
-Offline fixtures use only temporary roots/settings and stub service/dependency/
-readiness commands: provision gateway packages separately with `npm --prefix
-gateway ci --ignore-scripts`, then run `python3 scripts/deploy.test.py` (Linux,
-Node 22 and the already-pinned PyYAML prerequisite). The complete offline rehearsal
-copies those local locked packages and runs the unchanged search/evidence tests
-against the provenance-matched committed candidate; it never installs browsers
-or uses network credentials. CI serializes test files while preserving explicit
-in-test concurrency scenarios.
+### Offline remediation release rehearsal (#26)
+
+Offline implementation and rehearsal are authorized separately from live operations.
+Provision locked packages and an **isolated** Linux Chromium cache first (Node 22,
+gateway and Playwright MCP `npm ci --ignore-scripts`, pinned FastAPI/Pydantic/Uvicorn/
+PyYAML API fixture dependencies from `config/crawl4ai-requirements.lock`). Package
+provisioning is not acceptance execution. Set `PLAYWRIGHT_BROWSERS_PATH` to that
+isolated cache and `PLAYWRIGHT_SKIP_BROWSER_GC=1` only for this fixture environment;
+never clean or repurpose existing browser caches. Acceptance itself uses temporary
+roots, synthetic authentication, loopback protocol fixtures and stub service/install
+commands; it requires no public sites, live credentials, privileged systemd actions,
+or production private-address bypass. It can run with external networking disabled.
+
+From the provisioned Linux candidate, run:
+
+```bash
+node --test --test-concurrency=1 gateway/*.test.mjs proxy/*.test.mjs
+WAG_OFFLINE_EVIDENCE_DIR="$PWD/reports/offline-release" python3 scripts/deploy.test.py
+python3 scripts/bootstrap.test.py
+python3 -m unittest discover --start-directory crawl4ai --pattern '*_test.py'
+```
+
+CI discovers all gateway/proxy tests, `scripts/*.test.py`, crawler `*_test.py`,
+and every tracked shell/JavaScript/Python syntax check. Files are serialized while
+explicit in-test concurrency is preserved. Real Chromium/owned crawler API pinning
+regressions remain in the suite; the release fixture's browser/Crawl4AI protocol
+stand-ins are **not** evidence of live SDK rendering or live connectivity.
+
+The staged transaction rehearsal installs the reviewed candidate into a disposable
+root, validates installed helper/module hashes, locked dependency versions and
+relevant effective overlay digests, then runs the installed complete release wrapper:
+
+```bash
+# Only from the controlled fixture harness, with explicit fixture samples,
+# loopback GATEWAY_EVAL_URL and synthetic GATEWAY_TOKEN supplied in its environment.
+"$DISPOSABLE_ROOT/scripts/eval-release.sh" --offline "$DISPOSABLE_ROOT"
+```
+
+`--offline` never sources host secrets or runs live listener/health checks. It
+requires explicit controlled `.fixture.test` samples including a streaming timeout
+origin; missing deadline evidence fails rather than becoming a skipped pass. The
+real gateway/shared CONNECT path still enforces public-address validation and read
+deadlines. Reports label `acceptance_scope=deterministic_offline` and explicitly
+list `live_public_connectivity` and `provenance_matched_live_rollout` as deferred,
+not passed. The no-argument **live** wrapper path is unchanged.
+
+The rehearsal covers passed, aggregate-gate-failed and connectivity-degraded
+nonzero evaluator exits, subsequent recovery, bounded cleanup and coordinated
+runtime/overlay restore. It also injects incomplete inventories, locked-install
+failure, core readiness failure and same-revision module/config/version/overlay
+drift. Core readiness failure restores both sides; public readiness degradation
+may allow staged activation, but never turns a degraded evaluator into a passing
+release. Commit remains an explicit operator step after evaluation, not automatic
+on wrapper exit.
+
+`reports/offline-release/` retains sanitized provenance/journal classifications and
+all five evaluator reports, including same-second outcomes, after fixture rollback.
+CI uploads this evidence for 30 days, including failure runs. Credentials, raw
+settings/env snapshots and raw service output are not exported; those snapshots
+remain transaction-private. Local reports are ignored by Git and must be retained
+or attached separately when recording acceptance evidence.
+
+**Live prerequisite and closure boundary:** the **USER must rotate both exposed
+gateway and crawler tokens and synchronize every dependent configuration**. Then
+the USER must separately authorize a provenance-matched live rollout on the small
+computer (`yosef-server`) and complete release evaluation. Passing all configured
+live gates, public connectivity checks, real browser/crawler behavior and retaining
+rollback/diagnostic evidence remain required for overall #9 remediation closure.
+Offline success neither performs those operations nor closes the parent; this
+live prerequisite does not block offline implementation.
 
 ### 产物生命周期
 

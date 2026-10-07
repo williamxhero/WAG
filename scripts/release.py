@@ -41,7 +41,8 @@ MANIFESTS = ("runtime/gateway/package.json", "runtime/gateway/package-lock.json"
              "runtime/playwright-mcp/package.json", "runtime/playwright-mcp/package-lock.json",
              "config/crawl4ai-requirements.lock")
 REQUIRED = ("runtime/gateway/server.mjs", "runtime/gateway/search.mjs",
-            "runtime/gateway/eval-runner.mjs", "runtime/gateway/eval-case.mjs",
+            "runtime/gateway/eval-runner.mjs", "runtime/gateway/eval-case.mjs", "runtime/gateway/eval-core.mjs",
+            "scripts/eval-release.sh",
             "runtime/gateway/artifact-store.mjs", "runtime/gateway/readiness.mjs",
             "runtime/gateway/evidence-metadata.mjs", "scripts/searxng-overlay.py",
             "runtime/gateway/public/evals.html", "runtime/gateway/public/evals.js", "runtime/gateway/public/evals.css",

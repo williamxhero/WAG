@@ -230,6 +230,7 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                 self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "restored")
                 self.assertFalse((self.root / ".release-pending").exists())
                 self.assertNotIn("dummy-sensitive-output", result.stdout + result.stderr)
+                self.retain_evidence(tx, "activation-" + next(iter(failure)).lower())
 
     def test_effective_overlay_drift_at_commit_restores_both_sides(self):
         import yaml
@@ -383,6 +384,84 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                     if not unit.startswith("--"):
                         self.assertIn(unit, allowed, "all service actions are scoped to WAG/SearXNG stubs")
 
+    def test_staged_release_wrapper_exercises_complete_offline_evaluation_before_commit(self):
+        self.previous_runtime()
+        self.overlay_fixture()
+        packages = SOURCE / "gateway/node_modules"
+        self.assertTrue((packages / "jsdom/package.json").is_file(), "provision locked gateway dependencies first")
+        actual_node = os.environ.get("WAG_TEST_NODE") or shutil.which("node")
+        self.assertTrue(actual_node, "provision Node 22 first")
+        node = self.root / "runtime/node/bin/node"
+        node.unlink()
+        node.symlink_to(Path(actual_node).resolve())
+        for name in ("package.json", "package-lock.json"):
+            shutil.copy2(SOURCE / "gateway" / name, self.source / "gateway" / name)
+        subprocess.run(["git", "-C", str(self.source), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.source), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm",
+                        "Reviewed release fixture locks\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>"], check=True)
+        self.env["TEST_REAL_GATEWAY_PACKAGES"] = str(packages)
+        before, original = self.snapshot(), self.settings.read_bytes()
+        tx = self.prepare_overlay()
+        # Runtime core readiness permits public degradation; evaluator policy is
+        # independent and must still return nonzero for degraded/gate-failed runs.
+        activated = self.command("activate", tx, FAIL_PUBLIC="1")
+        self.assertEqual(activated.returncode, 0, activated.stderr)
+        self.assertEqual(json.loads(activated.stdout)["public_readiness"], "degraded")
+        result = subprocess.run([str(node), "--test", str(SOURCE / "gateway/release-rehearsal.test.mjs")],
+                                env={**self.env, "WAG_TEST_RELEASE_ROOT": str(self.root),
+                                     "WAG_TEST_GATEWAY_DIRECTORY": str(self.root / "runtime/gateway"),
+                                     "WAG_TEST_PROXY_DIRECTORY": str(self.root / "runtime/proxy"),
+                                     "WAG_TEST_RELEASE_WRAPPER": str(self.root / "scripts/eval-release.sh"),
+                                     "WAG_TEST_RELEASE_EVIDENCE": str(tx / "offline-evidence")},
+                                capture_output=True, text=True, timeout=50)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.command("commit", tx).returncode, 0)
+        provenance = json.loads((tx / "provenance.json").read_text())
+        import hashlib
+        for module in ("server.mjs", "search.mjs", "evidence-metadata.mjs", "eval-runner.mjs", "eval-case.mjs", "eval-core.mjs"):
+            name = "runtime/gateway/" + module
+            self.assertEqual(hashlib.sha256((self.root / name).read_bytes()).hexdigest(),
+                             provenance["inventory"][name]["sha256"])
+        evidence = tx / "offline-evidence"
+        reports = [json.loads(file.read_text()) for file in evidence.glob("*.json")]
+        self.assertEqual(len(reports), 5, "retain every outcome, even reports with the same second stamp")
+        self.assertEqual({report["status"] for report in reports}, {"passed", "failed", "degraded"})
+        self.assertTrue(all(report["acceptance_scope"] == "deterministic_offline" for report in reports))
+        self.assertNotIn("offline-release-fixture-only-not-a-live-token", json.dumps(reports))
+        shutil.rmtree(self.root / "reports")  # only this fixture's newly created tree
+        self.assertEqual(self.command("restore", tx).returncode, 0)
+        self.assertEqual(self.settings.read_bytes(), original)
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(list(evidence.glob("*.json")), "sanitized evidence survives coordinated restore")
+        self.retain_evidence(tx, "complete-release")
+
+    def retain_evidence(self, tx, label, command=None):
+        destination = os.environ.get("WAG_OFFLINE_EVIDENCE_DIR")
+        if not destination:
+            return
+        output = Path(destination).resolve()
+        self.assertTrue(output.is_relative_to(SOURCE), "evidence must stay in the owning repository")
+        output = output / label
+        output.mkdir(parents=True, exist_ok=True)
+        if command is not None:
+            # Preparation can fail before a transaction exists. Retain a fixed
+            # classification and measured exit, never raw dependency output.
+            diagnostic = {"classification": label, "exit_code": command.returncode,
+                          "reviewed_revision": subprocess.check_output(
+                              ["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip()}
+            (output / "diagnostic.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
+        if tx is None:
+            return
+        for name in ("provenance.json", "state.json", "searxng/state.json"):
+            file = tx / name
+            if file.exists():
+                value = json.loads(file.read_text())
+                self.assertNotIn("dummy-sensitive-output", json.dumps(value))
+                (output / name.replace("/", "-")).write_text(json.dumps(value, indent=2) + "\n")
+        if (tx / "offline-evidence").exists():
+            shutil.copytree(tx / "offline-evidence", output / "evaluations", dirs_exist_ok=True)
+
     def test_standalone_shell_uses_exclusive_backups_and_restores_failed_apply(self):
         self.overlay_fixture()
         original = self.settings.read_bytes()
@@ -444,6 +523,89 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
         self.assertNotEqual(self.command("commit", tx).returncode, 0)
         self.assertEqual(self.settings.read_bytes(), original)
         self.assertEqual(self.snapshot(), before)
+
+    def test_incomplete_inventory_and_failed_locked_install_never_mutate_runtime_or_overlay(self):
+        self.previous_runtime()
+        self.overlay_fixture()
+        before, original = self.snapshot(), self.settings.read_bytes()
+        for failure in ({"FAIL_INSTALL": "1"}, {"FAIL_PIP": "1"}):
+            with self.subTest(failure=failure):
+                result = self.command("prepare", self.source, "--target", self.root, "--units", self.units,
+                                      "--searxng-settings", self.settings, **failure)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.snapshot(), before)
+                self.assertEqual(self.settings.read_bytes(), original)
+                self.assertFalse((self.root / ".release-pending").exists())
+                self.assertNotIn("service restart", self.effects.read_text())
+                self.retain_evidence(None, "prepare-" + next(iter(failure)).lower(), result)
+        subprocess.run(["git", "-C", str(self.source), "rm", "gateway/evidence-metadata.mjs"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.source), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm",
+                        "Incomplete fixture inventory\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>"], check=True)
+        result = self.command("prepare", self.source, "--target", self.root, "--units", self.units,
+                              "--searxng-settings", self.settings)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required release inventory missing", result.stderr)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.settings.read_bytes(), original)
+        self.assertEqual(list((self.root / "releases").iterdir()), [])
+        self.retain_evidence(None, "prepare-incomplete-inventory", result)
+
+    def test_missing_complete_release_entrypoints_rejects_staging(self):
+        for name in ("gateway/eval-core.mjs", "scripts/eval-release.sh"):
+            with self.subTest(name=name):
+                file = self.source / name
+                original = file.read_bytes()
+                subprocess.run(["git", "-C", str(self.source), "rm", name], check=True, capture_output=True)
+                subprocess.run(["git", "-C", str(self.source), "-c", "user.name=Fixture", "-c",
+                                "user.email=fixture@example.invalid", "commit", "-qm",
+                                "Incomplete release entrypoint\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>"], check=True)
+                result = self.command("prepare", self.source, "--target", self.root, "--units", self.units)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("required release inventory missing", result.stderr)
+                self.assertFalse((self.root / ".release-pending").exists())
+                file.write_bytes(original)
+                subprocess.run(["git", "-C", str(self.source), "add", name], check=True)
+                subprocess.run(["git", "-C", str(self.source), "-c", "user.name=Fixture", "-c",
+                                "user.email=fixture@example.invalid", "commit", "-qm",
+                                "Restore fixture entrypoint\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>"], check=True)
+
+    def test_same_revision_cannot_hide_mixed_installed_modules_config_versions_or_overlay(self):
+        import yaml
+        self.previous_runtime()
+        self.overlay_fixture()
+        before, original = self.snapshot(), self.settings.read_bytes()
+        for drift in ("module", "config", "version", "overlay"):
+            with self.subTest(drift=drift):
+                tx = self.prepare_overlay()
+                revision = json.loads((tx / "provenance.json").read_text())["reviewed_revision"]
+                self.assertEqual(self.command("activate", tx).returncode, 0)
+                if drift == "module":
+                    (self.root / "runtime/gateway/evidence-metadata.mjs").write_text("// different installed helper\n")
+                elif drift == "config":
+                    file = self.root / "config/playwright.env"
+                    file.write_text(file.read_text().replace(":7895", ":7888"))
+                elif drift == "version":
+                    (tx / "candidate/runtime/gateway/node_modules/express/package.json").write_text('{"version":"0.0.0"}')
+                else:
+                    value = yaml.safe_load(self.settings.read_text())
+                    value["engines"][0]["disabled"] = True
+                    self.settings.write_text(yaml.safe_dump(value))
+                result = self.command("commit", tx)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(json.loads((tx / "provenance.json").read_text())["reviewed_revision"], revision)
+                expected = dict(before)
+                if drift == "config":
+                    # Unknown/operator environment is protected, not release-owned.
+                    # Drift blocks commit, but rollback must not overwrite that edit.
+                    key = "root/config/playwright.env"
+                    expected[key] = ("file", before[key][1].replace(b":7895", b":7888"), before[key][2])
+                self.assertEqual(self.snapshot(), expected)
+                if drift == "config":
+                    (self.root / "config/playwright.env").write_bytes(before["root/config/playwright.env"][1])
+                self.assertEqual(self.settings.read_bytes(), original)
+                self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "restored")
+                self.retain_evidence(tx, "drift-" + drift)
 
     def test_per_engine_proxy_choices_are_preserved_in_effective_verification(self):
         import yaml

@@ -18,12 +18,13 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function gatewayFixture(t, { search = validSearch, searchDelayMs = 0, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, requestTimeoutMs = 8000, env = {} } = {}) {
+async function gatewayFixture(t, { search = validSearch, searchTiming, searchDelayMs = 0, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, requestTimeoutMs = 8000, env = {} } = {}) {
   const counts = { search: 0, crawler: 0, crawl: 0 };
   const backend = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.url.startsWith('/search')) {
       counts.search++;
+      if (searchTiming !== undefined) res.setHeader('server-timing', searchTiming);
       if (!searchDelayMs) return res.end(JSON.stringify(search));
       const timer = setTimeout(() => res.end(JSON.stringify(search)), searchDelayMs);
       res.once('close', () => clearTimeout(timer));
@@ -75,7 +76,21 @@ async function gatewayFixture(t, { search = validSearch, searchDelayMs = 0, craw
   return { base, request, counts, proxyState, logs: () => logs };
 }
 
-test('gateway rejects empty search even when the backend returns HTTP 200', async t => {
+test('gateway accepts a completed zero-hit search with partially blocked engines', async t => {
+  const { request } = await gatewayFixture(t, {
+    search: { results: [], unresponsive_engines: [['google', 'CAPTCHA'], ['brave', 'rate limited']] },
+    searchTiming: 'total;dur=8000, render;dur=1, total_0_bing;dur=200, load_0_bing;dur=199',
+  });
+  const response = await request('/readyz');
+  assert.equal(response.status, 503); // Only the offline public-egress fixture fails.
+  const search = (await response.json()).dependencies.find(item => item.name === 'searxng');
+  assert.equal(search.ok, true);
+  assert.equal(search.result_count, 0);
+  assert.equal(search.responsive_engine_count, 1);
+  assert.deepEqual(search.unresponsive_engines, [['google', 'CAPTCHA'], ['brave', 'rate limited']]);
+});
+
+test('gateway rejects empty search without evidence of a completed engine even with HTTP 200', async t => {
   const fixture = await gatewayFixture(t, { search: { results: [], unresponsive_engines: [['bing', 'timeout']] } });
   const response = await fixture.request('/readyz');
   const readiness = await response.json();
@@ -257,6 +272,8 @@ async function readinessFixture(t, options = {}) {
     if (name === 'crawler') assert.equal(req.headers.authorization, `Bearer ${crawlToken}`);
     res.statusCode = state[`${name}Status`] ?? (name === 'playwright' ? 405 : 200);
     res.setHeader('content-type', 'application/json');
+    if (name === 'search' && state.searchTiming !== undefined) res.setHeader('server-timing', state.searchTiming);
+    if (state[`${name}Disconnect`]) return req.socket.destroy();
     res.end(state[`${name}Raw`] ?? JSON.stringify(state[name] ?? {}));
   });
   backend.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
@@ -271,7 +288,7 @@ async function readinessFixture(t, options = {}) {
 }
 
 test('readiness rejects malformed search and results without usable HTTP evidence', async t => {
-  for (const search of [null, {}, { results: 'invalid' }, { results: [null, {}, { url: 'javascript:alert(1)', title: 'Bad', content: 'Bad' }] }, { results: [{ url: 'https://example.com/', title: 42, content: 'Bad title type' }] }]) {
+  for (const search of [null, {}, { results: 'invalid' }, { results: [] }, { results: [], unresponsive_engines: 'invalid' }, { results: [null, {}, { url: 'javascript:alert(1)', title: 'Bad', content: 'Bad' }] }, { results: [{ url: 'https://example.com/', title: 42, content: 'Bad title type' }] }]) {
     const { read } = await readinessFixture(t, { state: { search } });
     const readiness = await read();
     assert.equal(readiness.ok, false);
@@ -280,6 +297,57 @@ test('readiness rejects malformed search and results without usable HTTP evidenc
   }
   const { read } = await readinessFixture(t, { state: { searchRaw: '<html>not JSON</html>' } });
   assert.equal((await read()).dependencies[0].error.kind, 'dependency_invalid_data');
+});
+
+test('readiness repeatedly accepts zero hits only with positive completed-engine evidence', async t => {
+  const { read, counts } = await readinessFixture(t, {
+    state: {
+      search: { results: [], unresponsive_engines: [['google', 'CAPTCHA'], ['brave', 'rate limited']] },
+      searchTiming: 'total;dur=8000, render;dur=1, total_0_bing;dur=0, total_1_bing;dur=1, total_2_other_engine name;dur=1.25',
+    },
+    config: { cacheMs: 0 },
+  });
+  for (let i = 0; i < 6; i++) {
+    const readiness = await read();
+    assert.equal(readiness.ok, true);
+    assert.equal(readiness.status, 'passed');
+    assert.equal(readiness.dependencies[0].result_count, 0);
+    assert.equal(readiness.dependencies[0].responsive_engine_count, 2);
+  }
+  assert.equal(counts.search, 6, 'each probe evaluated a fresh response');
+});
+
+test('readiness rejects dead-but-200 and all-unresponsive searches despite timing headers', async t => {
+  for (const state of [
+    { searchRaw: '' },
+    { searchRaw: 'not JSON' },
+    { search: {} },
+    { search: { results: [] } },
+    { search: { results: [], unresponsive_engines: null } },
+    { search: { results: [], unresponsive_engines: [[]] } },
+    { search: { results: [], unresponsive_engines: [['bing']] } },
+    { search: { results: [], unresponsive_engines: [[42, 'timeout']] } },
+    { search: { results: [], unresponsive_engines: [] }, searchTiming: undefined },
+    { search: { results: [], unresponsive_engines: [] }, searchTiming: 'total;dur=1, render;dur=1, load_0_bing;dur=1' },
+    { search: { results: [], unresponsive_engines: [] }, searchTiming: 'total_0_bing;dur=NaN, total_1_google;dur=-1, total_2_brave;dur=Infinity' },
+    { search: { results: [], unresponsive_engines: [['bing', 'timeout', true], ['google', 'CAPTCHA']] }, searchTiming: 'total_0_bing;dur=1, total_1_google;dur=2' },
+    { search: { results: [{ ...validSearch.results[0], engine: 'bing' }], unresponsive_engines: [['bing', 'timeout']] } },
+    { search: { results: [{ url: 'javascript:alert(1)', title: 'Bad' }], unresponsive_engines: [] } },
+  ]) {
+    const { read } = await readinessFixture(t, { state: { searchTiming: 'total_0_bing;dur=1', ...state } });
+    const readiness = await read();
+    assert.equal(readiness.ok, false, JSON.stringify(state));
+    assert.equal(readiness.dependencies[0].ok, false);
+  }
+});
+
+test('readiness reports a disconnected SearXNG as unhealthy within the configurable deadline', async t => {
+  const { read } = await readinessFixture(t, { state: { searchDisconnect: true }, config: { probeTimeoutMs: 500 } });
+  const started = performance.now();
+  const search = (await read()).dependencies[0];
+  assert.equal(search.ok, false);
+  assert.equal(search.error.kind, 'dependency_error');
+  assert.ok(performance.now() - started < 1000);
 });
 
 test('readiness preserves sanitized backend and engine failure diagnostics', async t => {

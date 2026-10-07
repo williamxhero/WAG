@@ -28,6 +28,18 @@ function engineDetails(value, secrets) {
     : sanitizeDiagnostic(item, secrets));
 }
 
+function responsiveEngineCount(serverTiming, unresponsiveEngines) {
+  const failed = new Set(unresponsiveEngines.map(item => item[0]));
+  const responsive = new Set();
+  // SearXNG emits per-engine total timings only for completed searches, including
+  // zero hits. Aggregate timings and engines also reported failed are not proof.
+  for (const metric of (serverTiming ?? '').split(',')) {
+    const match = /^total_\d+_([^;]+);dur=(\d+(?:\.\d+)?)$/.exec(metric.trim());
+    if (match && match[1].trim() && Number.isFinite(Number(match[2])) && !failed.has(match[1])) responsive.add(match[1]);
+  }
+  return responsive.size;
+}
+
 async function responseText(response) {
   const reader = response.body?.getReader();
   if (!reader) return '';
@@ -54,7 +66,7 @@ async function probeJson(url, options, label) {
   try { body = JSON.parse(text); } catch { /* Non-JSON error bodies still carry a useful HTTP diagnostic. */ }
   if (!response.ok) throw failure('dependency_http_status', `${label} returned HTTP ${response.status}: ${text}`, { httpStatus: response.status, engines: body?.unresponsive_engines });
   if (body === undefined) throw failure('dependency_invalid_data', `${label} returned invalid JSON`, { httpStatus: response.status });
-  return { body, http_status: response.status };
+  return { body, http_status: response.status, server_timing: response.headers.get('server-timing') };
 }
 
 // The only injected operation is the existing public-egress transport boundary.
@@ -87,9 +99,12 @@ export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl,
   async function check() {
     const dependencies = await Promise.all([
       probe('searxng', 'public_connectivity', async signal => {
-        const { body, http_status } = await probeJson(`${searxUrl.replace(/\/+$/, '')}/search?q=readyz&format=json`, { signal }, 'SearXNG');
+        const { body, http_status, server_timing } = await probeJson(`${searxUrl.replace(/\/+$/, '')}/search?q=readyz&format=json`, { signal }, 'SearXNG');
         if (!body || typeof body !== 'object' || !Array.isArray(body.results)) throw failure('dependency_invalid_data', 'SearXNG response must contain a results array', { httpStatus: http_status, engines: body?.unresponsive_engines });
+        if (body.unresponsive_engines !== undefined && (!Array.isArray(body.unresponsive_engines) || !body.unresponsive_engines.every(item => Array.isArray(item) && item.length >= 2 && typeof item[0] === 'string' && item[0].trim() && typeof item[1] === 'string'))) throw failure('dependency_invalid_data', 'SearXNG returned invalid engine diagnostics', { httpStatus: http_status, engines: body.unresponsive_engines });
+        const failed = new Set((body.unresponsive_engines ?? []).map(item => item[0]));
         const items = body.results.filter(item => {
+          if (failed.has(item?.engine)) return false;
           if (typeof item?.url !== 'string' || (item.title != null && typeof item.title !== 'string') || (item.content != null && typeof item.content !== 'string')) return false;
           try {
             const url = new URL(item.url);
@@ -97,8 +112,9 @@ export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl,
           } catch { return false; }
         });
         const results = normalizeSearchResults(items);
-        if (!results.length) throw failure('search_empty', 'SearXNG returned no usable normalized results', { httpStatus: http_status, engines: body.unresponsive_engines });
-        return { http_status, result_count: results.length, ...(body.unresponsive_engines !== undefined ? { unresponsive_engines: engineDetails(body.unresponsive_engines, [crawlToken, ...secrets]) } : {}) };
+        const responsive_engine_count = responsiveEngineCount(server_timing, body.unresponsive_engines ?? []);
+        if (!results.length && (body.results.length || !Array.isArray(body.unresponsive_engines) || !responsive_engine_count)) throw failure('search_empty', 'SearXNG returned no usable results or evidence of a responsive engine', { httpStatus: http_status, engines: body.unresponsive_engines });
+        return { http_status, result_count: results.length, ...(responsive_engine_count ? { responsive_engine_count } : {}), ...(body.unresponsive_engines !== undefined ? { unresponsive_engines: engineDetails(body.unresponsive_engines, [crawlToken, ...secrets]) } : {}) };
       }),
       probe('crawl4ai', 'core', async signal => {
         const { body, http_status } = await probeJson(`${crawlUrl.replace(/\/+$/, '')}/readyz`, { headers: { authorization: `Bearer ${crawlToken}` }, signal }, 'Crawl4AI');

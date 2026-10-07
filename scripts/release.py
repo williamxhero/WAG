@@ -520,16 +520,17 @@ def pending(root, tx):
         raise ReleaseError("transaction is not the pending release")
 
 
-def restore_runtime(tx, state, root, unit_dir):
+def restore_runtime(tx, state, root, unit_dir, finalize=True):
     if state["status"] == "restored":
         file = root / ".release-pending"
-        if file.exists() and file.read_text().strip() == str(tx):
+        if finalize and file.exists() and file.read_text().strip() == str(tx):
             file.unlink()
         return
     if state["status"] == "prepared":
         pending(root, tx)
-        write_state(tx, state, "restored")
-        (root / ".release-pending").unlink()
+        if finalize:
+            write_state(tx, state, "restored")
+            (root / ".release-pending").unlink()
         return
     if state["status"] == "committed":
         file = root / ".release-pending"
@@ -604,10 +605,11 @@ def restore_runtime(tx, state, root, unit_dir):
         write_state(tx, state, "restore_failed")
         raise ReleaseError("snapshot restoration failed: " + ",".join(state["restore_errors"]))
     state.pop("restore_errors", None)
-    write_state(tx, state, "restored")
-    file = root / ".release-pending"
-    if file.exists() and file.read_text().strip() == str(tx):
-        file.unlink()
+    if finalize:
+        write_state(tx, state, "restored")
+        file = root / ".release-pending"
+        if file.exists() and file.read_text().strip() == str(tx):
+            file.unlink()
 
 
 def overlay_command(tx, command):
@@ -644,7 +646,10 @@ def restore(tx, state, root, unit_dir):
                 state["overlay_restore_errors"] = ["journal_unavailable"]
     runtime_error = None
     try:
-        restore_runtime(tx, state, root, unit_dir)
+        # Keep the pending marker until BOTH sides have restored. An overlay
+        # failure must never briefly publish runtime's standalone success state,
+        # even if the coordinator is interrupted before recording the failure.
+        restore_runtime(tx, state, root, unit_dir, finalize=not state.get("searxng"))
     except (ReleaseError, OSError, Interrupted) as error:
         runtime_error = error
     if overlay_errors:
@@ -654,6 +659,11 @@ def restore(tx, state, root, unit_dir):
         raise ReleaseError("coordinated restoration failed: " + ",".join(state["restore_errors"]))
     if runtime_error:
         raise runtime_error
+    if state.get("searxng"):
+        write_state(tx, state, "restored")
+        file = root / ".release-pending"
+        if file.exists() and file.read_text().strip() == str(tx):
+            file.unlink()
 
 
 def validate_candidate(tx, state, root):

@@ -17,7 +17,22 @@ jobs:
       - run: node --check gateway/eval-runner.mjs
       - run: node --check proxy/server.mjs
       - run: npm --prefix gateway ci --ignore-scripts --no-audit --no-fund
+      - run: npm --prefix runtime/playwright-mcp ci --ignore-scripts --no-audit --no-fund
+      - run: node runtime/playwright-mcp/node_modules/playwright/cli.js install --with-deps chromium
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked crawler API fixture dependencies
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+          packages = {'fastapi', 'pydantic', 'uvicorn'}
+          requirements = [line for line in Path('config/crawl4ai-requirements.lock').read_text().splitlines() if line.split('==')[0] in packages]
+          subprocess.run([sys.executable, '-m', 'pip', 'install', *requirements], check=True)
+          PY
       - run: npm --prefix gateway test
-      - run: node --test proxy/server.test.mjs
+      - run: node --test proxy/*.test.mjs
       - run: for script in scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh scripts/cleanup-artifacts.sh scripts/install-artifact-cleanup.sh scripts/bootstrap.sh; do bash -n "$script" || exit; done
       - run: python3 scripts/bootstrap.test.py

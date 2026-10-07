@@ -31,15 +31,15 @@ jobs:
           from pathlib import Path
           import subprocess
           import sys
-          packages = {'fastapi', 'pydantic', 'uvicorn'}
+          packages = {'fastapi', 'pydantic', 'uvicorn', 'PyYAML'}
           requirements = [line for line in Path('config/crawl4ai-requirements.lock').read_text().splitlines() if line.split('==')[0] in packages]
           subprocess.run([sys.executable, '-m', 'pip', 'install', *requirements], check=True)
           PY
-      - run: npm --prefix gateway test
+      - run: node --test --test-concurrency=1 gateway/*.test.mjs
       - run: node --test proxy/*.test.mjs
-      - run: for script in scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh scripts/cleanup-artifacts.sh scripts/install-artifact-cleanup.sh scripts/bootstrap.sh; do bash -n "$script" || exit; done
+      - run: for script in scripts/healthcheck.sh scripts/deploy.sh scripts/searxng-apply-overlay.sh scripts/eval-smoke.sh scripts/cleanup-artifacts.sh scripts/install-artifact-cleanup.sh scripts/bootstrap.sh; do bash -n "$script" || exit; done
       - run: python3 scripts/bootstrap.test.py
-      - name: Offline runtime release transaction fixtures
+      - name: Offline coordinated runtime and overlay release fixtures
         run: python3 scripts/deploy.test.py
       - name: Python syntax without cache artifacts
         run: |

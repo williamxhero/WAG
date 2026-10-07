@@ -2,6 +2,9 @@
 # Apply with scripts/searxng-apply-overlay.sh; do not replace settings.yml by hand.
 # The apply script merges mappings and engine entries by name, preserving the rest
 # of the distribution's settings and creating a timestamped rollback copy.
+# Existing operator/backend proxy maps are preserved; this proxy is a default
+# only when no outgoing proxy map exists. Coordinated release provenance verifies
+# the effective preserved map, not just the values in this overlay file.
 
 outgoing:
   # Google, Bing, DuckDuckGo and the other public engines are not reachable

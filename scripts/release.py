@@ -4,10 +4,13 @@
 prepare SOURCE --target ROOT --units UNIT_DIR returns {transaction: PATH}.
 activate PATH leaves an uncommitted candidate; commit PATH seals it. abort PATH
 restores any uncommitted transaction; restore PATH also restores a committed one.
+Add --searxng-settings FILE to prepare for a coordinated reviewed-overlay release.
+Prepare snapshots both sides; activation applies/verifies the overlay before the
+runtime, and commit rechecks effective engines/proxies. Abort/restore and ALL
+activation/commit errors restore both sides, with retryable sanitized diagnostics.
+Without that option the #24 runtime-only CLI/contract remains unchanged.
 Snapshots and candidate venvs must be retained: venv scripts are not relocatable.
-The overlay coordinator must capture its snapshot before mutation, and restore it
-on ANY downstream error, including activate/commit failures and interruptions.
-This runtime-only contract does not authorize deployment or assert #9 acceptance.
+This offline contract does not authorize deployment or assert #9 acceptance.
 """
 import argparse
 import contextlib
@@ -40,6 +43,7 @@ MANIFESTS = ("runtime/gateway/package.json", "runtime/gateway/package-lock.json"
 REQUIRED = ("runtime/gateway/server.mjs", "runtime/gateway/search.mjs",
             "runtime/gateway/eval-runner.mjs", "runtime/gateway/eval-case.mjs",
             "runtime/gateway/artifact-store.mjs", "runtime/gateway/readiness.mjs",
+            "runtime/gateway/evidence-metadata.mjs", "scripts/searxng-overlay.py",
             "runtime/gateway/public/evals.html", "runtime/gateway/public/evals.js", "runtime/gateway/public/evals.css",
             "runtime/proxy/server.mjs", "runtime/crawl4ai-service/app.py", "eval/samples.json",
             "scripts/bootstrap-bind.py", "scripts/healthcheck.sh", "scripts/healthcheck-diagnostics.py",
@@ -516,7 +520,7 @@ def pending(root, tx):
         raise ReleaseError("transaction is not the pending release")
 
 
-def restore(tx, state, root, unit_dir):
+def restore_runtime(tx, state, root, unit_dir):
     if state["status"] == "restored":
         file = root / ".release-pending"
         if file.exists() and file.read_text().strip() == str(tx):
@@ -606,6 +610,52 @@ def restore(tx, state, root, unit_dir):
         file.unlink()
 
 
+def overlay_command(tx, command):
+    helper = Path(__file__).with_name("searxng-overlay.py")
+    output, _ = run(["python3", helper, command, tx / "searxng"], "overlay " + command,
+                    timeout=480)
+    return json.loads(output)
+
+
+def restore(tx, state, root, unit_dir):
+    # Runtime's automatic restoration alone cannot undo an external overlay.
+    # Attempt both sides even if one fails; preserve a pending retryable journal.
+    # Refuse stale/superseded transactions before touching either side.
+    if state["status"] == "committed":
+        file = root / ".release-pending"
+        current = root / ".release-current"
+        if ((file.exists() and file.read_text().strip() != str(tx)) or not current.is_file()
+                or current.read_text().strip() != str(tx)):
+            raise ReleaseError("cannot restore a superseded committed release")
+    elif state["status"] != "restored":
+        pending(root, tx)
+    overlay_errors = []
+    if state.get("searxng"):
+        try:
+            overlay_command(tx, "restore")
+            state.pop("overlay_restore_errors", None)
+        except (ReleaseError, OSError, ValueError, subprocess.TimeoutExpired, Interrupted):
+            overlay_errors.append("overlay_restore")
+            try:
+                errors = load(tx / "searxng/state.json").get("restore_errors", [])
+                state["overlay_restore_errors"] = [e for e in errors if e in {
+                    "snapshot_copy", "service_restore", "readiness_restore"}]
+            except (OSError, ValueError):
+                state["overlay_restore_errors"] = ["journal_unavailable"]
+    runtime_error = None
+    try:
+        restore_runtime(tx, state, root, unit_dir)
+    except (ReleaseError, OSError, Interrupted) as error:
+        runtime_error = error
+    if overlay_errors:
+        state["restore_errors"] = sorted(set(state.get("restore_errors", []) + overlay_errors))
+        text(root / ".release-pending", str(tx))
+        write_state(tx, state, "restore_failed")
+        raise ReleaseError("coordinated restoration failed: " + ",".join(state["restore_errors"]))
+    if runtime_error:
+        raise runtime_error
+
+
 def validate_candidate(tx, state, root):
     candidate = tx / "candidate"
     verify(candidate, state["inventory"])
@@ -637,6 +687,8 @@ def activation(tx, state, root, unit_dir):
     candidate = tx / "candidate"
     try:
         validate_candidate(tx, state, root)
+        if state.get("searxng"):
+            overlay_command(tx, "apply")
         write_state(tx, state, "activating")
         for unit in RUNTIME + TIMERS:
             run(["systemctl", "stop", unit], "activation stop")
@@ -714,6 +766,7 @@ def main():
     stage.add_argument("source")
     stage.add_argument("--target", required=True)
     stage.add_argument("--units", required=True)
+    stage.add_argument("--searxng-settings", help="opt in to coordinated reviewed overlay and runtime release")
     for name in ("activate", "commit", "abort", "restore", "status"):
         sub.add_parser(name).add_argument("transaction")
     args = parser.parse_args()
@@ -730,6 +783,15 @@ def main():
             try:
                 state["obsolete"] = obsolete(root, state["inventory"])
                 snapshot(tx, state)
+                if args.searxng_settings:
+                    output, _ = run(["python3", Path(__file__).with_name("searxng-overlay.py"), "prepare",
+                                     args.searxng_settings, tx / "candidate/config/searxng/settings-overlay.yml",
+                                     "--backup", tx / "searxng"], "overlay snapshot")
+                    state["searxng"] = json.loads(output)
+                    provenance = load(tx / "provenance.json")
+                    provenance["searxng"] = state["searxng"]
+                    provenance["scope"] = "coordinated runtime and reviewed overlay; complete release acceptance pending"
+                    save(tx / "provenance.json", provenance)
                 save(tx / "state.json", state)
                 text(root / ".release-pending", str(tx))
             except BaseException:
@@ -746,6 +808,10 @@ def main():
                     raise ReleaseError("only an activated transaction can commit")
                 try:
                     validate_candidate(tx, state, root)
+                    if state.get("searxng"):
+                        observed = overlay_command(tx, "verify")
+                        if observed != state["searxng"] or observed != load(tx / "provenance.json").get("searxng"):
+                            raise ReleaseError("effective overlay provenance drift")
                     verify(root, state["inventory"])
                     for name in ("runtime/gateway/node_modules", "runtime/playwright-mcp/node_modules", "runtime/crawl4ai-venv"):
                         file = root / name
@@ -764,7 +830,8 @@ def main():
                 restore(tx, state, root, unit_dir)
     print(json.dumps({"transaction": str(tx), "status": state["status"],
                       "public_readiness": state.get("public_readiness"),
-                      "restore_errors": state.get("restore_errors", [])}))
+                      "restore_errors": state.get("restore_errors", []),
+                      "overlay_restore_errors": state.get("overlay_restore_errors", [])}))
 
 
 if __name__ == "__main__":

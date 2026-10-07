@@ -156,6 +156,8 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
 - 离线回归：`npm --prefix gateway ci && npm --prefix gateway test`，包括 MCP 网关边界的受控分块流测试及产物下载/配额测试；无需公网网站、运行时服务或真实凭据。
 - Crawl4AI 渲染与浏览器任务的并发上限均为 2；浏览器 service 的内存上限为 6 GiB。
 - 出网沿用小电脑的 sing-box 代理；本机服务地址被加入 `NO_PROXY`。
+- 出口代理的全局 CONNECT 并发上限由 `EGRESS_MAX_CONNECTIONS` 配置，默认 32，必须为正整数；它独立于 `EGRESS_MAX_HOST_CONCURRENCY`（代码默认 8，当前 systemd unit 配置为 32）。systemd 部署可通过该代理 service 的 `Environment=` drop-in 覆盖这些值。
+- 从接受 CONNECT、DNS 校验及上游握手到隧道关闭均占用连接配额；超限立即返回 `429 Too Many Requests` 和 `Retry-After: 5`，不排队。`EGRESS_CONNECT_TIMEOUT_MS`（默认 10000 ms）同时约束 DNS 校验和上游握手；失败、超时、重置、客户端中止和正常关闭都释放配额，既有隧道不受其他请求失败影响。
 
 ## 运维
 

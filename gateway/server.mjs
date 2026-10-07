@@ -463,7 +463,15 @@ async function browserAction(session, action) {
     if (action.url && session.url !== action.url) throw rejectError('clicked link did not match the declared target', 'browser_target_mismatch', { blockedReason: 'browser_target_mismatch', host: new URL(session.url).hostname });
     return output;
   }
-  if (type === 'wait') { const output = await playwrightCall(session, 'browser_wait_for', { time: action.ms ?? 1000 }); await browserLocation(session); return output; }
+  if (type === 'wait') {
+    const seconds = (action.ms ?? 1000) / 1000;
+    // Playwright MCP 0.0.79 expects seconds but rejects zero via a truthiness guard.
+    const output = seconds === 0
+      ? { content: [{ type: 'text', text: 'Waited for 0 seconds' }] }
+      : await playwrightCall(session, 'browser_wait_for', { time: seconds });
+    await browserLocation(session);
+    return output;
+  }
   if (type === 'scroll') { const output = await playwrightCall(session, 'browser_evaluate', { function: `() => window.scrollBy(0, ${Math.max(-3000, Math.min(3000, Number(action.pixels ?? 600)))})` }); await browserLocation(session); return output; }
   if (type === 'snapshot') { const output = await playwrightCall(session, 'browser_snapshot', {}); await browserLocation(session); return output; }
   if (type === 'screenshot') { const output = await playwrightCall(session, 'browser_take_screenshot', { fullPage: true }); await browserLocation(session); return output; }

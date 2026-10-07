@@ -8,8 +8,11 @@ const port = Number(process.env.EGRESS_PROXY_PORT ?? 7895);
 const upstream = process.env.EGRESS_UPSTREAM ?? 'http://127.0.0.1:7890';
 const connectTimeoutMs = Number(process.env.EGRESS_CONNECT_TIMEOUT_MS ?? 10000);
 const maxHostConcurrency = Number(process.env.EGRESS_MAX_HOST_CONCURRENCY ?? 8);
+const maxConnections = Number(process.env.EGRESS_MAX_CONNECTIONS ?? 32);
+if (!Number.isSafeInteger(maxConnections) || maxConnections < 1) throw new Error('EGRESS_MAX_CONNECTIONS must be a positive safe integer');
 const upstreamUrl = new URL(upstream);
 const hostSlots = new Map();
+let connections = 0;
 const isPublic = address => {
   const value = address.toLowerCase();
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
@@ -21,28 +24,53 @@ const isPublic = address => {
 async function resolve(name) { const records = await dns.lookup(name, { all: true, verbatim: true }); if (!records.length || records.some(x => !isPublic(x.address))) throw new Error('blocked destination'); return records[0]; }
 function validPort(value) { return Number(value) === 80 || Number(value) === 443; }
 async function tunnel(req, client, head) {
-  const [name, portText] = req.url.split(':'); if (!name || !validPort(portText)) return client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
-  try { await resolve(name); } catch { return client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); }
-  const slot = hostSlots.get(name) ?? 0;
-  if (slot >= maxHostConcurrency) return client.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n');
-  hostSlots.set(name, slot + 1);
-  const socket = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 80) });
-  let handshake = '';
+  const limited = 'HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\n\r\n';
+  if (connections >= maxConnections) {
+    client.once('error', () => client.destroy());
+    return client.end(limited);
+  }
+  // Reserve before asynchronous validation so pending work cannot bypass the budget.
+  connections += 1;
+  const [name, portText] = req.url.split(':');
+  let socket;
+  let hostReserved = false;
   let closed = false;
-  const teardown = () => {
+  const release = () => {
     if (closed) return;
     closed = true;
     clearTimeout(timer);
+    connections -= 1;
+    if (hostReserved) {
+      const active = hostSlots.get(name) - 1;
+      if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
+    }
+  };
+  const teardown = () => {
+    release();
     client.destroy();
-    socket.destroy();
-    const active = (hostSlots.get(name) ?? 1) - 1;
-    if (active > 0) hostSlots.set(name, active); else hostSlots.delete(name);
+    socket?.destroy();
+  };
+  const reject = response => {
+    release();
+    socket?.destroy();
+    client.end(response);
   };
   const timer = setTimeout(teardown, connectTimeoutMs);
   client.once('error', teardown);
   client.once('close', teardown);
+  client.once('end', teardown);
+  if (!name || !validPort(portText)) return reject('HTTP/1.1 403 Forbidden\r\n\r\n');
+  const slot = hostSlots.get(name) ?? 0;
+  if (slot >= maxHostConcurrency) return reject(limited);
+  hostSlots.set(name, slot + 1);
+  hostReserved = true;
+  try { await resolve(name); } catch { if (!closed) reject('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
+  if (closed) return;
+  try { socket = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 80) }); } catch { return teardown(); }
+  let handshake = '';
   socket.once('error', teardown);
   socket.once('close', teardown);
+  socket.once('end', teardown);
   socket.once('connect', () => socket.write(`CONNECT ${name}:${portText} HTTP/1.1\r\nHost: ${name}:${portText}\r\nConnection: keep-alive\r\n\r\n`));
   socket.on('data', chunk => {
     if (handshake === null) return;

@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm --prefix gateway ci
+      - run: npm --prefix gateway ci --ignore-scripts --no-audit --no-fund
       - run: node --check gateway/server.mjs
       - run: node --check gateway/eval-runner.mjs
       - run: node --check proxy/server.mjs

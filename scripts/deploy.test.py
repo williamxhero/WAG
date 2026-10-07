@@ -47,17 +47,31 @@ class ReleaseTests(unittest.TestCase):
                         "user.email=fixture@example.invalid", "commit", "-qm", "Fixture\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>"], check=True)
         self.stub("systemctl", '''printf 'service %s\n' "$*" >> "$TEST_EFFECTS"
 if [[ "$1" == stop && "${FAIL_STOP_UNIT:-}" == "${2:-}" ]]; then printf 'dummy-sensitive-output' >&2; exit 1; fi
-if [[ -n "${ABSENT_UNIT:-}" && "$ABSENT_UNIT" == "${2:-}" && ! -e "$TEST_UNIT_DIR/$2" ]]; then
-  case "$1" in
-    is-active) printf 'unknown\n'; exit 4;;
-    is-enabled) printf 'not-found\n'; exit 4;;
-    stop) exit 5;;
-  esac
-fi
+if [[ "${FAIL_ACTION:-}" == "$1" && "${FAIL_ACTION_UNIT:-}" == "${2:-}" ]]; then printf 'dummy-sensitive-output' >&2; exit 1; fi
+for unit in "${@:2}"; do
+  [[ "$unit" != --* ]] || continue
+  if [[ " ${ABSENT_UNIT:-} ${ABSENT_UNITS:-} " == *" $unit "* && ! -e "$TEST_UNIT_DIR/$unit" ]]; then
+    case "$1" in
+      is-active) printf 'inactive\n'; exit 3;;
+      is-enabled) printf 'not-found\n'; exit 1;;
+      stop|start|restart) printf 'Unit %s not loaded\n' "$unit" >&2; exit 5;;
+      disable|enable) printf 'Unit file %s does not exist\n' "$unit" >&2; exit 1;;
+      mask) ln -s /dev/null "$TEST_UNIT_DIR/$unit";;
+    esac
+  fi
+  if [[ "${REQUIRE_UNIT_FILES:-}" == 1 && ! -e "$TEST_UNIT_DIR/$unit" ]]; then
+    case "$1" in enable) exit 1;; start|restart) exit 5;; esac
+  fi
+done
 if [[ "$1" == stop && "${NOT_LOADED_UNIT:-}" == "${2:-}" ]]; then exit 5; fi
 case "$1" in
-  is-active) printf 'inactive\n'; exit 3;;
-  is-enabled) printf 'disabled\n'; exit 1;;
+  is-active) if [[ "${PRIOR_ACTIVE_UNIT:-}" == "$2" ]]; then printf 'active\n'; else printf 'inactive\n'; exit 3; fi;;
+  is-enabled)
+    if [[ -L "$TEST_UNIT_DIR/$2" && "$(readlink "$TEST_UNIT_DIR/$2")" == /dev/null ]]; then printf 'masked\n'; exit 1; fi
+    if [[ "${PRIOR_ENABLED_UNIT:-}" == "$2" ]]; then
+      printf '%s\n' "$PRIOR_ENABLED_STATE"
+      case "$PRIOR_ENABLED_STATE" in disabled|masked|not-found) exit 1;; esac
+    else printf 'disabled\n'; exit 1; fi;;
 esac
 if [[ "${FAIL_SERVICE:-}" == 1 && "$1" == restart ]]; then exit 9; fi
 if [[ "${FAIL_RESTORE:-}" == 1 && "$1" == stop ]]; then printf 'dummy-sensitive-output' >&2; exit 9; fi
@@ -746,6 +760,123 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                       "the real cleanup installer must install and start the timer")
         self.assertEqual(self.command("commit", tx).returncode, 0)
         self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "committed")
+
+    def test_absent_units_restore_committed_release_without_enablement_commands(self):
+        units = ("web-access-egress-proxy.service", "web-access-crawl4ai.service",
+                 "web-access-playwright.service", "web-access-gateway.service",
+                 "web-access-healthcheck.timer", "web-access-artifact-cleanup.timer")
+        self.env["ABSENT_UNITS"] = " ".join(units)
+        before = self.snapshot()
+        tx = self.prepare()
+        state = json.loads((tx / "state.json").read_text())
+        for unit in units:
+            self.assertEqual(state["services"][unit], {"active": False, "enabled": "not-found"})
+        result = self.command("activate", tx)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.command("commit", tx).returncode, 0)
+        self.effects.write_text("")
+        result = self.command("restore", tx)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restored")
+        self.assertNotIn("restore_errors", state)
+        self.assertFalse((self.root / ".release-pending").exists())
+        self.assertEqual(self.snapshot(), before)
+        actions = self.effects.read_text().splitlines()
+        self.assertFalse(any(action.startswith(("service enable ", "service disable ",
+                                               "service mask ", "service start ")) for action in actions))
+        self.assertEqual(self.command("restore", tx).returncode, 0, "restore remains idempotent")
+
+    def test_disabled_restore_issues_disable_and_keeps_genuine_failure_retryable(self):
+        unit = "web-access-gateway.service"
+        (self.units / unit).write_text("# previous disabled unit\n")
+        before = self.snapshot()
+        tx = self.prepare()
+        self.assertEqual(json.loads((tx / "state.json").read_text())["services"][unit]["enabled"], "disabled")
+        self.assertEqual(self.command("activate", tx).returncode, 0)
+        result = self.command("restore", tx, FAIL_ACTION="disable", FAIL_ACTION_UNIT=unit)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("snapshot restoration failed: service_restore", result.stderr)
+        self.assertNotIn("dummy-sensitive-output", result.stdout + result.stderr)
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restore_failed")
+        self.assertEqual(state["restore_errors"], ["service_restore"])
+        self.assertTrue((self.root / ".release-pending").exists())
+        self.assertIn("service disable " + unit, self.effects.read_text())
+        self.effects.write_text("")
+        result = self.command("restore", tx)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("service disable " + unit, self.effects.read_text())
+        state = json.loads((tx / "state.json").read_text())
+        self.assertEqual(state["status"], "restored")
+        self.assertNotIn("restore_errors", state)
+        self.assertFalse((self.root / ".release-pending").exists())
+        self.assertEqual(self.snapshot(), before)
+
+    def test_enabled_unit_files_are_restored_before_enable_and_start(self):
+        unit = "web-access-gateway.service"
+        previous = self.root / "systemd" / unit
+        previous.parent.mkdir()
+        previous.write_text("# previous enabled unit\n")
+        (self.units / unit).symlink_to(previous)
+        self.env.update(PRIOR_ENABLED_UNIT=unit, PRIOR_ACTIVE_UNIT=unit, REQUIRE_UNIT_FILES="1")
+        before = self.snapshot()
+        for enabled in ("enabled", "enabled-runtime"):
+            with self.subTest(enabled=enabled):
+                self.env["PRIOR_ENABLED_STATE"] = enabled
+                tx = self.prepare()
+                self.assertEqual(self.command("activate", tx).returncode, 0)
+                # The old unit is only available again once BOTH its target code
+                # and the unit-dir link have been restored from the snapshot.
+                (self.units / unit).unlink()
+                previous.unlink()
+                result = self.command("restore", tx)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                option = "--runtime " if enabled == "enabled-runtime" else ""
+                self.assertIn("service enable " + option + unit, self.effects.read_text())
+                self.assertIn("service start " + unit, self.effects.read_text())
+                self.assertEqual(self.snapshot(), before)
+                self.assertFalse((self.root / ".release-pending").exists())
+
+    def test_absent_systemctl_fixture_matches_measured_exit_codes(self):
+        unit = "web-access-artifact-cleanup.timer"
+        env = {**self.env, "ABSENT_UNIT": unit}
+        for action, code, output in (("stop", 5, ""), ("start", 5, ""),
+                                     ("disable", 1, ""), ("enable", 1, ""),
+                                     ("is-active", 3, "inactive"), ("is-enabled", 1, "not-found"),
+                                     ("mask", 0, ""), ("is-enabled", 1, "masked"),
+                                     ("is-active", 3, "inactive")):
+            with self.subTest(action=action, output=output):
+                result = subprocess.run([str(self.bin / "systemctl"), action, unit],
+                                        env=env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                self.assertEqual(result.stdout.strip(), output)
+
+    def test_required_restore_service_actions_keep_failures_fatal_and_recorded(self):
+        unit = "web-access-gateway.service"
+        (self.units / unit).write_text("# previous unit\n")
+        before = self.snapshot()
+        for action, enabled, active in (("enable", "enabled", False),
+                                        ("mask", "masked", False),
+                                        ("start", "enabled", True),
+                                        ("daemon-reload", "enabled", False)):
+            with self.subTest(action=action):
+                self.env.update(PRIOR_ENABLED_UNIT=unit, PRIOR_ENABLED_STATE=enabled,
+                                PRIOR_ACTIVE_UNIT=unit if active else "")
+                tx = self.prepare()
+                self.assertEqual(self.command("activate", tx).returncode, 0)
+                result = self.command("restore", tx, FAIL_ACTION=action,
+                                      FAIL_ACTION_UNIT="" if action == "daemon-reload" else unit)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("dummy-sensitive-output", result.stdout + result.stderr)
+                state = json.loads((tx / "state.json").read_text())
+                self.assertEqual(state["status"], "restore_failed")
+                self.assertEqual(state["restore_errors"], ["service_restore"])
+                self.assertTrue((self.root / ".release-pending").exists())
+                result = self.command("restore", tx)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.snapshot(), before)
+                self.assertFalse((self.root / ".release-pending").exists())
 
     def test_not_loaded_units_allow_activation(self):
         self.previous_runtime()

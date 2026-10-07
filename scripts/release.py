@@ -629,8 +629,11 @@ def restore_runtime(tx, state, root, unit_dir, finalize=True):
                 run(["systemctl", "enable", *(["--runtime"] if enabled == "enabled-runtime" else []), unit], "rollback enable")
             elif enabled == "masked":
                 run(["systemctl", "mask", unit], "rollback mask")
-            elif enabled in {"disabled", "not-found"}:
+            elif enabled == "disabled":
                 run(["systemctl", "disable", unit], "rollback disable")
+            # not-found needs no enablement command: snapshot copying already
+            # restored the unit's absence. Missing-unit enable/disable exit 1
+            # is indistinguishable from a genuine failure, so keep both strict.
         # enable/disable may rewrite the top-level unit link. Reapply the exact
         # entry snapshot afterwards, before reloading/starting the old runtime.
         for entry in state["snapshot"]:

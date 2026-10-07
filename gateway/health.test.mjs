@@ -18,11 +18,17 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, env = {} } = {}) {
+async function gatewayFixture(t, { search = validSearch, searchDelayMs = 0, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, requestTimeoutMs = 8000, env = {} } = {}) {
   const counts = { search: 0, crawler: 0, crawl: 0 };
   const backend = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
-    if (req.url.startsWith('/search')) { counts.search++; return res.end(JSON.stringify(search)); }
+    if (req.url.startsWith('/search')) {
+      counts.search++;
+      if (!searchDelayMs) return res.end(JSON.stringify(search));
+      const timer = setTimeout(() => res.end(JSON.stringify(search)), searchDelayMs);
+      res.once('close', () => clearTimeout(timer));
+      return;
+    }
     if (req.url === '/crawl') { counts.crawl++; res.statusCode = 500; return res.end('{}'); }
     if (req.url === '/readyz' || req.url === '/healthz') { counts.crawler++; return res.end(JSON.stringify(crawler)); }
     res.statusCode = 405; res.end('{}');
@@ -48,7 +54,7 @@ async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, i
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(import.meta.dirname, 'server.mjs')], {
-    env: { ...process.env, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1', GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(port), GATEWAY_TOKEN: token, GATEWAY_ALLOW_ANONYMOUS: undefined, CRAWL4AI_TOKEN: crawlToken, CRAWL4AI_URL: backendUrl, SEARXNG_URL: backendUrl, PLAYWRIGHT_MCP_URL: `${backendUrl}/mcp`, EGRESS_PROXY: proxyUrl, ...env },
+    env: { ...process.env, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1', GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(port), GATEWAY_TOKEN: token, GATEWAY_ALLOW_ANONYMOUS: undefined, CRAWL4AI_TOKEN: crawlToken, CRAWL4AI_URL: backendUrl, SEARXNG_URL: backendUrl, PLAYWRIGHT_MCP_URL: `${backendUrl}/mcp`, EGRESS_PROXY: proxyUrl, GATEWAY_PROBE_TIMEOUT_MS: undefined, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -64,7 +70,7 @@ async function gatewayFixture(t, { search = validSearch, crawler = { ok: true, i
     assert.ok(!logs.includes(token) && !logs.includes(crawlToken), 'gateway logs must not contain tokens');
   });
   const base = `http://127.0.0.1:${port}`;
-  const request = (route, authenticated = true) => fetch(`${base}${route}`, { headers: authenticated ? { authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(8000) });
+  const request = (route, authenticated = true) => fetch(`${base}${route}`, { headers: authenticated ? { authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(requestTimeoutMs) });
   await waitForListening(child);
   return { base, request, counts, proxyState, logs: () => logs };
 }
@@ -179,8 +185,47 @@ test('anonymous gateway emits exactly one prominent startup warning', async t =>
   assert.match(warnings[0], /WARNING.*GATEWAY_ALLOW_ANONYMOUS=1/);
 });
 
+test('gateway rejects invalid readiness probe deadlines at startup', async t => {
+  for (const value of ['', ' ', '0', '-1', '1.5', 'NaN', 'Infinity', 'invalid', '9007199254740992']) {
+    await t.test(JSON.stringify(value), async t => {
+      await assert.rejects(gatewayFixture(t, { env: { GATEWAY_PROBE_TIMEOUT_MS: value } }), /GATEWAY_PROBE_TIMEOUT_MS must be a positive safe integer/);
+    });
+  }
+});
+
+test('gateway default readiness deadline allows SearXNG to finish beyond the overlay engine timeout', async t => {
+  const { request } = await gatewayFixture(t, { searchDelayMs: 8200, requestTimeoutMs: 15000 });
+  const response = await request('/readyz');
+  assert.equal(response.status, 503); // Only the offline public-egress fixture fails.
+  const readiness = await response.json();
+  const search = readiness.dependencies.find(item => item.name === 'searxng');
+  assert.equal(search.ok, true);
+  assert.equal(search.result_count, 1);
+  assert.ok(search.duration_ms >= 8200);
+  assert.equal(readiness.core_ok, true);
+});
+
+test('gateway configurable readiness deadline still rejects slow SearXNG', async t => {
+  const { request } = await gatewayFixture(t, { searchDelayMs: 300, env: { GATEWAY_PROBE_TIMEOUT_MS: '80' } });
+  const started = performance.now();
+  const response = await request('/readyz');
+  assert.equal(response.status, 503);
+  const search = (await response.json()).dependencies.find(item => item.name === 'searxng');
+  assert.equal(search.ok, false);
+  assert.equal(search.error.kind, 'dependency_timeout');
+  assert.ok(search.duration_ms >= 80);
+  assert.ok(performance.now() - started < 1000);
+});
+
+test('gateway SearXNG probe succeeds within an explicitly raised deadline', async t => {
+  const { request } = await gatewayFixture(t, { searchDelayMs: 300, env: { GATEWAY_PROBE_TIMEOUT_MS: '1000' } });
+  const search = (await (await request('/readyz')).json()).dependencies.find(item => item.name === 'searxng');
+  assert.equal(search.ok, true);
+  assert.equal(search.result_count, 1);
+});
+
 test('gateway readiness aborts a stalled CONNECT at its bounded deadline and caches the outcome', async t => {
-  const { request, counts, proxyState } = await gatewayFixture(t, { proxyHang: true });
+  const { request, counts, proxyState } = await gatewayFixture(t, { proxyHang: true, env: { GATEWAY_PROBE_TIMEOUT_MS: '5000' } });
   const started = performance.now();
   const readiness = await (await request('/readyz')).json();
   assert.ok(performance.now() - started < 7000);

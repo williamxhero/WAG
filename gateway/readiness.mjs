@@ -1,5 +1,7 @@
 import { normalizeSearchResults } from './evidence-metadata.mjs';
 
+export const DEFAULT_PROBE_TIMEOUT_MS = 10000;
+
 function failure(kind, message, extra = {}) {
   return Object.assign(new Error(message), { kind, ...extra });
 }
@@ -57,7 +59,7 @@ async function probeJson(url, options, label) {
 
 // The only injected operation is the existing public-egress transport boundary.
 // Deadlines include DNS, connection establishment and response-body consumption.
-export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl, egressProbe, secrets = [], cacheMs = 10000, probeTimeoutMs = 5000, now = Date.now }) {
+export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl, egressProbe, secrets = [], cacheMs = 10000, probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS, now = Date.now }) {
   let cached;
   let checkedAt = 0;
   let inFlight;

@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, runWithRetries, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
+import { dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
+import { evaluateCase } from './eval-case.mjs';
 
 const root = process.env.WAG_ROOT ?? '/data/web-access-gateway';
 const suite = process.argv[2] === 'release' ? 'release' : 'smoke';
@@ -22,12 +23,9 @@ const elapsed = started => Math.round(now() - started);
 const exec = (command, args) => new Promise(resolve => execFile(command, args, { timeout: 5000 }, (error, stdout) => resolve(error ? '' : stdout.trim())));
 
 function parseToolResult(result) {
+  if (result.structuredContent) return result.structuredContent;
   const text = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
   try { return JSON.parse(text); } catch { return { raw_text: text }; }
-}
-function errorInfo(error) {
-  const message = String(error?.message ?? error ?? 'unknown failure');
-  return { kind: error?.kind ?? (/timeout|timed out|abort/i.test(message) ? 'timeout' : /unauthorized|401/i.test(message) ? 'authentication' : 'request'), message: message.slice(0, 500) };
 }
 function assertQuality(checks) {
   const normalized = checks.map(check => ({ ...check, passed: Boolean(check.passed) }));
@@ -102,31 +100,9 @@ async function callTool(client, name, args) {
   return { payload, total_ms: totalMs, first_valid_result_ms: telemetry.first_valid_result_ms ?? totalMs, stages_ms: { mcp_round_trip_ms: totalMs, ...(telemetry.stages_ms ?? {}) } };
 }
 async function runCase(cases, artifacts, definition) {
-  const started = now();
-  try {
-    const attempted = await runWithRetries(async () => {
-      const outcome = await definition.run();
-      const quality = definition.quality ? definition.quality(outcome.payload, outcome) : assertQuality([{ name: 'request-completed', passed: true }]);
-      return { outcome, quality };
-    }, {
-      maximumAttempts: definition.retry ? 3 : 1,
-      shouldRetryResult: result => definition.retryQuality === true && !result.quality.passed,
-      resultError: () => 'transient quality assertion failed',
-    });
-    const { outcome, quality } = attempted;
-    const status = quality.passed ? 'passed' : 'failed';
-    const record = { id: definition.id, name: definition.name, category: definition.category, dimension: definition.dimension ?? 'core', expectation: definition.expectation ?? 'availability', tool: definition.tool, status, attempts: attempted.attempts, degraded: attempted.degraded, ...(attempted.first_error ? { first_error: attempted.first_error } : {}), total_ms: outcome.total_ms ?? elapsed(started), first_valid_result_ms: outcome.first_valid_result_ms ?? outcome.total_ms ?? elapsed(started), stages_ms: outcome.stages_ms ?? {}, quality, ...(outcome.metrics ? { metrics: outcome.metrics } : {}), ...(status === 'failed' ? { error: { kind: 'quality', message: 'quality assertion failed' } } : {}) };
-    if (outcome.artifact) { artifacts.push(outcome.artifact); record.artifact = outcome.artifact.name; }
-    cases.push(record);
-  } catch (error) {
-    const expectedPayload = error.payload;
-    const expectedOutcome = definition.errorQuality ? definition.errorQuality(expectedPayload ?? {}) : null;
-    if (expectedOutcome?.passed) {
-      cases.push({ id: definition.id, name: definition.name, category: definition.category, dimension: definition.dimension ?? 'core', expectation: definition.expectation ?? 'availability', tool: definition.tool, status: 'passed', attempts: error.attempts ?? 1, total_ms: elapsed(started), first_valid_result_ms: elapsed(started), stages_ms: {}, quality: expectedOutcome, error: { kind: expectedPayload?.error?.kind ?? 'expected_error', message: expectedPayload?.error?.message ?? 'expected error' } });
-    } else {
-      cases.push({ id: definition.id, name: definition.name, category: definition.category, dimension: definition.dimension ?? 'core', expectation: definition.expectation ?? 'availability', tool: definition.tool, status: 'failed', attempts: error.attempts ?? 1, ...(error.first_error ? { first_error: error.first_error } : {}), total_ms: elapsed(started), first_valid_result_ms: null, stages_ms: {}, quality: assertQuality([{ name: 'request-completed', passed: false }]), error: errorInfo(error) });
-    }
-  }
+  const record = await evaluateCase(definition);
+  if (record.artifact) { artifacts.push(record.artifact); record.artifact = record.artifact.name; }
+  cases.push(record);
 }
 async function main() {
   const samples = JSON.parse(await fs.readFile(samplePath, 'utf8'));
@@ -150,14 +126,15 @@ async function main() {
     for (const output of ['screenshot', 'pdf']) await runCase(cases, artifacts, { id: `read-${output}`, name: `Rendered ${output}`, category: 'artifact', dimension: 'connectivity', retry: true, tool: 'web_read', run: async () => { const result = await callTool(client, 'web_read', { url: samples.static.url, render: 'always', output }); const artifact = artifactFrom(result.payload, output, `read-${output}`); if (!artifact) throw new Error(`missing ${output} artifact`); return { ...result, artifact }; }, quality: (_payload, outcome) => assertQuality([{ name: 'non-empty-artifact', passed: Number(outcome.artifact?.bytes) > 100 }]) });
     await runCase(cases, artifacts, { id: 'gateway-health', name: 'Authenticated gateway health', category: 'health', tool: 'health', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz'), { headers: { authorization: `Bearer ${token}` } }); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }]) });
     await runCase(cases, artifacts, { id: 'gateway-ready', name: 'Dependency readiness', category: 'health', tool: 'ready', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/readyz'), { headers: { authorization: `Bearer ${token}` } }); const body = await response.json(); const totalMs = elapsed(start); return { payload: { status: response.status, body }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }, { name: 'all-dependencies-ready', passed: payload.body?.ok === true && (payload.body.dependencies ?? []).every(item => item.ok === true) }]) });
-    await runCase(cases, artifacts, { id: 'eval-api-auth', name: 'Evaluation API rejects missing token', category: 'security', expectation: 'expected_security', tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/api/evals')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
-    await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-401', passed: payload.status === 401 }]) });
-    await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', expectation: 'expected_security', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.loopback_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); const payload = result.structuredContent ?? parseToolResult(result); return { payload: { blocked: result.isError === true, blocked_reason: payload.blocked_reason, error_kind: payload.error?.kind }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'blocked', passed: payload.blocked === true }, { name: 'ssrf-reason', passed: payload.blocked_reason === 'non_public_address' }]) });
+    await runCase(cases, artifacts, { id: 'eval-api-auth', name: 'Evaluation API rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/api/evals')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
+    await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetch(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
+    await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: 'non_public_address' }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.security.loopback_url, render: 'never', output: 'markdown' }) });
     if (suite === 'release') {
       const baseline = cases.find(item => item.id === 'read-static')?.total_ms ?? 1;
       await runCase(cases, artifacts, { id: 'concurrency-two', name: 'Two concurrent reads', category: 'concurrency', tool: 'web_read', run: async () => { const start = now(); const [a, b] = await Promise.all([callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' }), callTool(client, 'web_read', { url: samples.static.url, render: 'never', output: 'markdown' })]); const totalMs = elapsed(start); const degradation = Math.round((Math.max(a.total_ms, b.total_ms) / baseline - 1) * 100); return { payload: { both_completed: true, degradation_pct: degradation }, metrics: { degradation_pct: degradation, queue_ms: Math.max(0, totalMs - Math.max(a.total_ms, b.total_ms)) }, total_ms: totalMs, first_valid_result_ms: Math.min(a.first_valid_result_ms, b.first_valid_result_ms), stages_ms: { parallel_wall_ms: totalMs, request_a_ms: a.total_ms, request_b_ms: b.total_ms } }; }, quality: payload => assertQuality([{ name: 'both-completed', passed: payload.both_completed === true }, { name: 'degradation-limit', passed: payload.degradation_pct <= 50 }]) });
-      await runCase(cases, artifacts, { id: 'ssrf-redirect', name: 'Private redirect target is rejected', category: 'security', expectation: 'expected_security', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.redirect_to_loopback_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); const payload = result.structuredContent ?? parseToolResult(result); return { payload: { blocked: result.isError === true, blocked_reason: payload.blocked_reason, error_kind: payload.error?.kind }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'blocked', passed: payload.blocked === true }, { name: 'redirect-reason', passed: payload.blocked_reason === 'non_public_address' }]) });
-      await runCase(cases, artifacts, { id: 'read-timeout', name: 'Slow upstream request times out', category: 'timeout', expectation: 'expected_timeout', tool: 'web_read', run: async () => { const start = now(); const result = await client.callTool({ name: 'web_read', arguments: { url: samples.security.slow_url, render: 'never', output: 'markdown' } }); const totalMs = elapsed(start); const payload = result.structuredContent ?? parseToolResult(result); return { payload: { timed_out: result.isError === true, error_kind: payload.error?.kind }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { mcp_round_trip_ms: totalMs } }; }, errorQuality: payload => assertQuality([{ name: 'timed-out', passed: payload?.error?.kind === 'upstream_timeout' || payload?.error?.kind === 'egress_timeout' }, { name: 'timeout-reason', passed: ['upstream_timeout', 'egress_timeout'].includes(payload?.error?.kind) }]) });
+      await runCase(cases, artifacts, { id: 'ssrf-redirect', name: 'Private redirect target is rejected', category: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: 'non_public_address' }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.security.redirect_to_loopback_url, render: 'never', output: 'markdown' }) });
+      // Deadline proof is the offline controlled-origin gateway fixture, not a
+      // public delay endpoint whose JSON response can fail on content type.
     }
   } finally { clearInterval(resourceTimer); await client.close().catch(() => {}); await transport.close().catch(() => {}); }
   const completedAt = new Date(); const summary = summarizeCases(cases);

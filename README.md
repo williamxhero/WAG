@@ -153,8 +153,13 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
 - 所有 URL 仅允许 HTTP/HTTPS；初始 URL 和最多五次重定向都会进行 DNS 解析。
 - 回环、私网、链路本地、Docker 常用网段和多播/保留地址会被拒绝，避免 SSRF 访问小电脑或局域网内部服务。
 - 轻量读取最大响应 5 MiB、单次网络请求超时 30 秒；Crawl4AI 渲染超时 90 秒。
+- Crawl4AI 完整 JSON 响应在解析前按流累计字节，默认上限 80 MiB（`CRAWL4AI_RESPONSE_MAX_BYTES=83886080`，正整数）；不依赖 `Content-Length`，压缩响应按解压后的 JSON 字节计数，超限立即中止并返回 `response_too_large`。
+- 爬取 Markdown 按 UTF-8 字节计数，上限 5 MiB（`markdown_too_large`）；截图与 PDF 各自限制为 25 MiB（`ARTIFACT_MAX_BYTES`），在 base64 解码前校验编码长度、格式和精确解码大小（`artifact_too_large` / `artifact_invalid`）。所有这些预算在发布任一产物前校验，存储总配额仍为 1 GiB（`ARTIFACT_QUOTA_BYTES`）。无效 JSON 或结果结构返回 `render_invalid_response`，错误不会回显完整负载。
+- 离线回归：`npm --prefix gateway ci && npm --prefix gateway test`，包括 MCP 网关边界的受控分块流测试及产物下载/配额测试；无需公网网站、运行时服务或真实凭据。
 - Crawl4AI 渲染与浏览器任务的并发上限均为 2；浏览器 service 的内存上限为 6 GiB。
 - 出网沿用小电脑的 sing-box 代理；本机服务地址被加入 `NO_PROXY`。
+- 每次 CONNECT 连接尝试只解析一次目的域名，任一 DNS 答案非公网即拒绝；发给上游的 CONNECT authority 必须是已校验的 IPv4 或带方括号的 IPv6 地址，失败重试只遍历这组答案，不重新解析。整个过程共用一个连接配额和握手截止时间。`EGRESS_UPSTREAM` 仅支持无认证的 HTTP CONNECT 代理，其他传输启动即拒绝；隧道不终止 TLS，客户端原始 Host、SNI 和证书校验保持不变。这封闭了连接时再次解析 DNS 的设计风险，不代表已证明此前存在可利用的重绑定攻击。
+- 既有普通 absolute-form HTTP 代理请求仍不转发：公网目标返回 `501 CONNECT required`，非法目标返回 `403`。轻量读取可通过 CONNECT:80 使用 HTTP，但使用普通 HTTP 代理模式的浏览器/Crawl4AI 不能直接浏览明文 HTTP 页面；HTTPS 导航、重定向和渲染子请求通过受校验的 CONNECT 隧道。
 - 出口代理的全局 CONNECT 并发上限由 `EGRESS_MAX_CONNECTIONS` 配置，默认 32，必须为正整数；它独立于 `EGRESS_MAX_HOST_CONCURRENCY`（代码默认 8，当前 systemd unit 配置为 32）。systemd 部署可通过该代理 service 的 `Environment=` drop-in 覆盖这些值。
 - 从接受 CONNECT、DNS 校验及上游握手到隧道关闭均占用连接配额；超限立即返回 `429 Too Many Requests` 和 `Retry-After: 5`，不排队。`EGRESS_CONNECT_TIMEOUT_MS`（默认 10000 ms）同时约束 DNS 校验和上游握手；失败、超时、重置、客户端中止和正常关闭都释放配额，既有隧道不受其他请求失败影响。
 

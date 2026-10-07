@@ -37,6 +37,7 @@ const cfg = Object.freeze({
   tokenRateLimit: Number(process.env.GATEWAY_TOKEN_RATE_LIMIT ?? 120),
   tokenRateWindowMs: Number(process.env.GATEWAY_TOKEN_RATE_WINDOW_MS ?? 60000),
   hostConcurrency: Number(process.env.GATEWAY_HOST_CONCURRENCY ?? 4),
+  crawlResponseMaxBytes: Number(process.env.CRAWL4AI_RESPONSE_MAX_BYTES ?? 80 * 1024 * 1024),
   artifactMaxBytes: Number(process.env.ARTIFACT_MAX_BYTES ?? 25 * 1024 * 1024),
   artifactQuotaBytes: Number(process.env.ARTIFACT_QUOTA_BYTES ?? 1024 * 1024 * 1024),
   dashboardDir: path.join(moduleDir, 'public'),
@@ -44,6 +45,8 @@ const cfg = Object.freeze({
 });
 
 if (cfg.token.length < 32) throw new Error('GATEWAY_TOKEN must be at least 32 characters');
+if (!Number.isSafeInteger(cfg.crawlResponseMaxBytes) || cfg.crawlResponseMaxBytes <= 0) throw new Error('CRAWL4AI_RESPONSE_MAX_BYTES must be a positive safe integer');
+if (!Number.isSafeInteger(cfg.artifactMaxBytes) || cfg.artifactMaxBytes <= 0) throw new Error('ARTIFACT_MAX_BYTES must be a positive safe integer');
 
 const browserSessions = new Map();
 const renderSlots = { active: 0, limit: 2 };
@@ -315,23 +318,85 @@ async function withSlot(pool, job) {
   pool.active++;
   try { return await job(); } finally { pool.active--; }
 }
+async function readCrawlResponse(response, controller) {
+  const reader = response.body?.getReader();
+  if (!reader) throw rejectError('Crawl4AI returned an empty response', 'render_invalid_response');
+  const parts = [];
+  let total = 0;
+  try {
+    // Content-Length is not authoritative (and may describe compressed bytes).
+    // Count the entire JSON byte stream before allocating a string or parsing.
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > cfg.crawlResponseMaxBytes) {
+        const error = rejectError(`Crawl4AI response exceeds ${cfg.crawlResponseMaxBytes} bytes`, 'response_too_large');
+        controller.abort(error);
+        await reader.cancel(error).catch(() => {});
+        throw error;
+      }
+      parts.push(value);
+    }
+    return Buffer.concat(parts, total);
+  } finally {
+    reader.releaseLock();
+  }
+}
 async function callCrawl4ai(url, output) {
   return withSlot(renderSlots, async () => {
+    const controller = new AbortController();
     const response = await fetch(`${cfg.crawlUrl}/crawl`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.crawlToken}` },
       body: JSON.stringify({ urls: [url], browser_config: { type: 'BrowserConfig', params: { headless: true } }, crawler_config: { type: 'CrawlerRunConfig', params: { cache_mode: 'bypass', screenshot: output === 'screenshot', pdf: output === 'pdf' } } }),
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000)]),
     });
-    if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}: ${trimText(await response.text(), 500)}`, 'render_backend_status', { httpStatus: response.status });
-    const payload = await response.json();
-    const result = payload.results?.[0] ?? payload[0] ?? payload;
-    const markdown = result.markdown?.raw_markdown ?? result.markdown ?? result.fit_markdown ?? '';
-    return { result, markdown: typeof markdown === 'string' ? markdown : JSON.stringify(markdown) };
+    const body = await readCrawlResponse(response, controller);
+    if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}: ${body.subarray(0, 500).toString('utf8')}`, 'render_backend_status', { httpStatus: response.status });
+    let payload;
+    try { payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)); }
+    catch { throw rejectError('Crawl4AI returned invalid JSON', 'render_invalid_response'); }
+    if (!payload || typeof payload !== 'object' || ('results' in payload && !Array.isArray(payload.results))) throw rejectError('Crawl4AI returned an invalid result envelope', 'render_invalid_response');
+    const result = 'results' in payload ? payload.results[0] : Array.isArray(payload) ? payload[0] : payload;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) throw rejectError('Crawl4AI returned an invalid result', 'render_invalid_response');
+    const text = result.markdown?.raw_markdown ?? result.markdown ?? result.fit_markdown ?? '';
+    if (typeof text !== 'string') throw rejectError('Crawl4AI returned invalid Markdown', 'render_invalid_response');
+    if (Buffer.byteLength(text, 'utf8') > 5 * 1024 * 1024) throw rejectError('Crawl4AI Markdown exceeds 5 MiB', 'markdown_too_large');
+    // Validate both fields, including an unrequested artifact, before any
+    // decode or publication. Only the requested artifact is later decoded.
+    validateArtifactEncoding(result.screenshot);
+    validateArtifactEncoding(result.pdf);
+    return { result, markdown: text };
   });
 }
+function validateArtifactEncoding(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') throw rejectError('artifact must be base64 text', 'artifact_invalid');
+  const maximumEncoded = 4 * Math.ceil(cfg.artifactMaxBytes / 3);
+  // Bound the original field before stripping a bounded data-URL header.
+  if (value.length > maximumEncoded + 256) throw rejectError(`encoded artifact exceeds ${maximumEncoded} characters`, 'artifact_too_large');
+  let encoded = value;
+  if (value.startsWith('data:')) {
+    const comma = value.indexOf(',');
+    if (comma < 0 || comma > 255 || !/^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,$/i.test(value.slice(0, comma + 1))) throw rejectError('invalid artifact data URL', 'artifact_invalid');
+    encoded = value.slice(comma + 1);
+  }
+  if (encoded.length > maximumEncoded) throw rejectError(`encoded artifact exceeds ${maximumEncoded} characters`, 'artifact_too_large');
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  const decodedBytes = Math.floor(encoded.length * 3 / 4) - padding;
+  if (decodedBytes > cfg.artifactMaxBytes) throw rejectError(`artifact exceeds ${cfg.artifactMaxBytes} bytes`, 'artifact_too_large');
+  if (!encoded || encoded.length % 4 === 1 || (padding && encoded.length % 4 !== 0) || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw rejectError('invalid artifact base64', 'artifact_invalid');
+  // Node's decoder accepts noncanonical padding bits and discards invalid
+  // characters. Validate instead of letting that permissiveness hide damage.
+  const remainder = (encoded.length - padding) % 4;
+  const tail = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.indexOf(encoded[encoded.length - padding - 1]);
+  if ((remainder === 2 && (tail & 15) !== 0) || (remainder === 3 && (tail & 3) !== 0)) throw rejectError('invalid artifact base64 padding bits', 'artifact_invalid');
+  return encoded;
+}
 async function saveArtifact(value, extension) {
-  if (typeof value !== 'string' || !value) return null;
-  const content = value.startsWith('data:') ? Buffer.from(value.slice(value.indexOf(',') + 1), 'base64') : Buffer.from(value, 'base64');
+  const encoded = validateArtifactEncoding(value);
+  if (encoded == null) return null;
+  const content = Buffer.from(encoded, 'base64');
   const artifact = await artifactStore.save(content, extension);
   return { ...artifact, url: `${cfg.artifactBase}/artifacts/${encodeURIComponent(artifact.id)}` };
 }

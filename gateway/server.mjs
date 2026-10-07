@@ -119,13 +119,26 @@ function requestOnce(url) {
   const timeoutMs = 30000;
   return new Promise((resolve, reject) => {
     let settled = false;
-    const finish = (error, value) => { if (settled) return; settled = true; error ? reject(error) : resolve(value); };
+    let downstreamRequest;
+    let tunnelSocket;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      // CONNECT hands ownership of its socket to the downstream request. Closing
+      // only the CONNECT request leaves an active origin running past deadline.
+      downstreamRequest?.destroy();
+      tunnelSocket?.destroy();
+      connect.destroy();
+      error ? reject(error) : resolve(value);
+    };
     const connect = http.request({ host: proxyUrl.hostname, port: proxyUrl.port || 80, method: 'CONNECT', path: `${url.hostname}:${url.port || (url.protocol === 'https:' ? 443 : 80)}`, timeout: timeoutMs });
-    const deadline = setTimeout(() => { connect.destroy(); finish(rejectError('egress request timed out', 'egress_timeout')); }, timeoutMs);
+    const deadline = setTimeout(() => complete(rejectError('egress request timed out', 'egress_timeout')), timeoutMs);
     const complete = (error, value) => { clearTimeout(deadline); finish(error, value); };
     connect.once('error', error => complete(rejectError(error.message, 'egress_connect', { cause: error })));
     connect.once('timeout', () => { connect.destroy(); complete(rejectError('egress proxy connection timed out', 'egress_timeout')); });
     connect.once('connect', (response, socket, head) => {
+      if (settled) { socket.destroy(); return; }
+      tunnelSocket = socket;
       connect.setTimeout(0);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         socket.destroy();
@@ -134,9 +147,13 @@ function requestOnce(url) {
       if (head.length) socket.unshift(head);
       const transport = url.protocol === 'https:' ? https : http;
       const sendRequest = requestSocket => {
-        const request = transport.request({
+        // agent:false creates a fresh Agent that ignores the per-request
+        // createConnection option, opening a connection outside the tunnel.
+        const agent = new transport.Agent({ keepAlive: false });
+        agent.createConnection = () => requestSocket;
+        const request = downstreamRequest = transport.request({
           protocol: url.protocol, hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`,
-          method: 'GET', agent: false, createConnection: () => requestSocket,
+          method: 'GET', agent,
           headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
           timeout: timeoutMs,
         }, page => {
@@ -151,6 +168,7 @@ function requestOnce(url) {
             request.destroy();
           }
         });
+        page.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
         page.on('end', () => {
           const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
           if (result.status < 200 || result.status >= 400) {
@@ -170,12 +188,12 @@ function requestOnce(url) {
           request.destroy();
         });
         });
-        request.once('timeout', () => { request.destroy(); complete(rejectError('upstream request timed out', 'upstream_timeout')); });
+        request.once('timeout', () => complete(rejectError('upstream request timed out', 'upstream_timeout')));
         request.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
         request.end();
       };
       if (url.protocol === 'https:') {
-        const secure = tls.connect({ socket, servername: url.hostname, rejectUnauthorized: true });
+        const secure = tunnelSocket = tls.connect({ socket, servername: url.hostname, rejectUnauthorized: true });
         secure.once('secureConnect', () => sendRequest(secure));
         secure.once('error', error => complete(rejectError(error.message, 'tls_error', { cause: error })));
       } else {

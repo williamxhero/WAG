@@ -52,6 +52,17 @@ REQUIRED = ("runtime/gateway/server.mjs", "runtime/gateway/search.mjs",
             "scripts/searxng-apply-overlay.sh", "scripts/cleanup-artifacts.sh", "scripts/install-artifact-cleanup.sh",
             "config/searxng/settings-overlay.yml") + MANIFESTS + tuple("systemd/" + x for x in UNITS)
 
+# Each sync driver owns an event loop, so their contexts must not overlap.
+BROWSER_PROBE = """import json, crawl4ai, fastapi, uvicorn
+from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright as patch
+with sync_playwright() as p:
+    a = p.chromium.executable_path
+with patch() as q:
+    b = q.chromium.executable_path
+print(json.dumps([a, b]))
+"""
+
 
 class ReleaseError(Exception):
     pass
@@ -384,10 +395,7 @@ def prerequisites(root, candidate, entries):
          candidate / "config/crawl4ai-requirements.lock"], "locked Python install", env=env, timeout=600)
     installed = python_packages(candidate, env)
     py_version, _ = run([venv / "bin/python", "--version"], "installed Python version", env=env)
-    browsers, _ = run([venv / "bin/python", "-c",
-        "import json, crawl4ai, fastapi, uvicorn; from playwright.sync_api import sync_playwright; "
-        "from patchright.sync_api import sync_playwright as patch; "
-        "\nwith sync_playwright() as p, patch() as q: print(json.dumps([p.chromium.executable_path, q.chromium.executable_path]))"],
+    browsers, _ = run([venv / "bin/python", "-c", BROWSER_PROBE],
         "crawler/browser imports", env=env)
     paths = json.loads(browsers)
     unit = (candidate / "systemd/web-access-playwright.service").read_text()

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyTransientFailure, dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
+import { classifyTransientFailure, dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, publicRunSummary, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
 
 test('latestSnapshotText ignores stale refs from earlier browser actions', () => {
   const outputs = [
@@ -49,6 +49,16 @@ test('legacy smoke report is visible as a compatible report', () => {
   const report = normalizeReport({ suite: 'smoke', at: '2026-08-28T01:09:39Z', health: { ok: true }, private_proxy_status: 403 }, 'smoke-old.json');
   assert.equal(report.legacy, true);
   assert.equal(report.status, 'passed');
+});
+
+test('historical report index retains normalized identity and compatibility defaults', () => {
+  const report = normalizeReport({ suite: 'smoke', at: '2026-08-28T01:09:39Z', health: { ok: true }, private_proxy_status: 403 }, 'smoke-20260828T010939Z.json');
+  const summary = publicRunSummary(report);
+  assert.equal(summary.id, 'smoke-20260828T010939Z');
+  assert.equal(summary.completed_at, '2026-08-28T01:09:39Z');
+  assert.equal(summary.status, 'passed');
+  assert.equal(summary.summary.success_rate_pct, 100);
+  assert.equal(summary.legacy, true);
 });
 
 test('only WAG-owned screenshot and PDF identifiers are accepted', () => {

@@ -3,6 +3,7 @@ import dns from 'node:dns/promises';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
@@ -57,9 +58,9 @@ const getReadiness = createReadiness({
   searxUrl: cfg.searxUrl, crawlUrl: cfg.crawlUrl, crawlToken: cfg.crawlToken, playwrightUrl: cfg.playwrightUrl,
   secrets: Object.entries(process.env).filter(([key]) => /token|secret|password|api[_-]?key|authorization|credential|private[_-]?key|access[_-]?key/i.test(key)).map(([, value]) => value),
   egressProbe: async signal => {
-    const { url } = await resolvePublicUrl('https://example.com/');
+    const { url, records } = await resolvePublicUrl('https://example.com/');
     signal.throwIfAborted();
-    const response = await requestOnce(url, signal);
+    const response = await requestOnce(url, records, signal);
     return { http_status: response.status };
   },
 });
@@ -95,11 +96,16 @@ function isPublicAddress(address) {
   // RFC 1918, loopback, link-local, CGNAT, documentation/benchmark and all
   // IPv6 special-use ranges are deliberately excluded.  DNS answers must all
   // be public: selecting one answer would otherwise permit DNS rebinding.
-  if (address.includes(':')) {
-    const value = address.toLowerCase().replace(/^::ffff:/, '');
-    if (!value.includes(':')) return isPublicAddress(value);
-    return !(/^(::|::1|fc|fd|fe[89ab]|2001:db8:|2001:2:|2001:10:|2002:|64:ff9b:1:)/.test(value) ||
-      value.startsWith('ff') || value.startsWith('::ffff:'));
+  const family = net.isIP(address);
+  if (!family) return false;
+  if (family === 6) {
+    const value = new URL(`http://[${address}]`).hostname.slice(1, -1);
+    const mapped = /^::ffff:([0-9a-f]+):([0-9a-f]+)$/.exec(value);
+    if (mapped) {
+      const high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
+      return isPublicAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+    }
+    return /^[23][0-9a-f]{3}:/.test(value) && !/^(2001::|2001:db8:|2001:2:|2001:10:|2001:20:|2001:30:|2002:|3fff:)/.test(value);
   }
   const octets = address.split('.').map(Number);
   if (octets.length !== 4 || octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
@@ -115,19 +121,26 @@ async function resolvePublicUrl(raw) {
   try { url = new URL(raw); } catch { throw rejectError('invalid URL', 'invalid_url'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw rejectError('only public HTTP/HTTPS URLs are allowed', 'ssrf_blocked', { blockedReason: 'unsupported_url' });
   if (url.port && !['80', '443'].includes(url.port)) throw rejectError('only ports 80 and 443 are allowed', 'ssrf_blocked', { blockedReason: 'unsupported_port' });
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const family = net.isIP(hostname);
   let records;
-  try { records = await dns.lookup(url.hostname, { all: true, verbatim: true }); }
+  try { records = family ? [{ address: hostname, family }] : await dns.lookup(hostname, { all: true, verbatim: true }); }
   catch (error) { throw rejectError(`hostname could not be resolved: ${error.message}`, 'dns_error', { cause: error }); }
   if (!records.length || records.some(record => !isPublicAddress(record.address))) throw rejectError('non-public targets are blocked', 'ssrf_blocked', { blockedReason: 'non_public_address', host: url.hostname });
   return { url, records };
 }
 const proxyUrl = new URL(cfg.egressProxy);
-function requestOnce(url, signal) {
+if (proxyUrl.protocol !== 'http:' || proxyUrl.username || proxyUrl.password) {
+  throw new Error('EGRESS_PROXY must be an unauthenticated HTTP CONNECT proxy; other transports cannot enforce address pinning');
+}
+function requestOnce(url, records, signal) {
   const timeoutMs = 30000;
   return new Promise((resolve, reject) => {
     let settled = false;
     let downstreamRequest;
     let tunnelSocket;
+    let connect;
+    let nextAddress = 0;
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
@@ -135,82 +148,111 @@ function requestOnce(url, signal) {
       // only the CONNECT request leaves an active origin running past deadline.
       downstreamRequest?.destroy();
       tunnelSocket?.destroy();
-      connect.destroy();
+      connect?.destroy();
       error ? reject(error) : resolve(value);
     };
-    const connect = http.request({ host: proxyUrl.hostname, port: proxyUrl.port || 80, method: 'CONNECT', path: `${url.hostname}:${url.port || (url.protocol === 'https:' ? 443 : 80)}`, timeout: timeoutMs });
     const deadline = setTimeout(() => complete(rejectError('egress request timed out', 'egress_timeout')), timeoutMs);
     const onAbort = () => complete(signal.reason ?? rejectError('dependency probe timed out', 'dependency_timeout'));
     const complete = (error, value) => { clearTimeout(deadline); signal?.removeEventListener('abort', onAbort); finish(error, value); };
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) { onAbort(); return; }
-    connect.once('error', error => complete(rejectError(error.message, 'egress_connect', { cause: error })));
-    connect.once('timeout', () => { connect.destroy(); complete(rejectError('egress proxy connection timed out', 'egress_timeout')); });
-    connect.once('connect', (response, socket, head) => {
-      if (settled || signal?.aborted) { socket.destroy(); return; }
-      tunnelSocket = socket;
-      connect.setTimeout(0);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        socket.destroy();
-        return complete(rejectError(`egress proxy returned ${response.statusCode}`, 'egress_proxy_status', { httpStatus: response.statusCode, blockedReason: response.statusCode === 403 ? 'egress_proxy_blocked' : null }));
-      }
-      if (head.length) socket.unshift(head);
-      const transport = url.protocol === 'https:' ? https : http;
-      const sendRequest = requestSocket => {
-        // agent:false creates a fresh Agent that ignores the per-request
-        // createConnection option, opening a connection outside the tunnel.
-        const agent = new transport.Agent({ keepAlive: false });
-        agent.createConnection = () => requestSocket;
-        const request = downstreamRequest = transport.request({
-          protocol: url.protocol, hostname: url.hostname, port: url.port || undefined, path: `${url.pathname}${url.search}`,
-          method: 'GET', agent,
-          headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
-          timeout: timeoutMs,
-        }, page => {
-        const parts = [];
-        let total = 0;
-        page.on('data', chunk => {
-          total += chunk.length;
-          if (total <= 5 * 1024 * 1024) parts.push(chunk);
-          else {
-            const error = rejectError('response exceeds 5 MiB', 'response_too_large');
-            complete(error);
-            request.destroy();
-          }
-        });
-        page.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
-        page.on('end', () => {
-          const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
-          if (result.status < 200 || result.status >= 400) {
-            const error = rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
-              httpStatus: result.status,
-              retryAfter: result.headers['retry-after'] ?? null,
-              contentType: result.headers['content-type'] ?? null,
-              bytes: result.body.length,
-              contentHash: crypto.createHash('sha256').update(result.body).digest('hex'),
-              blockedReason: result.status === 403 ? 'upstream_forbidden' : result.status === 429 ? 'upstream_rate_limited' : result.status >= 500 ? 'upstream_server_error' : 'upstream_http_error',
-            });
-            complete(error);
-            request.destroy();
-            return;
-          }
-          complete(null, result);
-          request.destroy();
-        });
-        });
-        request.once('timeout', () => complete(rejectError('upstream request timed out', 'upstream_timeout')));
-        request.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
-        request.end();
+    const attempt = () => {
+      if (settled) return;
+      const address = records[nextAddress++].address;
+      const authority = `${net.isIP(address) === 6 ? `[${address}]` : address}:${url.port || (url.protocol === 'https:' ? 443 : 80)}`;
+      const connection = connect = http.request({ host: proxyUrl.hostname, port: proxyUrl.port || 80, method: 'CONNECT', path: authority, timeout: timeoutMs });
+      let handedOff = false;
+      let failed = false;
+      const retry = error => {
+        if (settled || failed) return;
+        failed = true;
+        connection.destroy();
+        // Do not replay a downstream GET or retry TLS/policy failures. All
+        // pre-tunnel retries share the deadline and this checked DNS answer set.
+        if (!handedOff && nextAddress < records.length) attempt(); else complete(error);
       };
-      if (url.protocol === 'https:') {
-        const secure = tunnelSocket = tls.connect({ socket, servername: url.hostname, rejectUnauthorized: true });
-        secure.once('secureConnect', () => sendRequest(secure));
-        secure.once('error', error => complete(rejectError(error.message, 'tls_error', { cause: error })));
-      } else {
-        sendRequest(socket);
-      }
-    });
-    connect.end();
+      connection.once('error', error => retry(rejectError(error.message, 'egress_connect', { cause: error })));
+      connection.once('timeout', () => {
+        if (!failed) complete(rejectError('egress proxy connection timed out', 'egress_timeout'));
+      });
+      connection.once('connect', (response, socket, head) => {
+        if (settled || failed || signal?.aborted) { socket.destroy(); return; }
+        connection.setTimeout(0);
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          socket.destroy();
+          const error = rejectError(`egress proxy returned ${response.statusCode}`, 'egress_proxy_status', { httpStatus: response.statusCode, blockedReason: response.statusCode === 403 ? 'egress_proxy_blocked' : null });
+          return response.statusCode >= 500 ? retry(error) : complete(error);
+        }
+        handedOff = true;
+        tunnelSocket = socket;
+        if (head.length) socket.unshift(head);
+        const transport = url.protocol === 'https:' ? https : http;
+        const sendRequest = requestSocket => {
+          // agent:false creates a fresh Agent that ignores the per-request
+          // createConnection option, opening a connection outside the tunnel.
+          const agent = new transport.Agent({ keepAlive: false });
+          agent.createConnection = () => requestSocket;
+          const request = downstreamRequest = transport.request({
+            protocol: url.protocol, hostname: url.hostname.replace(/^\[|\]$/g, ''), port: url.port || undefined, path: `${url.pathname}${url.search}`,
+            method: 'GET', agent,
+            headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
+            timeout: timeoutMs,
+          }, page => {
+            const parts = [];
+            let total = 0;
+            page.on('data', chunk => {
+              total += chunk.length;
+              if (total <= 5 * 1024 * 1024) parts.push(chunk);
+              else {
+                const error = rejectError('response exceeds 5 MiB', 'response_too_large');
+                complete(error);
+                request.destroy();
+              }
+            });
+            page.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
+            page.on('end', () => {
+              const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
+              if (result.status < 200 || result.status >= 400) {
+                const error = rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
+                  httpStatus: result.status,
+                  retryAfter: result.headers['retry-after'] ?? null,
+                  contentType: result.headers['content-type'] ?? null,
+                  bytes: result.body.length,
+                  contentHash: crypto.createHash('sha256').update(result.body).digest('hex'),
+                  blockedReason: result.status === 403 ? 'upstream_forbidden' : result.status === 429 ? 'upstream_rate_limited' : result.status >= 500 ? 'upstream_server_error' : 'upstream_http_error',
+                });
+                complete(error);
+                request.destroy();
+                return;
+              }
+              complete(null, result);
+              request.destroy();
+            });
+          });
+          request.once('timeout', () => complete(rejectError('upstream request timed out', 'upstream_timeout')));
+          request.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
+          request.end();
+        };
+        if (url.protocol === 'https:') {
+          const hostname = url.hostname.replace(/^\[|\]$/g, '');
+          // The tunnel's numeric destination is not the website's TLS identity.
+          // IP URLs use IP SAN verification, without sending an invalid IP SNI.
+          const secure = tunnelSocket = tls.connect({ socket, host: hostname, servername: net.isIP(hostname) ? undefined : hostname, rejectUnauthorized: true,
+            // Node 22's IDNA-based checkServerIdentity can treat IPv6 as a DNS
+            // name. X509.checkIP verifies the IP SAN without that conversion.
+            checkServerIdentity: net.isIP(hostname) === 6 ? (_name, cert) => {
+              if (!new crypto.X509Certificate(cert.raw).checkIP(hostname)) return Object.assign(new Error(`certificate does not match IP ${hostname}`), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+            } : tls.checkServerIdentity,
+          });
+          secure.once('secureConnect', () => sendRequest(secure));
+          secure.once('error', error => complete(rejectError(error.message, 'tls_error', { cause: error })));
+        } else {
+          sendRequest(socket);
+        }
+      });
+      connection.end();
+    };
+    attempt();
   });
 }
 async function withHostSlot(host, job) {
@@ -223,8 +265,8 @@ async function withHostSlot(host, job) {
 async function fetchPublic(raw) {
   let current = raw;
   for (let redirects = 0; redirects <= 5; redirects++) {
-    const { url } = await resolvePublicUrl(current);
-    const response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url));
+    const { url, records } = await resolvePublicUrl(current);
+    const response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records));
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       if (!response.headers.location) throw rejectError(`upstream returned redirect ${response.status} without a location`, 'redirect_without_location', { httpStatus: response.status });
       current = new URL(response.headers.location, url).href;

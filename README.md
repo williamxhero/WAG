@@ -153,6 +153,9 @@ curl --fail -H "Authorization: Bearer $GATEWAY_TOKEN" \
 - 所有 URL 仅允许 HTTP/HTTPS；初始 URL 和最多五次重定向都会进行 DNS 解析。
 - 回环、私网、链路本地、Docker 常用网段和多播/保留地址会被拒绝，避免 SSRF 访问小电脑或局域网内部服务。
 - 轻量读取最大响应 5 MiB、单次网络请求超时 30 秒；Crawl4AI 渲染超时 90 秒。
+- Crawl4AI 完整 JSON 响应在解析前按流累计字节，默认上限 80 MiB（`CRAWL4AI_RESPONSE_MAX_BYTES=83886080`，正整数）；不依赖 `Content-Length`，压缩响应按解压后的 JSON 字节计数，超限立即中止并返回 `response_too_large`。
+- 爬取 Markdown 按 UTF-8 字节计数，上限 5 MiB（`markdown_too_large`）；截图与 PDF 各自限制为 25 MiB（`ARTIFACT_MAX_BYTES`），在 base64 解码前校验编码长度、格式和精确解码大小（`artifact_too_large` / `artifact_invalid`）。所有这些预算在发布任一产物前校验，存储总配额仍为 1 GiB（`ARTIFACT_QUOTA_BYTES`）。无效 JSON 或结果结构返回 `render_invalid_response`，错误不会回显完整负载。
+- 离线回归：`npm --prefix gateway ci && npm --prefix gateway test`，包括 MCP 网关边界的受控分块流测试及产物下载/配额测试；无需公网网站、运行时服务或真实凭据。
 - Crawl4AI 渲染与浏览器任务的并发上限均为 2；浏览器 service 的内存上限为 6 GiB。
 - 出网沿用小电脑的 sing-box 代理；本机服务地址被加入 `NO_PROXY`。
 - 每次 CONNECT 连接尝试只解析一次目的域名，任一 DNS 答案非公网即拒绝；发给上游的 CONNECT authority 必须是已校验的 IPv4 或带方括号的 IPv6 地址，失败重试只遍历这组答案，不重新解析。整个过程共用一个连接配额和握手截止时间。`EGRESS_UPSTREAM` 仅支持无认证的 HTTP CONNECT 代理，其他传输启动即拒绝；隧道不终止 TLS，客户端原始 Host、SNI 和证书校验保持不变。这封闭了连接时再次解析 DNS 的设计风险，不代表已证明此前存在可利用的重绑定攻击。
@@ -233,5 +236,11 @@ systemctl is-active web-access-healthcheck.timer
 # 网关与 SearXNG 仅绑定直连网线接口；其余服务仅绑定回环接口。
 sudo ss -ltnp '( sport = :8930 or sport = :8931 or sport = :11235 )'
 ```
+
+评测门禁默认值：smoke 成功率/质量通过率均至少 100%；release 均至少 95%，普通可用性案例的超时率至多 2%，并发退化至多 50%。边界相等通过；比较使用未取整的测量值。可在 `WAG_EVAL_SAMPLES` 指定的 JSON 样本文件中提供 `thresholds` 对象覆盖当前套件的门限（键为 `success_rate_pct`、`quality_rate_pct`、`timeout_rate_pct`、`concurrency_degradation_pct`）；无效门限或缺失必需测量不会通过。故意超时/安全拒绝案例不进入普通可用性超时分母。
+
+核心案例失败或任一门禁失败，结论为 `failed`；仅公网连接案例不通过且没有失败门禁时为 `degraded`。两者的评测命令退出码均为非零，不改变部署脚本独立的核心/公网 readiness 回滚策略。报告增量提供 `gates`、`failing_gates` 和 `reasons`；空/不完整套件及失败的并发基线均不能通过。
+
+看板从每次报告读取并显示门限，不使用独立常量。历史结构化及旧格式报告的原有结论保留；缺少门限时按 suite 使用以上默认值，未知 suite 使用 smoke 默认值，标记 `thresholds_source: legacy_defaults`。这是兼容显示，不是重新认证历史报告。
 
 验收还应覆盖：MCP 鉴权、SearXNG 搜索、静态页面正文、JS 渲染、浏览器快照/点击、截图/PDF、两个并发任务、超时，以及私网 URL 拦截。评测结果页为 [http://yosef-server:8930/evals](http://yosef-server:8930/evals)，仅展示已完成的评测报告；报告保留 30 天，截图/PDF 保留 7 天。MCP、健康检查和通用产物接口仍要求 Token。

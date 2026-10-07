@@ -191,9 +191,16 @@ export function evaluationStatus(cases, options) {
   return 'passed';
 }
 
+function reportThresholds(raw) {
+  return {
+    thresholds: { ...defaultThresholds(raw?.suite), ...raw?.thresholds },
+    thresholds_source: raw?.thresholds_source ?? (raw?.thresholds ? 'report' : 'legacy_defaults'),
+  };
+}
+
 export function normalizeReport(raw, fileName = '') {
   if (raw?.schema_version === REPORT_VERSION && Array.isArray(raw.cases)) {
-    return { ...raw, dimensions: raw.dimensions ?? dimensionSummaries(raw.cases) };
+    return { ...raw, ...reportThresholds(raw), dimensions: raw.dimensions ?? dimensionSummaries(raw.cases) };
   }
   const health = raw?.health ?? {};
   const blocked = String(raw?.private_proxy_status ?? '') === '403';
@@ -205,6 +212,7 @@ export function normalizeReport(raw, fileName = '') {
     schema_version: 0,
     id: fileName.replace(/\.json$/, '') || 'legacy-report',
     suite: raw?.suite ?? 'unknown',
+    ...reportThresholds(raw),
     started_at: raw?.at ?? null,
     completed_at: raw?.at ?? null,
     status: cases.every(item => item.status === 'passed') ? 'passed' : 'failed',
@@ -230,6 +238,11 @@ export function publicRunSummary(report) {
     legacy: normalized.legacy === true,
     summary: normalized.summary,
     dimensions: normalized.dimensions,
+    thresholds: normalized.thresholds,
+    thresholds_source: normalized.thresholds_source,
+    ...(normalized.gates ? { gates: normalized.gates } : {}),
+    ...(normalized.failing_gates ? { failing_gates: normalized.failing_gates } : {}),
+    ...(normalized.reasons ? { reasons: normalized.reasons } : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deadlineKind, classifyTransientFailure, dimensionSummaries, evaluateGates, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
+import { deadlineKind, classifyTransientFailure, dimensionSummaries, evaluateGates, evaluationStatus, publicRunSummary, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
 
 test('deadline taxonomy is exact and preserves underlying typed causes', () => {
   for (const kind of ['timeout', 'upstream_timeout', 'egress_timeout']) {
@@ -162,10 +162,46 @@ test('reports identify core failures and connectivity-only degradation without w
   assert.equal(core.gates.core_cases.reason, 'non_passing_cases');
 });
 
+test('success and quality gates reject values that display rounded to 100%', () => {
+  const cases = Array.from({ length: 20000 }, (_, index) => ({ dimension: 'connectivity', status: index ? 'passed' : 'failed', quality: { passed: index !== 0 } }));
+  assert.equal(summarizeCases(cases).success_rate_pct, 100);
+  assert.equal(summarizeCases(cases).quality_rate_pct, 100);
+  const result = evaluateGates(cases, { suite: 'smoke' });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.gates.success_rate_pct.reason, 'below_minimum');
+  assert.equal(result.gates.quality_rate_pct.reason, 'below_minimum');
+});
+
+test('matched negative outcomes do not dilute the operational timeout gate', () => {
+  const cases = [
+    { status: 'passed', quality: { passed: true } },
+    { dimension: 'connectivity', status: 'failed', quality: { passed: false }, error: { kind: 'upstream_timeout' } },
+    ...Array.from({ length: 100 }, () => ({ expectation: 'expected_timeout', status: 'passed', quality: { passed: true }, error: { kind: 'egress_timeout' } })),
+  ];
+  const result = evaluateGates(cases, { suite: 'smoke', thresholds: { success_rate_pct: 0, quality_rate_pct: 0, timeout_rate_pct: 2 } });
+  assert.equal(result.gates.timeout_rate_pct.value, 50);
+  assert.equal(result.status, 'failed');
+});
+
 test('legacy smoke report is visible as a compatible report', () => {
   const report = normalizeReport({ suite: 'smoke', at: '2026-08-28T01:09:39Z', health: { ok: true }, private_proxy_status: 403 }, 'smoke-old.json');
   assert.equal(report.legacy, true);
   assert.equal(report.status, 'passed');
+});
+
+test('historical structured reports retain status with explicit suite threshold defaults', () => {
+  const historical = { schema_version: 1, id: 'retained', suite: 'smoke', status: 'degraded', cases: [{ status: 'passed', quality: { passed: true } }], summary: { success_rate_pct: 99 }, artifacts: [] };
+  const normalized = normalizeReport(historical);
+  assert.equal(normalized.status, 'degraded');
+  assert.equal(normalized.summary.success_rate_pct, 99);
+  assert.deepEqual(normalized.thresholds, { success_rate_pct: 100, quality_rate_pct: 100 });
+  assert.equal(normalized.thresholds_source, 'legacy_defaults');
+  const configured = normalizeReport({ ...historical, suite: 'release', thresholds: { success_rate_pct: 80, quality_rate_pct: 85, timeout_rate_pct: 7, concurrency_degradation_pct: 25 }, gates: { success_rate_pct: { passed: true } }, failing_gates: [], reasons: [] });
+  assert.equal(configured.thresholds_source, 'report');
+  assert.deepEqual(publicRunSummary(configured).thresholds, configured.thresholds);
+  assert.deepEqual(publicRunSummary(configured).gates, configured.gates);
+  assert.deepEqual(publicRunSummary(configured).reasons, []);
+  assert.deepEqual(normalizeReport({ suite: 'release', health: { ok: true }, private_proxy_status: 403 }).thresholds, { success_rate_pct: 95, quality_rate_pct: 95, timeout_rate_pct: 2, concurrency_degradation_pct: 50 });
 });
 
 test('only WAG-owned screenshot and PDF identifiers are accepted', () => {

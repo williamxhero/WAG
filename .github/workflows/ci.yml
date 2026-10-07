@@ -19,5 +19,5 @@ jobs:
       - run: npm --prefix gateway ci --ignore-scripts --no-audit --no-fund
       - run: npm --prefix gateway test
       - run: node --test proxy/server.test.mjs
-      - run: bash -n scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh scripts/bootstrap.sh
+      - run: for script in scripts/healthcheck.sh scripts/deploy.sh scripts/eval-smoke.sh scripts/cleanup-artifacts.sh scripts/install-artifact-cleanup.sh scripts/bootstrap.sh; do bash -n "$script" || exit; done
       - run: python3 scripts/bootstrap.test.py

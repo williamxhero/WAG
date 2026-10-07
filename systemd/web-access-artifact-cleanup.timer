@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Web Access Gateway artifact retention daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=web-access-artifact-cleanup.service
+
+[Install]
+WantedBy=timers.target

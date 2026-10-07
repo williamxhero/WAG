@@ -1,0 +1,13 @@
+[Unit]
+Description=Reclaim completed Web Access Gateway artifacts after seven days
+
+[Service]
+Type=oneshot
+User=yosef
+Group=yosef
+EnvironmentFile=/data/web-access-gateway/secrets/gateway.env
+ExecStart=/data/web-access-gateway/scripts/cleanup-artifacts.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full

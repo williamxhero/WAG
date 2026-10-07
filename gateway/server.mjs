@@ -91,6 +91,12 @@ const requireToken = (req, res, next) => {
   if (!anonymous && (!match || !tokenEqual(match[1]))) return res.status(401).json({ error: 'unauthorized' });
   const key = cfg.allowAnonymous ? req.socket.remoteAddress : crypto.createHash('sha256').update(match[1]).digest('hex').slice(0, 16);
   const now = Date.now();
+  if (cfg.allowAnonymous) {
+    // Unlike the single token bucket, inactive client addresses can accumulate.
+    for (const [client, requests] of tokenRequests) {
+      if (!requests.length || requests.at(-1) <= now - cfg.tokenRateWindowMs) tokenRequests.delete(client);
+    }
+  }
   const recent = (tokenRequests.get(key) ?? []).filter(value => value > now - cfg.tokenRateWindowMs);
   if (recent.length >= cfg.tokenRateLimit) {
     tokenRequests.set(key, recent);

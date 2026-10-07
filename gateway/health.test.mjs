@@ -159,6 +159,13 @@ test('anonymous gateway rate limits the client address even with changing forwar
       assert.equal(response.headers.get('retry-after'), '60');
       assert.deepEqual(await response.json(), { error: 'rate limit exceeded', blocked_reason: 'token_rate_limit' });
       assert.equal((await request({ authorization: 'Bearer wrong' })).status, 401);
+      const otherClientStatus = await new Promise((resolve, reject) => {
+        http.get(`${base}/healthz`, { localAddress: '127.0.0.2', agent: false, timeout: 8000 }, response => {
+          response.resume();
+          response.once('end', () => resolve(response.statusCode));
+        }).on('error', reject).on('timeout', function () { this.destroy(new Error('client request timed out')); });
+      });
+      assert.equal(otherClientStatus, 200, 'a different client address retains its own quota');
     });
   }
 });

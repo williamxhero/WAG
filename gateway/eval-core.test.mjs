@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deadlineKind, classifyTransientFailure, dimensionSummaries, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
+import { deadlineKind, classifyTransientFailure, dimensionSummaries, evaluateGates, evaluationStatus, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
 
 test('deadline taxonomy is exact and preserves underlying typed causes', () => {
   for (const kind of ['timeout', 'upstream_timeout', 'egress_timeout']) {
@@ -92,6 +92,74 @@ test('core failures fail a run while connectivity failures degrade it', () => {
   assert.equal(evaluationStatus(connectivityOnly), 'degraded');
   assert.equal(evaluationStatus([{ dimension: 'core', status: 'failed', quality: { passed: false } }]), 'failed');
   assert.equal(dimensionSummaries(connectivityOnly).connectivity.failed_cases, 1);
+});
+
+test('configured success gate enforces smoke and release discrete case counts', () => {
+  const cases = Array.from({ length: 20 }, (_, index) => ({ id: index === 1 ? 'concurrency-two' : `case-${index}`, dimension: 'connectivity', status: index === 0 ? 'failed' : 'passed', quality: { passed: index !== 0 }, ...(index === 1 ? { metrics: { degradation_pct: 50, baseline_ms: 100 } } : {}) }));
+  assert.equal(evaluationStatus(cases, { suite: 'smoke' }), 'failed');
+  assert.equal(evaluationStatus(cases, { suite: 'release' }), 'degraded');
+  assert.equal(evaluationStatus(cases.slice(0, 19), { suite: 'release' }), 'failed');
+});
+
+test('quality rate has an independent inclusive gate', () => {
+  const cases = Array.from({ length: 20 }, (_, index) => ({ id: index === 1 ? 'concurrency-two' : `case-${index}`, status: 'passed', quality: { passed: index !== 0 }, ...(index === 1 ? { metrics: { degradation_pct: 50, baseline_ms: 100 } } : {}) }));
+  assert.equal(evaluationStatus(cases, { suite: 'release' }), 'passed');
+  assert.equal(evaluationStatus(cases, { suite: 'smoke' }), 'failed');
+  assert.equal(evaluationStatus(cases.slice(0, 19), { suite: 'release' }), 'failed');
+});
+
+test('operational timeout gate passes 2% exactly and rejects a rounded-down breach', () => {
+  const cases = Array.from({ length: 50 }, (_, index) => ({ id: index === 1 ? 'concurrency-two' : `case-${index}`, dimension: 'connectivity', status: index === 0 ? 'failed' : 'passed', quality: { passed: index !== 0 }, ...(index === 0 ? { error: { kind: 'egress_timeout' } } : {}), ...(index === 1 ? { metrics: { degradation_pct: 50, baseline_ms: 100 } } : {}) }));
+  assert.equal(evaluationStatus(cases, { suite: 'release' }), 'degraded');
+  assert.equal(evaluationStatus(cases.slice(0, 49), { suite: 'release' }), 'failed');
+  const large = Array.from({ length: 9999 }, (_, index) => ({ status: 'passed', quality: { passed: true }, ...(index < 500 ? { error: { kind: 'timeout' } } : {}) }));
+  assert.equal(summarizeCases(large).timeout_rate_pct, 5);
+  assert.equal(evaluationStatus(large, { suite: 'smoke', thresholds: { timeout_rate_pct: 5 } }), 'failed');
+});
+
+test('concurrency gate has an inclusive boundary and requires a successful measured baseline', () => {
+  const baseline = { id: 'read-static', dimension: 'connectivity', status: 'passed', quality: { passed: true }, total_ms: 100 };
+  const concurrent = { id: 'concurrency-two', status: 'passed', quality: { passed: true }, metrics: { degradation_pct: 50, baseline_ms: 100 } };
+  const status = (metric, base = baseline) => evaluationStatus([base, { ...concurrent, metrics: metric }], { suite: 'release', thresholds: { success_rate_pct: 0, quality_rate_pct: 0 } });
+  assert.equal(status(concurrent.metrics), 'passed');
+  assert.equal(status({ ...concurrent.metrics, degradation_pct: 50.001 }), 'failed');
+  for (const value of [undefined, null, '50', NaN, Infinity]) assert.equal(status({ baseline_ms: 100, degradation_pct: value }), 'failed');
+  assert.equal(status(concurrent.metrics, { ...baseline, status: 'failed', quality: { passed: false } }), 'failed');
+  assert.equal(status({ degradation_pct: 0 }), 'failed');
+});
+
+test('empty, incomplete, and invalid measurements fail even with permissive thresholds', () => {
+  const valid = { id: 'one', status: 'passed', quality: { passed: true } };
+  const options = { suite: 'smoke', thresholds: { success_rate_pct: 0, quality_rate_pct: 0 } };
+  for (const cases of [[], [{ ...valid, expectation: 'expected_timeout' }], [{ ...valid, quality: {} }], [{ ...valid, status: 'running' }]]) {
+    assert.equal(evaluationStatus(cases, options), 'failed');
+  }
+  assert.equal(evaluationStatus([valid], { ...options, complete: false }), 'failed');
+  assert.equal(evaluationStatus([valid], { ...options, expected_case_ids: ['one', 'two'] }), 'failed');
+  assert.equal(evaluationStatus([valid, valid], { ...options, expected_case_ids: ['one'] }), 'failed');
+  for (const name of ['success_rate_pct', 'quality_rate_pct', 'timeout_rate_pct', 'concurrency_degradation_pct']) {
+    for (const value of [null, undefined, '95', NaN, Infinity, -1]) {
+      const report = evaluateGates([valid], { suite: 'smoke', thresholds: { [name]: value } });
+      assert.equal(report.status, 'failed');
+      assert.equal(report.gates[name].reason, 'invalid_threshold');
+    }
+  }
+});
+
+test('reports identify core failures and connectivity-only degradation without weakening gates', () => {
+  const cases = [
+    { id: 'core', status: 'passed', quality: { passed: true } },
+    { id: 'public', dimension: 'connectivity', status: 'failed', quality: { passed: false } },
+  ];
+  const options = { suite: 'smoke', thresholds: { success_rate_pct: 50, quality_rate_pct: 50 } };
+  const degraded = evaluateGates(cases, options);
+  assert.equal(degraded.status, 'degraded');
+  assert.deepEqual(degraded.failing_gates, []);
+  assert.deepEqual(degraded.reasons, [{ gate: 'connectivity', reason: 'non_passing_cases', case_ids: ['public'] }]);
+  const core = evaluateGates([{ ...cases[0], status: 'failed' }, cases[1]], { ...options, thresholds: { success_rate_pct: 0, quality_rate_pct: 0 } });
+  assert.equal(core.status, 'failed');
+  assert.ok(core.failing_gates.includes('core_cases'));
+  assert.equal(core.gates.core_cases.reason, 'non_passing_cases');
 });
 
 test('legacy smoke report is visible as a compatible report', () => {

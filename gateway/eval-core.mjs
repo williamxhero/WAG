@@ -201,6 +201,23 @@ export function evaluationStatus(cases, options) {
   return 'passed';
 }
 
+// Readiness carries a deliberate three-state classification (gateway/readiness.mjs
+// and scripts/healthcheck-diagnostics.py share it): a healthy gateway, a core
+// capability failure, and a SearXNG that answered but whose public/third-party
+// engines are blocked or unusable. A public-only degradation must not read as a
+// hard failure, but it must not be reported as healthy either. Keeping the single
+// interpretation here keeps the shell healthcheck and the acceptance cases aligned
+// instead of each re-deriving it from `ok` / `core_ok` / `public_connectivity_ok`.
+export function classifyReadiness(body) {
+  const value = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  // Legacy bodies predating #38 only expose `ok`; treat it as the whole signal.
+  const legacyOk = value.ok === true;
+  const core_ready = value.core_ok === true || (value.core_ok === undefined && legacyOk);
+  const public_ready = core_ready
+    && (value.public_connectivity_ok === true || (value.public_connectivity_ok === undefined && legacyOk));
+  return { core_ready, public_ready, state: !core_ready ? 'core_failed' : public_ready ? 'ok' : 'public_degraded' };
+}
+
 function reportThresholds(raw) {
   return {
     thresholds: { ...defaultThresholds(raw?.suite), ...raw?.thresholds },

@@ -27,7 +27,7 @@ async function fixture(t, handler) {
     if (request.method === 'DELETE') { response.writeHead(200).end(); return; }
     if (request.url !== '/mcp') {
       const status = request.headers.authorization ? 200 : 401;
-      response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, dependencies: [] }));
+      response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, core_ok: true, public_connectivity_ok: true, status: 'passed', dependencies: [] }));
       return;
     }
     if (request.method === 'GET') { response.writeHead(405).end(); return; }
@@ -159,7 +159,8 @@ test('a recovered connectivity deadline still breaches the configured command ti
   assert.equal(recovered.attempt_outcomes[0].error.kind, 'egress_timeout');
   assert.equal(report.summary.success_rate_pct, 100);
   assert.equal(report.summary.timeout_cases, 1);
-  assert.equal(report.gates.timeout_rate_pct.value, 12.5);
+  // One timeout across the nine availability cases (including the public readiness case).
+  assert.ok(Math.abs(report.gates.timeout_rate_pct.value - 100 / 9) < 1e-9);
   assert.deepEqual(report.failing_gates, ['timeout_rate_pct']);
 });
 
@@ -199,6 +200,7 @@ for (const [name, thresholds, failureKind, expectedGate] of [
 test('core failure overrides permissive aggregate command thresholds', async t => {
   const f = await passingFixture(t, (request, response) => {
     if (request.url !== '/readyz') return false;
+    // Legacy/ambiguous body: no core/public split, ok=false must still be a core failure.
     response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, dependencies: [] }));
     return true;
   });
@@ -206,6 +208,27 @@ test('core failure overrides permissive aggregate command thresholds', async t =
   assert.equal(report.status, 'failed');
   assert.ok(report.failing_gates.includes('core_cases'));
   assert.deepEqual(report.gates.core_cases.case_ids, ['gateway-ready']);
+});
+
+test('public readiness degradation degrades the run instead of failing a healthy core', async t => {
+  const f = await passingFixture(t, (request, response) => {
+    if (request.url !== '/readyz') return false;
+    // SearXNG answered (503 degraded) but every public engine is blocked: the WAG
+    // core is healthy, so this must not turn acceptance red - only degraded.
+    response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({
+      ok: false, core_ok: true, public_connectivity_ok: false, status: 'degraded',
+      dependencies: [{ name: 'searxng', scope: 'public_connectivity', ok: false, result_count: 0, error: { kind: 'search_empty', message: 'all engines blocked' } }],
+    }));
+    return true;
+  });
+  const { report } = await runEvaluator(t, f, await samplesWithThresholds(f, { success_rate_pct: 0, quality_rate_pct: 0 }));
+  assert.equal(report.status, 'degraded');
+  assert.deepEqual(report.failing_gates, []);
+  assert.equal(report.cases.find(item => item.id === 'gateway-ready').status, 'passed');
+  const publicCase = report.cases.find(item => item.id === 'gateway-public');
+  assert.equal(publicCase.status, 'failed');
+  assert.equal(publicCase.dimension, 'connectivity');
+  assert.ok(report.reasons.some(reason => reason.gate === 'connectivity' && reason.case_ids.includes('gateway-public')));
 });
 
 for (const [threshold, code] of [[100, 0], [99.99, 1]]) test(`release command enforces concurrency boundary ${threshold}% with a controlled clock`, async t => {

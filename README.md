@@ -204,8 +204,11 @@ systemctl list-timers web-access-healthcheck.timer
 
 Playwright MCP writes SDK output under
 `/data/web-access-gateway/data/playwright/output`, **outside** `ARTIFACT_DIR`.
-Both service units create that directory as the application user before startup;
-bootstrap provisions it with application ownership. `PLAYWRIGHT_OUTPUT_DIR` must
+Both service units prepare that tree in a privileged (`+`) `ExecStartPre` step as
+root - creating it and re-asserting application ownership - before dropping to
+`User=yosef`; `scripts/upgrade.sh` also provisions it up front. This keeps the
+units startable even when a prior run left the tree (or its parent) root-owned,
+which otherwise fails `mkdir` with `EACCES` and loops on restart. `PLAYWRIGHT_OUTPUT_DIR` must
 match the SDK `--output-dir` if overridden. Do not point SDK output or eviction at
 retained artifacts. SDK output-size eviction bounds only staging, not the shared
 retained quota.

@@ -149,17 +149,27 @@ test('installed browser output is outside retained storage and its directory is 
   const playwright = await fs.readFile(path.join(root, 'systemd/web-access-playwright.service'), 'utf8');
   const gateway = await fs.readFile(path.join(root, 'systemd/web-access-gateway.service'), 'utf8');
   const bootstrap = await fs.readFile(path.join(root, 'scripts/bootstrap.sh'), 'utf8');
+  const upgrade = await fs.readFile(path.join(root, 'scripts/upgrade.sh'), 'utf8');
   const template = await fs.readFile(path.join(root, 'config/gateway.env.template'), 'utf8');
   const staging = '/data/web-access-gateway/data/playwright/output';
   assert.ok(playwright.includes(`--output-dir ${staging} `));
   assert.equal(playwright.includes('--output-dir /data/web-access-gateway/artifacts'), false);
   for (const unit of [playwright, gateway]) {
-    assert.ok(unit.includes(`ExecStartPre=/usr/bin/mkdir -p ${staging}`));
+    // A prior run can leave the tree (or its parent) root-owned; an unprivileged
+    // "mkdir -p" as User=yosef then fails with EACCES and the service loops on
+    // restart (observed 2026-10-07). Preparation must therefore repair ownership
+    // with full privileges, covering the root-owned parent, not just `output`.
+    assert.ok(unit.includes(`ExecStartPre=+/usr/bin/mkdir -p ${staging} `));
+    assert.ok(unit.includes('ExecStartPre=+/usr/bin/chown yosef:yosef /data/web-access-gateway/data/playwright '));
+    assert.equal(unit.includes('ExecStartPre=/usr/bin/mkdir'), false);
     assert.match(unit, /^ReadWritePaths=.*\/data\/web-access-gateway\/data\s*$/m);
     assert.match(unit, /^User=yosef\s*$/m);
   }
   assert.ok(bootstrap.includes('"$ROOT/data/playwright/output"'));
   assert.ok(bootstrap.includes('install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750'));
+  // Deployment layer: the documented upgrade path must provision the tree up front.
+  assert.ok(upgrade.includes('install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750'));
+  assert.ok(upgrade.includes('"$ROOT/data/playwright/output"'));
   assert.ok(template.includes(`PLAYWRIGHT_OUTPUT_DIR=${staging}`));
 });
 

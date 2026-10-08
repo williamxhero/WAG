@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { DEADLINE_KINDS, dimensionSummaries, evaluateGates, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
+import { classifyReadiness, DEADLINE_KINDS, dimensionSummaries, evaluateGates, isEvaluationReportFileName, latestSnapshotText, REPORT_VERSION, safeArtifactId, summarizeCases, toolSummaries } from './eval-core.mjs';
 import { evaluateCase } from './eval-case.mjs';
 
 const root = process.env.WAG_ROOT ?? '/data/web-access-gateway';
@@ -85,6 +85,19 @@ function errorInfo(error) {
 function assertQuality(checks) {
   const normalized = checks.map(check => ({ ...check, passed: Boolean(check.passed) }));
   return { passed: normalized.every(check => check.passed), checks: normalized };
+}
+// Grade a /readyz body through the shared three-state classification
+// (eval-core.classifyReadiness). Core capability readiness is a hard gate, while
+// a public/SearXNG degradation - including third-party engines blocking every
+// query - is a connectivity-dimension result so it degrades the run instead of
+// failing a healthy WAG.
+function readinessQuality(body, scope) {
+  const readiness = classifyReadiness(body);
+  if (scope === 'core') return assertQuality([
+    { name: 'core-ready', passed: readiness.core_ready },
+    { name: 'core-dependencies-ready', passed: readiness.core_ready && (body?.dependencies ?? []).filter(item => (item?.scope ?? 'core') === 'core').every(item => item?.ok === true) },
+  ]);
+  return assertQuality([{ name: 'public-connectivity-ready', passed: readiness.public_ready }]);
 }
 function evidenceChecks(value) {
   const retrieved = value?.temporal_evidence?.find(item => item.kind === 'retrieved_at');
@@ -212,7 +225,7 @@ async function main() {
   const cases = []; const artifacts = []; const resourceSamples = [];
   let resourceStart = {}; let resourceEnd = {}; let resourceTimer;
   let completed = false; let failure; let thresholds;
-  const expectedCaseIds = ['search-public', 'read-static', 'read-rendered', 'browser-snapshot-click', 'read-screenshot', 'read-pdf', 'gateway-health', 'gateway-ready', 'eval-api-auth', 'auth-required', 'ssrf-loopback', ...(suite === 'release' ? ['concurrency-two', 'ssrf-redirect'] : []), ...(offline ? ['read-timeout'] : [])];
+  const expectedCaseIds = ['search-public', 'read-static', 'read-rendered', 'browser-snapshot-click', 'read-screenshot', 'read-pdf', 'gateway-health', 'gateway-ready', 'gateway-public', 'eval-api-auth', 'auth-required', 'ssrf-loopback', ...(suite === 'release' ? ['concurrency-two', 'ssrf-redirect'] : []), ...(offline ? ['read-timeout'] : [])];
   const cleanupErrors = [];
   try {
     await lifecycle.run('evaluation', async () => {
@@ -270,7 +283,8 @@ async function main() {
     }, quality: payload => assertQuality([{ name: 'snapshot-and-click-completed', passed: payload.clicked?.outputs?.length > 0 }, { name: 'browser-evidence', passed: Boolean(payload.initial?.url && payload.initial?.source?.host && payload.initial?.retrieved_at && payload.initial?.temporal_evidence?.some(record => record.kind === 'retrieved_at')) }, { name: 'session-closed', passed: payload.closed === true }]) });
     for (const output of ['screenshot', 'pdf']) await runCase(cases, artifacts, { id: `read-${output}`, name: `Rendered ${output}`, category: 'artifact', dimension: 'connectivity', retry: true, tool: 'web_read', run: async () => { const result = await callTool(client, 'web_read', { url: samples.static.url, render: 'always', output }); const artifact = artifactFrom(result.payload, output, `read-${output}`); if (!artifact) throw new Error(`missing ${output} artifact`); return { ...result, artifact }; }, quality: (_payload, outcome) => assertQuality([{ name: 'non-empty-artifact', passed: Number(outcome.artifact?.bytes) > 100 }]) });
     await runCase(cases, artifacts, { id: 'gateway-health', name: 'Authenticated gateway health', category: 'health', tool: 'health', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/healthz'), { headers: { authorization: `Bearer ${token}` } }); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }]) });
-    await runCase(cases, artifacts, { id: 'gateway-ready', name: 'Dependency readiness', category: 'health', tool: 'ready', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/readyz'), { headers: { authorization: `Bearer ${token}` } }); const body = await response.json(); const totalMs = elapsed(start); return { payload: { status: response.status, body }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => assertQuality([{ name: 'returns-200', passed: payload.status === 200 }, { name: 'all-dependencies-ready', passed: payload.body?.ok === true && (payload.body.dependencies ?? []).every(item => item.ok === true) }]) });
+    await runCase(cases, artifacts, { id: 'gateway-ready', name: 'Core dependency readiness', category: 'health', tool: 'ready', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/readyz'), { headers: { authorization: `Bearer ${token}` } }); const body = await response.json(); const totalMs = elapsed(start); return { payload: { body }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => readinessQuality(payload.body, 'core') });
+    await runCase(cases, artifacts, { id: 'gateway-public', name: 'Public connectivity readiness', category: 'health', dimension: 'connectivity', tool: 'ready', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/readyz'), { headers: { authorization: `Bearer ${token}` } }); const body = await response.json().catch(() => null); const totalMs = elapsed(start); return { payload: { body }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; }, quality: payload => readinessQuality(payload.body, 'public') });
     await runCase(cases, artifacts, { id: 'eval-api-auth', name: 'Evaluation API rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/api/evals')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
     await runCase(cases, artifacts, { id: 'auth-required', name: 'Health endpoint rejects missing token', category: 'security', expectation: 'expected_security', expected_outcome: { http_status: 401 }, tool: 'authentication', run: async () => { const start = now(); const response = await fetchEvaluation(gatewayUrl.replace('/mcp', '/healthz')); const totalMs = elapsed(start); return { payload: { status: response.status }, total_ms: totalMs, first_valid_result_ms: totalMs, stages_ms: { http_ms: totalMs } }; } });
     await runCase(cases, artifacts, { id: 'ssrf-loopback', name: 'Loopback URL is rejected', category: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: 'non_public_address' }, tool: 'web_read', run: () => callTool(client, 'web_read', { url: samples.security.loopback_url, render: 'never', output: 'markdown' }) });

@@ -423,7 +423,13 @@ function renderedMetadata(rendered) {
   const status = Number.isInteger(rendered?.result?.status_code) ? rendered.result.status_code : null;
   const markdown = rendered?.markdown ?? '';
   return {
-    http_status: status,
+    // A renderer that reports no integer `status_code` has no upstream HTTP
+    // figure to report. Omit the key instead of emitting `null`: the output
+    // schema declares `http_status: z.number().optional()`, and a null value
+    // fails output validation, turning the whole read into an MCP -32602
+    // protocol error that hides `blocked_reason` / `render_fallback` from the
+    // caller (issue #51 D1). `errorResult()` omits the key the same way.
+    ...(status == null ? {} : { http_status: status }),
     content_type: 'text/markdown',
     bytes: Buffer.byteLength(markdown, 'utf8'),
     content_hash: crypto.createHash('sha256').update(markdown, 'utf8').digest('hex'),

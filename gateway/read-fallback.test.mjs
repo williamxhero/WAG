@@ -315,6 +315,29 @@ test('a fallback whose renderer still observes a block reports the final status,
   assert.equal(JSON.stringify(payload).includes('enable JS'), false, 'a challenge page is not returned as content');
 });
 
+test('a renderer that reports no status_code still returns a structured payload instead of an MCP protocol error', { timeout: 20000 }, async t => {
+  const gateway = await fixture(t);
+  gateway.setOrigin({ status: 403, headers: { 'content-type': 'text/html' }, body: 'forbidden' });
+  // Crawl4AI may omit `status_code` entirely; the gateway must not synthesize an
+  // HTTP figure, and must not emit `http_status: null` either — that value fails
+  // readOutputSchema (`z.number().optional()`) and turns the read into a
+  // protocol-level -32602 that hides every other evidence field (issue #51 D1).
+  gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [{ markdown: '# Rendered\n\nRecovered body without a status code.' }] }) });
+  const { result, payload } = await gateway.read('http://blocked.example.test/article', 'auto');
+  assert.notEqual(result.isError, true, JSON.stringify(result));
+  assert.equal(payload.renderer, 'crawl4ai');
+  assert.equal(Object.hasOwn(payload, 'http_status'), false, 'an unknown status is omitted, never null');
+  assert.match(payload.markdown, /Recovered body without a status code/);
+  assert.deepEqual(payload.render_fallback, {
+    occurred: true, from: 'lightweight', to: 'crawl4ai',
+    reason: 'upstream_forbidden', http_status: 403, url: 'http://blocked.example.test/article',
+  });
+  assert.equal(payload.blocked_reason, null);
+  assert.equal(payload.source.host, 'blocked.example.test');
+  assert.match(payload.content_hash, /^[a-f0-9]{64}$/);
+  assert.equal(gateway.crawlRequests.length, 1);
+});
+
 test('render: always still renders and keeps evidence from the lightweight read', { timeout: 20000 }, async t => {
   const gateway = await fixture(t);
   gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body: longArticle(150) });

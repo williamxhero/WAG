@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { DEFAULT_PROBE_TIMEOUT_MS } from './readiness.mjs';
 
 const scripts = path.resolve(import.meta.dirname, '../scripts');
 const bash = process.env.BASH_PATH ?? (process.platform === 'win32' ? path.join(process.env.ProgramFiles, 'Git/bin/bash.exe') : 'bash');
@@ -21,13 +22,19 @@ async function fixture(t, { gatewayEnv, realGateway = false } = {}) {
   await copyFile(path.join(scripts, 'healthcheck-diagnostics.py'), path.join(root, 'scripts/healthcheck-diagnostics.py')).catch(error => { if (error.code !== 'ENOENT') throw error; });
   await writeFile(path.join(root, 'secrets/gateway.env'), gatewayEnv ?? `GATEWAY_HOST=fixture.test\nGATEWAY_PORT=8930\nGATEWAY_TOKEN=${gatewayToken}\nCRAWL4AI_TOKEN=${crawlerToken}\nOTHER_API_KEY=offline-other-secret\n`);
   await writeFile(path.join(root, 'bin/systemctl'), `#!/usr/bin/env bash\nif [[ "$FIXTURE_MODE" == hang ]]; then exec sleep 30; fi\nif [[ "$1" == show ]]; then printf '0\\n'; fi\n`);
+  await writeFile(path.join(root, 'bin/timeout'), `#!/usr/bin/env bash
+if [[ "$1" == --foreground ]]; then printf '%s\\n' "$4" >> "$WAG_ROOT/request-wrappers"; fi
+exec /usr/bin/timeout "$@"
+`);
   await writeFile(path.join(root, 'bin/curl'), `#!/usr/bin/env bash
 original=("$@")
-output=''; writeout=false; url=''
+output=''; writeout=false; url=''; max_time=''
 while (($#)); do
-  case "$1" in --output) output="$2"; shift;; --write-out) writeout=true; shift;; --max-time|-H|--proxy) shift;; http*) url="$1";; esac
+  case "$1" in --output) output="$2"; shift;; --write-out) writeout=true; shift;; --max-time) max_time="$2"; shift;; -H|--proxy) shift;; http*) url="$1";; esac
   shift
 done
+printf '%s %s\\n' "$max_time" "$url" >> "$WAG_ROOT/request-deadlines"
+if [[ "$FIXTURE_MODE" == slow-health && "$url" == *":$GATEWAY_PORT/healthz" ]]; then sleep 3; fi
 if [[ "$FIXTURE_REAL_GATEWAY" == 1 && "$url" == *":$GATEWAY_PORT/"* ]]; then
   exec "$FIXTURE_REAL_CURL" --noproxy '*' "\${original[@]}"
 fi
@@ -56,9 +63,10 @@ if [[ -n "$output" ]]; then printf '%s' "$body" > "$output"; else printf '%s' "$
 if [[ "$writeout" == true ]]; then printf '%s' "$status"; fi
 `);
   await writeFile(path.join(root, 'shell-env'), `export PATH="${posix(root)}/bin:$PATH"\n`);
-  await Promise.all(['curl', 'systemctl'].map(name => chmod(path.join(root, 'bin', name), 0o755)));
+  await Promise.all(['curl', 'systemctl', 'timeout'].map(name => chmod(path.join(root, 'bin', name), 0o755)));
   t.after(() => rm(root, { recursive: true, force: true }));
   return async (mode, args = [], extra = {}) => {
+    await Promise.all(['request-deadlines', 'request-wrappers'].map(name => writeFile(path.join(root, name), '')));
     const environment = { ...process.env };
     delete environment.MSYS_NO_PATHCONV;
     delete environment.MSYS2_ARG_CONV_EXCL;
@@ -68,11 +76,16 @@ if [[ "$writeout" == true ]]; then printf '%s' "$status"; fi
     let stdout = ''; let stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
-    const guard = setTimeout(() => child.kill(), 12000);
+    const guard = setTimeout(() => child.kill(), 20000);
     const result = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({ code, signal })); });
     clearTimeout(guard);
     assert.ok(!(await readdir(root)).some(name => name.startsWith('tmp.')), 'healthcheck removes captured diagnostic files on all terminal paths');
-    return { ...result, stdout, stderr, lines: (stdout + stderr).split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line)) };
+    const requests = (await readFile(path.join(root, 'request-deadlines'), 'utf8').catch(() => '')).trim().split(/\r?\n/).filter(Boolean).map(line => {
+      const [seconds, url] = line.split(' ');
+      return { seconds: Number(seconds), url };
+    });
+    const wrappers = (await readFile(path.join(root, 'request-wrappers'), 'utf8').catch(() => '')).trim().split(/\r?\n/).filter(Boolean);
+    return { ...result, stdout, stderr, requests, wrappers, lines: (stdout + stderr).split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line)) };
   };
 }
 
@@ -102,6 +115,125 @@ test('shell probes the local bind independently of the default logical Host, inc
       const result = await run('healthy', ['--core-only']);
       assert.equal(result.code, 0, JSON.stringify(result));
       assert.deepEqual(seen, [{ path: '/healthz', host: `yosef-server:${port}` }, { path: '/readyz', host: `yosef-server:${port}` }]);
+    });
+  }
+});
+
+async function delayedGateway(t, { delayMs, probeMs } = {}) {
+  const timers = new Set();
+  const server = http.createServer((req, res) => {
+    const respond = () => res.end(JSON.stringify({ ok: true, core_ok: true, public_connectivity_ok: true, dependencies: [] }));
+    if (req.url !== '/readyz') { respond(); return; }
+    if (delayMs === undefined) return;
+    const timer = setTimeout(() => { timers.delete(timer); respond(); }, delayMs);
+    timers.add(timer);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    for (const timer of timers) clearTimeout(timer);
+    return new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });
+  });
+  return fixture(t, {
+    realGateway: true,
+    gatewayEnv: `GATEWAY_HOST=fixture.test\nGATEWAY_PORT=${server.address().port}\nGATEWAY_TOKEN=${gatewayToken}\n${probeMs === undefined ? '' : `GATEWAY_PROBE_TIMEOUT_MS=${probeMs}\n`}`,
+  });
+}
+
+test('shell full healthcheck accepts readiness slower than the old eight-second client deadline', async t => {
+  const run = await delayedGateway(t, { delayMs: 8250 });
+  const result = await run('healthy');
+  assert.equal(result.code, 0, JSON.stringify(result));
+  assert.equal(result.lines.find(line => line.layer === 'gateway-ready').ok, true);
+  assert.equal(result.requests.find(request => request.url.endsWith('/readyz')).seconds, Math.ceil(DEFAULT_PROBE_TIMEOUT_MS / 1000) + 2);
+  assert.ok(result.wrappers.includes('13s'));
+  assert.ok(result.requests.filter(request => !request.url.endsWith('/readyz')).every(request => request.seconds === 8));
+});
+
+test('shell couples readiness curl and wrapper deadlines to the configured gateway budget', async t => {
+  const run = await delayedGateway(t, { delayMs: 1100, probeMs: 1500 });
+  const result = await run('healthy');
+  assert.equal(result.code, 0, JSON.stringify(result));
+  assert.equal(result.requests.find(request => request.url.endsWith('/readyz')).seconds, 4);
+  assert.ok(result.wrappers.includes('5s'));
+});
+
+test('shell readiness beyond its client budget or never answering remains a curl timeout', async t => {
+  for (const delayMs of [4500, undefined]) {
+    await t.test(delayMs === undefined ? 'never answers' : 'beyond budget', async t => {
+      const run = await delayedGateway(t, { delayMs, probeMs: 100 });
+      const started = performance.now();
+      const result = await run('healthy');
+      assert.equal(result.code, 1, JSON.stringify(result));
+      const readiness = result.lines.find(line => line.layer === 'gateway-ready');
+      assert.equal(readiness.exit_code, 28);
+      assert.equal(readiness.error.kind, 'curl_timeout');
+      assert.equal(result.requests.find(request => request.url.endsWith('/readyz')).seconds, 3);
+      assert.ok(result.wrappers.includes('4s'));
+      assert.ok(performance.now() - started < 7000, 'request must expire without waiting for the overall guard');
+    });
+  }
+});
+
+test('shell core-only still gates promptly without additional public checks or waits', async t => {
+  const run = await delayedGateway(t, { delayMs: 0 });
+  const started = performance.now();
+  const result = await run('healthy', ['--core-only']);
+  assert.equal(result.code, 0, JSON.stringify(result));
+  assert.deepEqual(result.lines.map(line => line.layer), ['process', 'gateway', 'crawl4ai', 'playwright', 'gateway-ready']);
+  assert.equal(result.requests.length, 4);
+  assert.equal(result.requests.find(request => request.url.endsWith('/readyz')).seconds, Math.ceil(DEFAULT_PROBE_TIMEOUT_MS / 1000) + 2);
+  assert.ok(performance.now() - started < 5000, 'core-only must return as soon as readiness answers');
+});
+
+test('shell rejects readiness deadlines that cannot fit the actual overall budget', async t => {
+  const run = await fixture(t, { gatewayEnv: `GATEWAY_PORT=8930\nGATEWAY_TOKEN=${gatewayToken}\nWAG_HEALTHCHECK_TIMEOUT_SECONDS=60\n` });
+  const result = await run('healthy', [], { deadline: '8' });
+  assert.equal(result.code, 1, JSON.stringify(result));
+  assert.equal(result.lines.find(line => line.layer === 'gateway-ready').error.kind, 'invalid_deadline');
+  assert.ok(!result.requests.some(request => request.url.endsWith('/readyz')));
+  assert.ok(result.requests.every(request => request.seconds < 8));
+});
+
+test('shell reserves elapsed time from preceding layers before requesting readiness', async t => {
+  const run = await fixture(t);
+  const result = await run('slow-health', ['--core-only'], { deadline: '17' });
+  assert.equal(result.code, 1, JSON.stringify(result));
+  assert.equal(result.lines.find(line => line.layer === 'gateway-ready').error.kind, 'invalid_deadline');
+  assert.ok(!result.requests.some(request => request.url.endsWith('/readyz')));
+});
+
+test('shell keeps gateway numeric config syntax and normalizes decimal overall budgets', async t => {
+  for (const probeMs of ['1e4', '10000.0', '00000000000000010000', '0x2710']) {
+    await t.test(probeMs, async t => {
+      const run = await fixture(t, { gatewayEnv: `GATEWAY_PORT=8930\nGATEWAY_TOKEN=${gatewayToken}\nGATEWAY_PROBE_TIMEOUT_MS=${probeMs}\n` });
+      const result = await run('healthy', ['--core-only'], { deadline: '045' });
+      assert.equal(result.code, 0, JSON.stringify(result));
+      assert.equal(result.requests.find(request => request.url.endsWith('/readyz')).seconds, 12);
+    });
+  }
+  const large = await fixture(t, { gatewayEnv: `GATEWAY_PORT=8930\nGATEWAY_TOKEN=${gatewayToken}\nGATEWAY_PROBE_TIMEOUT_MS=35000\n` });
+  const decimal = await large('healthy', ['--core-only'], { deadline: '045' });
+  assert.equal(decimal.code, 0, JSON.stringify(decimal));
+  assert.equal(decimal.requests.find(request => request.url.endsWith('/readyz')).seconds, 37);
+  const run = await fixture(t);
+  const short = await run('healthy', [], { deadline: '08' });
+  assert.equal(short.code, 1, JSON.stringify(short));
+  assert.equal(short.lines.find(line => line.layer === 'gateway-ready').error.kind, 'invalid_deadline');
+  for (const deadline of ['0', '61', '9999999999999999999999999999', 'invalid']) {
+    const result = await run('healthy', [], { deadline });
+    assert.equal(result.code, 1, JSON.stringify(result));
+    assert.equal(result.lines.find(line => line.layer === 'healthcheck').error.kind, 'invalid_deadline');
+  }
+});
+
+test('shell rejects invalid or oversized readiness budgets with structured diagnostics', async t => {
+  for (const probeMs of ['', '0', '-1', '1.5', 'NaN', '1_000', '9007199254740992', '9007199254740991']) {
+    await t.test(probeMs || 'empty', async t => {
+      const run = await fixture(t, { gatewayEnv: `GATEWAY_PORT=8930\nGATEWAY_TOKEN=${gatewayToken}\nGATEWAY_PROBE_TIMEOUT_MS=${probeMs}\n` });
+      const result = await run('healthy', ['--core-only']);
+      assert.equal(result.code, 1, JSON.stringify(result));
+      assert.equal(result.lines.find(line => line.layer === 'gateway-ready').error.kind, 'invalid_deadline');
+      assert.ok(!result.requests.some(request => request.url.endsWith('/readyz')));
     });
   }
 });

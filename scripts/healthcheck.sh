@@ -10,16 +10,21 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Bound the entire command, including service-manager and diagnostic failures.
 if [[ "${WAG_HEALTHCHECK_BOUNDED:-}" != 1 ]]; then
   seconds="${WAG_HEALTHCHECK_TIMEOUT_SECONDS:-45}"
-  if [[ ! "$seconds" =~ ^[0-9]+$ ]] || ((seconds < 1 || seconds > 60)); then
+  if [[ ! "$seconds" =~ ^0*([1-9][0-9]?)$ ]] || ((10#${BASH_REMATCH[1]} > 60)); then
     printf '{"layer":"healthcheck","ok":false,"error":{"kind":"invalid_deadline"}}\n' >&2
     exit 1
   fi
-  if timeout --signal=TERM --kill-after=2 "${seconds}s" env WAG_HEALTHCHECK_BOUNDED=1 bash "$0" "$@"; then exit 0; else status=$?; fi
+  seconds="$((10#${BASH_REMATCH[1]}))"
+  if timeout --signal=TERM --kill-after=2 "${seconds}s" env WAG_HEALTHCHECK_BOUNDED=1 WAG_HEALTHCHECK_TIMEOUT_SECONDS="$seconds" bash "$0" "$@"; then exit 0; else status=$?; fi
   if [[ "$status" == 124 || "$status" == 137 ]]; then
     printf '{"layer":"healthcheck","ok":false,"exit_code":%s,"error":{"kind":"healthcheck_timeout","message":"Overall healthcheck deadline exceeded"}}\n' "$status" >&2
   fi
   exit "$status"
 fi
+
+# Snapshot the actual outer budget before the env file can override it.
+readonly healthcheck_seconds="${WAG_HEALTHCHECK_TIMEOUT_SECONDS:-45}"
+SECONDS=0
 
 # Export only into subprocesses so their diagnostics can redact secret values.
 set -a
@@ -44,9 +49,49 @@ check_command() {
   diagnose "$layer" "$status" command
 }
 check_http() {
-  local layer="$1" validation="$2" status=0; shift 2
+  local layer="$1" validation="$2" status=0 request_seconds=8 remaining; shift 2
+  # Reserve 1 s for the wrapper, 1 s for forced teardown, and 1 s for diagnostics.
+  remaining=$((healthcheck_seconds - SECONDS - 3))
+  if [[ "$validation" == ready || "$validation" == ready-core ]]; then
+    # Match the gateway's numeric config (including decimal/exponent/base forms)
+    # using the existing Python runtime, without requiring node on system PATH.
+    if ! request_seconds="$(python3 - <<'PY'
+import os
+import re
+import sys
+
+value = os.environ.get("GATEWAY_PROBE_TIMEOUT_MS", "10000").strip()
+try:
+    if re.fullmatch(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+", value):
+        milliseconds = float(int(value, 0))
+    elif re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", value):
+        milliseconds = float(value)
+    else:
+        raise ValueError()
+    if not 0 < milliseconds <= 9007199254740991 or not milliseconds.is_integer():
+        raise ValueError()
+    # Entire server probe budget plus 2 s for transport/response.
+    print((int(milliseconds) + 999) // 1000 + 2)
+except (ValueError, OverflowError):
+    sys.exit(1)
+PY
+)"; then
+      printf '{"layer":"%s","ok":false,"error":{"kind":"invalid_deadline","message":"GATEWAY_PROBE_TIMEOUT_MS must be a positive safe integer"}}\n' "$layer" >&2
+      return 1
+    fi
+    if ((request_seconds > remaining)); then
+      printf '{"layer":"%s","ok":false,"error":{"kind":"invalid_deadline","message":"Readiness request plus teardown margin exceeds remaining WAG_HEALTHCHECK_TIMEOUT_SECONDS budget"}}\n' "$layer" >&2
+      return 1
+    fi
+  elif ((request_seconds > remaining)); then
+    request_seconds=$remaining
+  fi
+  if ((request_seconds < 1)); then
+    printf '{"layer":"%s","ok":false,"error":{"kind":"healthcheck_timeout","message":"No HTTP request budget remains"}}\n' "$layer" >&2
+    return 1
+  fi
   : > "$work/body"
-  timeout --foreground --signal=TERM --kill-after=1 9s curl --silent --show-error --max-time 8 --max-filesize 65536 --output "$work/body" --write-out '%{http_code}' "$@" > "$work/status" 2> "$work/error" || status=$?
+  timeout --foreground --signal=TERM --kill-after=1 "$((request_seconds + 1))s" curl --silent --show-error --max-time "$request_seconds" --max-filesize 65536 --output "$work/body" --write-out '%{http_code}' "$@" > "$work/status" 2> "$work/error" || status=$?
   diagnose "$layer" "$status" "$validation"
 }
 

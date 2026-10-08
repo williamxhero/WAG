@@ -150,6 +150,9 @@ Chromium 会话明显变多，而出口代理按 host 限并发 8，渲染会话
 用旧 release（`runtime-v1p9_r97` 的候选目录仍在）在同一批 URL 上做 A/B，并统计出口代理
 的 host 槽位占用/释放。
 
+> **2026-10-08 追加**：该隔离验证已完成，D1 修复已部署生产。结论、出口代理槽位实测与
+> 部署后验收结果见 **§6**（本节保留当时判断，不回改）。
+
 ### D3（未改善）：就绪抖动与新的连通性用例
 `/readyz` 的 HTTP 状态码只由 `ok = core_ok && public_connectivity_ok` 决定
 （`gateway/server.mjs:872-875`），**公网侧不 ok 就是 503**，card5 的三态策略改的是
@@ -180,6 +183,129 @@ Chromium 会话明显变多，而出口代理按 host 限并发 8，渲染会话
 - 未改善 / 新问题：引擎仍只有 yandex；`published_at` 覆盖没有提高；`/readyz` 抖动
   仍在且新增了会让 smoke 抖动的连通性用例；`web_read` 兜底路径有协议级缺陷 D1 和
   未定因的成功率下降 D2。
+
+## 6. issue #51 复核：D1 修复与 D2 隔离验证（2026-10-08 追加）
+
+本节复核上文 §4 的 D1、D2。全部数字来自生产机 `yosef-server` 实测；原始输出归档在
+`/data/web-access-gateway/reports/round-20261008-d1d2/`，驱动脚本在 `/tmp/wag-ab/`。
+
+### 6.1 D1：渲染器无 `status_code` 触发 MCP -32602 —— 已修复、已部署、已复验
+
+| 项 | 值 |
+|----|----|
+| 修复 | PR #53，head `b3d26d5`，合并 `2c3cf98`（`main`） |
+| 做法 | `renderedMetadata()` 无整数 `status_code` 时**省略** `http_status` 键（不再写 `null`）；`readOutputSchema` 与 `errorResult()` 不动 |
+| 回归用例 | `gateway/read-fallback.test.mjs` 新增「渲染器结果无 `status_code`」 |
+| 测试 | 新用例修复前失败（`MCP error -32602 ... expected number, received null at http_status` 原样冒泡成客户端协议错误）、修复后通过；`node --test --test-concurrency=1 gateway/*.test.mjs` = **301 pass / 0 fail**（基线 `main@19ba670` = 300 pass）；PR CI success（run 37804675324，5m16s）|
+| 部署 | 仓库自带路径 `scripts/deploy.sh prepare/activate/commit` → release **`runtime-assl85oe`**（源 `2c3cf98`）；`.release-current` 已指向；三段返回 `prepared` / `activated(public_readiness=passed)` / `committed(public_readiness=passed)`，`restore_errors` 与 `overlay_restore_errors` 均为空 |
+| 部署前 | `runtime-7x0vxago`（`fe50854`）|
+
+生产复验（`/tmp/wag-probe/verify-d1.mjs`，`web_read` `render:auto`，release 自带 Node v22.23.2）：
+
+| URL | 结果 |
+|-----|------|
+| `https://www.ft.com/` | 不再 -32602：结构化载荷，`renderer=crawl4ai`、`render_fallback={reason:"upstream_forbidden",http_status:403}`、**`http_status` 键不存在**、`blocked_reason=null`、markdown 40013 字、4292ms |
+| `https://www.rfi.fr/cn/` | 结构化载荷，`renderer=crawl4ai`、`render_fallback={reason:"upstream_http_status",http_status:429}`、35k+ 字、1241ms |
+| 对照（修复前同一命令） | `MCP error -32602: Output validation error: ... expected number, received null at http_status` |
+
+`http_status` 键缺失是修复后的预期形态：既没有上游整数状态码可报，也不再写 `null` 触发输出校验。
+
+### 6.2 D2：render:auto 成功率下降 —— 隔离验证与出口代理槽位实测
+
+**方法**
+
+| 项 | 值 |
+|----|----|
+| URL 集合 | `/tmp/wag-ab/candidates.json`（= `round-20261008/wag-round-after/candidates.json` 副本，20 条，与原报告同批）|
+| 新 release | 生产 `runtime-7x0vxago`（`fe50854`），`http://yosef-server:8930/mcp` |
+| 旧 release | `runtime-v1p9_r97/candidate/runtime/gateway` 起第二个实例 `127.0.0.1:8935`（同一 crawl4ai / egress / searxng；独立端口与 artifact 目录；`GATEWAY_ALLOWED_HOSTS` 增加 `127.0.0.1`）|
+| 观测 | 每 1s `ss -Htn state established '( dport = :7895 )'` 采样（= 存活 CONNECT 隧道数）；轮次 1 另用 `tcpdump` 抓出口代理控制面（CONNECT / 200 / 429）|
+| 轮次 1 | 8 条腿连续跑（never/auto 交替），复刻原报告跑法，不加间隔 |
+| 轮次 2 | 每条腿起跑前等出口代理排空到 ≤3 隧道，单腿独立采样 |
+
+**轮次 1（连续跑，隧道峰值来自 1s 采样）**
+
+| 腿 | 成功 | 轻量成功 | crawl4ai 成功 | 渲染尝试 | 失败形态 | 隧道峰值 |
+|----|------|---------|--------------|---------|---------|---------|
+| old-never-1 | 18/20 | 18 | 0 | 0 | egress_timeout 1、upstream_http_status 1 | 2 |
+| new-never-1 | 17/20 | 17 | 0 | 0 | upstream_http_status 2、egress_timeout 1 | 3 |
+| old-auto-1 | 13/20 | 9 | 4 | 5 | render_backend_status 1、egress_proxy_status 6 | 32 |
+| new-auto-1 | 3/20 | 2 | 1 | 18 | render_backend_status 13、mcp_-32602 4 | 33 |
+| new-auto-2 | 0/20 | 0 | 0 | 20 | render_backend_status 15、mcp_-32602 5 | 33 |
+| old-auto-2 | 0/20 | 0 | 0 | 0 | egress_proxy_status 20 | 32 |
+| new-never-2 | 0/20 | 0 | 0 | 0 | egress_proxy_status 20 | 32 |
+| old-never-2 | 0/20 | 0 | 0 | 0 | egress_proxy_status 20 | 32 |
+
+**轮次 2（每条腿从空代理起跑）**
+
+| 腿 | 起始隧道 | 成功 | 轻量 | crawl4ai | 渲染尝试 | 失败形态 | 峰值 / 均值 |
+|----|---------|------|------|---------|---------|---------|------------|
+| old-auto-r2 | 1 | 15/20 | 9 | 6 | 6 | egress_timeout 1、upstream_http_status 1、egress_proxy_status 3 | 32 / 24.3 |
+| new-auto-r2 | 3 | 13/20 | 9 | 4 | 11 | render_backend_status 6、mcp_-32602 1 | 32 / 24.6 |
+| new-auto-r3 | 2 | 14/20 | 9 | 5 | 11 | render_backend_status 5、mcp_-32602 1 | 32 / 21.7 |
+| old-auto-r3 | 1 | 16/20 | 10 | 6 | 6 | upstream_http_status 1、egress_proxy_status 3 | 32 / 20.0 |
+
+**出口代理槽位实测**
+
+- 生产实际参数：`EGRESS_MAX_HOST_CONCURRENCY=32`（unit 文件），`EGRESS_MAX_CONNECTIONS`
+  未设置 → 代码默认 **32**。**修正 §4 D2 正文（与 issue #51）里“`EGRESS_MAX_HOST_CONCURRENCY=8`”的说法：
+  8 是代码默认值，不是生产值。**
+- 占用：任一条 auto 腿都能把隧道数顶到 **32–33**（两个上限同时打满）。轮次 1 的 never 腿峰值
+  只有 2–3；轮次 2 四条 auto 腿峰值全是 32、均值 20.0–24.6。极端观测两次：
+  3 条 URL 的渲染探针（`example.com`+`tver.jp` 走 crawl4ai）把隧道从 ~1 推到 **28**；
+  一次证据门禁运行里 **2 秒内从 6 推到 34**（16:50:28→16:50:38）。即**一两个并发渲染就足以吃光整个出口代理预算**。
+- 释放：**很慢**。轮次 1 最后一次渲染 16:03:49，隧道数 33 → 32 → 31 → 25 → 24 → 17（16:06:47）
+  → 5（16:07:08）→ 1（16:07:49）：**约 4 分钟**才排空，窗口内所有新 CONNECT 都被代理合成 429。
+- 归属：饱和时 24 条隧道里 **23 条由 `chrome-headless`**（Crawl4AI 的 Chromium）持有，代理侧对应
+  24 条到 `127.0.0.1:7890` 的上游连接。
+- 429 命中率：轮次 1 控制面抓包 **320 次 CONNECT，其中 191 次被回 429（60%）**。
+
+**失败形态与因果**
+
+- 代理打满后两条腿一起完蛋：轻量腿收到代理合成的 429（`egress_proxy_status`）；渲染腿里
+  Chromium 的 CONNECT 被拒，Playwright 报 `net::ERR_TUNNEL_CONNECTION_FAILED`，Crawl4AI 包成
+  502（`render_backend_status`，实测 40–235ms 快速失败）。所以轮次 1 里旧 release 的失败写成
+  `egress_proxy_status`、新 release 的失败写成 `render_backend_status`，**是同一个 429 的两种外衣**。
+- 3/20 与 17/20 不是稳定特征：`new-auto-1` 之后，后续四条腿（含**两条 `render:never`**、且含旧
+  release 实例）全部 0/20，20/20 失败都是 `egress_proxy_status` —— 一旦打满，连同一台机器上
+  另一个网关实例的纯轻量读取也被挡住约 4 分钟。
+- 轮次 2 把每条腿放在空代理上跑：旧 = **15/20、16/20**，新 = **13/20、14/20**；渲染尝试
+  旧 每条腿 **6 次**、新 **11 次**（≈2×，差集正是本轮新增的 401/403/406/429 回退）。
+
+**结论**
+
+1. “出口代理打满 → 所有读取被 429”这条链路**在旧 release 上同样成立**（旧版单腿也把隧道顶到 32、
+   也拿 3–6 次 429、饱和后也 0/20）。D2 的机制**不是本轮引入**。
+2. 本轮新增的 401/403/406/429 → 渲染回退把每条 auto 腿的渲染量从 6 提到 11（≈2×），让饱和更
+   容易被触发、更难恢复。原报告 17/20 vs 3/20 的对比里只有一小部分（空代理下 15–16 vs 13–14）
+   可归因到本轮改动，其余是共享出口/渲染环境的饱和效应与跑腿顺序。
+3. D1 缺陷本身在 auto 腿里贡献 1–5 条失败（`mcp_-32602`）；修复后这些变成结构化成功（见 6.1）。
+4. 修复建议（**本卡不做**，属读取回退策略，应单独开卡）：
+   - **不要把“本地出口代理 429”（`egress_proxy_status`）当作可回退的 bot-challenge 去渲染**：
+     那是 WAG 自己的限流，再走同一条代理的 Chromium 只会自伤；应直接回报 429（或按
+     `Retry-After: 5` 退避）。
+   - 渲染并发与出口预算解耦：`renderSlots=2` 却能让单个页面开 ~14 条 CONNECT，一两个渲染就吃掉
+     32 条预算；考虑渲染后短暂冷却、或按出口预算限制在飞渲染。
+   - 出口限流参数（`EGRESS_MAX_CONNECTIONS` / `EGRESS_MAX_HOST_CONCURRENCY`）属 WAG 自己的 unit，
+     改它不改动非 WAG 服务**配置**；但出口最终经共享 `127.0.0.1:7890`（sing-box），抬高上限等于把
+     压力转给共享出口，属影响面超出 WAG 的改动 —— 因此**本卡不改参数**，交用户决策。
+
+### 6.3 部署后验收三件套（生产机原生命令）
+
+| 验收 | 命令 | 结果 |
+|------|------|------|
+| smoke | `bash /data/web-access-gateway/scripts/eval-smoke.sh` | **通过**：报告 `smoke-20261008T163936Z`（12/12 用例、success/quality 100%、门禁全绿）|
+| release | `bash /data/web-access-gateway/scripts/eval-release.sh` | **通过**：报告 `release-20261008T163954Z`（14/14 用例、`concurrency_degradation_pct=0`（门禁 ≤50）、timeout 0%、门禁全绿）|
+| evidence | `node /data/web-access-gateway/runtime/gateway/evidence-live-smoke.mjs` | **失败**：`only N evidence reads succeeded`。3 次尝试 2/10、6/10、5/10；对照实验用**旧 release 实例**跑同一门禁同样失败（7/10）。原因即 6.2：门禁自身连续 auto 读取在 2 秒内把出口代理推到 34 条隧道，随后每个 CONNECT 被 429；同一窗口 gateway 审计里 44/55 次读取是 `render_backend_status`，失败耗时 40–235ms。**与 D1 修复无关**（D1 只省略一个字段，不改变任何网络行为）。|
+
+### 6.4 归档
+
+- 结果与观测：`/data/web-access-gateway/reports/round-20261008-d1d2/`
+  （`old-auto-*.json` / `new-auto-*.json` / `*-never-*.json` / `legs*.timeline` / `ss-samples.log` /
+  `proxy-http.log` / `d1-verify.json` / `gates-*.out` / `evidence*.out` / `smoke-20261008T163936Z.json` /
+  `release-20261008T163954Z.json` / `analyze.mjs` / `verify-d1.mjs`）
+- 驱动脚本（生产机 `/tmp/wag-ab/`）：`ab-run.sh`（轮次 1）、`ab2-run.sh`（轮次 2，含排空等待）、
+  `fix-leg.sh`、`run-gates.sh`、`rerun-evidence*.sh`、`start-old.sh`（旧 release 第二实例）
 
 ## 附：原始输出留档
 

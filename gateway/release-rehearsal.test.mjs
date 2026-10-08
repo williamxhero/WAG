@@ -6,8 +6,9 @@ test('complete deterministic release traverses real gateway/proxy and retains sc
   const fixture = await releaseFixture(t);
   const first = await fixture.evaluate();
   assert.equal(first.report.status, 'passed');
-  assert.equal(first.report.cases.length, 14, 'no required release case is hidden or skip-passed');
+  assert.equal(first.report.cases.length, 15, 'no required release case is hidden or skip-passed');
   assert.ok(first.report.cases.every(item => item.status === 'passed'), JSON.stringify(first.report.cases));
+  assert.ok(first.report.cases.some(item => item.id === 'gateway-public' && item.dimension === 'connectivity'), 'public readiness is graded as connectivity, not core');
   assert.ok(Object.values(first.report.gates).every(gate => gate.passed), JSON.stringify(first.report.gates));
   const timeout = first.report.cases.find(item => item.id === 'read-timeout');
   assert.equal(timeout.error.kind, 'egress_timeout');

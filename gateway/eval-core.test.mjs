@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deadlineKind, classifyTransientFailure, dimensionSummaries, evaluateGates, evaluationStatus, publicRunSummary, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
+import { deadlineKind, classifyReadiness, classifyTransientFailure, dimensionSummaries, evaluateGates, evaluationStatus, publicRunSummary, isEvaluationReportFileName, latencySummary, latestSnapshotText, normalizeReport, runWithRetries, safeArtifactId, summarizeCases } from './eval-core.mjs';
 
 test('deadline taxonomy is exact and preserves underlying typed causes', () => {
   for (const kind of ['timeout', 'upstream_timeout', 'egress_timeout']) {
@@ -93,6 +93,27 @@ test('core failures fail a run while connectivity failures degrade it', () => {
   assert.equal(evaluationStatus(connectivityOnly), 'degraded');
   assert.equal(evaluationStatus([{ dimension: 'core', status: 'failed', quality: { passed: false } }]), 'failed');
   assert.equal(dimensionSummaries(connectivityOnly).connectivity.failed_cases, 1);
+});
+
+test('readiness classification separates health, public degradation and core failure', () => {
+  // Healthy gateway (current readiness.mjs body).
+  assert.deepEqual(classifyReadiness({ ok: true, core_ok: true, public_connectivity_ok: true, status: 'passed', dependencies: [] }),
+    { core_ready: true, public_ready: true, state: 'ok' });
+  // SearXNG answered but every public engine is blocked/unusable: 503, core still ready.
+  assert.deepEqual(classifyReadiness({ ok: false, core_ok: true, public_connectivity_ok: false, status: 'degraded', dependencies: [{ name: 'searxng', scope: 'public_connectivity', ok: false, result_count: 0, error: { kind: 'search_empty' } }] }),
+    { core_ready: true, public_ready: false, state: 'public_degraded' });
+  // A dead-but-200/unreachable SearXNG is the same public degradation, not a core failure.
+  assert.equal(classifyReadiness({ ok: false, core_ok: true, public_connectivity_ok: false, dependencies: [{ name: 'searxng', scope: 'public_connectivity', ok: false, error: { kind: 'dependency_timeout' } }] }).state, 'public_degraded');
+  // Core capability failure dominates: a healthy public layer cannot mask it.
+  assert.deepEqual(classifyReadiness({ ok: false, core_ok: false, public_connectivity_ok: true, status: 'failed', dependencies: [{ name: 'crawl4ai', scope: 'core', ok: false }] }),
+    { core_ready: false, public_ready: false, state: 'core_failed' });
+  // Legacy bodies without the core/public split fall back to `ok`.
+  assert.equal(classifyReadiness({ ok: true }).state, 'ok');
+  assert.equal(classifyReadiness({ ok: false }).state, 'core_failed');
+  // A body that reports core readiness but omits the public split is not assumed healthy.
+  assert.deepEqual(classifyReadiness({ core_ok: true }), { core_ready: true, public_ready: false, state: 'public_degraded' });
+  // Malformed bodies are never healthy.
+  for (const body of [undefined, null, 'invalid', [], 42]) assert.equal(classifyReadiness(body).state, 'core_failed');
 });
 
 test('configured success gate enforces smoke and release discrete case counts', () => {

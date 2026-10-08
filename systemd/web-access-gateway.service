@@ -12,7 +12,19 @@ EnvironmentFile=/data/web-access-gateway/secrets/gateway.env
 Environment=NODE_ENV=production
 Environment=PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp
 Environment=EGRESS_PROXY=http://127.0.0.1:7895
-ExecStartPre=/usr/bin/mkdir -p /data/web-access-gateway/data/playwright/output
+# Prepare the shared Playwright staging tree (also used by
+# web-access-playwright.service) before starting. It lives outside ARTIFACT_DIR.
+# A prior run or operator can leave these paths owned by root; an unprivileged
+# "mkdir -p" as User=yosef then fails with EACCES and the unit restarts forever
+# (observed 2026-10-07: mkdir "Permission denied" -> status=1/FAILURE loop).
+# ProtectSystem=full never covers /data, so that failure was POSIX ownership,
+# not a read-only mount: ReadWritePaths only affects the mount namespace. The
+# "+" prefix runs these lines with full privileges so the tree is always created
+# and owned by the service identity; a genuine failure (e.g. read-only
+# filesystem) still aborts startup instead of being masked.
+ExecStartPre=+/usr/bin/mkdir -p /data/web-access-gateway/data/playwright/output /data/web-access-gateway/data/playwright/config /data/web-access-gateway/data/playwright/cache
+ExecStartPre=+/usr/bin/chown yosef:yosef /data/web-access-gateway/data/playwright /data/web-access-gateway/data/playwright/output /data/web-access-gateway/data/playwright/config /data/web-access-gateway/data/playwright/cache
+ExecStartPre=+/usr/bin/chmod 0750 /data/web-access-gateway/data/playwright /data/web-access-gateway/data/playwright/output /data/web-access-gateway/data/playwright/config /data/web-access-gateway/data/playwright/cache
 ExecStart=/data/web-access-gateway/runtime/node/bin/node server.mjs
 Restart=on-failure
 RestartSec=5

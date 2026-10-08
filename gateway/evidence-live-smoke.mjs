@@ -63,15 +63,21 @@ try {
       failures.push({ url: item.url, error: String(error.message ?? error).slice(0, 160) });
     }
   }
-  if (searches.some(item => item.count === 0)) throw new Error('an equivalent search returned no results');
+  // A zero-hit for a single term is a normal SearXNG answer (see #38/#42), not a
+  // WAG failure, so it is reported rather than thrown. Only a systematic failure
+  // to search (every equivalent query empty) or an errored call is fatal.
+  const zeroResultSearches = searches.filter(item => item.count === 0);
+  if (searches.length && zeroResultSearches.length === searches.length) throw new Error('every equivalent search returned no results');
   if (reads.length < 10) throw new Error(`only ${reads.length} evidence reads succeeded`);
   console.log(JSON.stringify({
-    version: '1.1.2',
+    version: '1.1.3',
     evidence_window: { start: new Date(windowStart).toISOString(), end: new Date(windowEnd).toISOString() },
     searches,
     reads,
     summary: {
       searches_succeeded: searches.length,
+      searches_with_zero_results: zeroResultSearches.length,
+      zero_result_queries: zeroResultSearches.map(item => item.query),
       reads_succeeded: reads.length,
       reads_with_publisher_time: reads.filter(item => item.published_at).length,
       reads_in_evidence_window: reads.filter(item => item.in_evidence_window).length,

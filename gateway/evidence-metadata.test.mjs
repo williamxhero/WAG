@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractPageEvidence, normalizeSearchResult, normalizeSearchResults, normalizeUrlForDedup, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { classifyLowQualityResult, extractPageEvidence, filterLowQualityResults, normalizeSearchResult, normalizeSearchResults, normalizeUrlForDedup, prependPublishedEvidence, timeRangeCompliance } from './evidence-metadata.mjs';
 
 test('page evidence keeps publisher time separate from retrieval and response time', () => {
   const html = `<!doctype html><html><head>
@@ -130,4 +130,92 @@ test('search results deduplicate normalized URLs and retain the fuller record', 
   assert.equal(results.length, 1);
   assert.equal(results[0].title, 'Full story');
   assert.match(results[0].content, /more details/);
+});
+
+test('URL dates cover CMS compact forms and query parameters without faking publisher time', () => {
+  const retrievedAt = '2026-10-08T00:00:00.000Z';
+  const cases = [
+    ['https://m.21jingji.com/article/20260722/herald/abc.html', '2026-07-22'],
+    ['https://www.news.cn/news/t20260722_1234.htm', '2026-07-22'],
+    ['https://example.org/p/2026-07-22/story', '2026-07-22'],
+    ['https://example.org/article?id=77&date=2026-07-22', '2026-07-22'],
+    ['https://example.org/article?pubdate=20260722', '2026-07-22'],
+  ];
+  for (const [url, publishedOn] of cases) {
+    const result = normalizeSearchResult({ title: 'News', url, content: 'Summary' }, retrievedAt);
+    assert.equal(result.published_on, publishedOn, url);
+    assert.equal(result.precision, 'day', url);
+    // URL-derived dates must never masquerade as publisher metadata.
+    assert.equal(result.published_at, null, url);
+    assert.equal(result.temporal_evidence[0].source, 'url.pattern', url);
+  }
+});
+
+test('URL date enrichment rejects invalid or unrelated digit runs', () => {
+  const retrievedAt = '2026-10-08T00:00:00.000Z';
+  for (const url of [
+    'https://example.org/bad/20261340/story',
+    'https://example.org/bad/20260230/story',
+    'https://example.org/order/12345678',
+    'https://example.org/article?id=98765432',
+  ]) {
+    const result = normalizeSearchResult({ title: 'News', url, content: 'Summary' }, retrievedAt);
+    assert.equal(result.published_on, null, url);
+    assert.equal(result.temporal_evidence.some(item => item.source === 'url.pattern'), false, url);
+  }
+});
+
+test('error pages are classified with a countable reason', () => {
+  const cases = [
+    ['http_error_page', { title: '403 - Operations too frequent', url: 'https://www.moomoo.com/403', content: '', source: { host: 'www.moomoo.com' } }],
+    ['http_error_page', { title: '404 Not Found', url: 'https://example.org/missing', content: '' }],
+    ['http_error_page', { title: 'Access Denied', url: 'https://example.org/a', content: '' }],
+    ['error_endpoint', { title: 'moomoo', url: 'https://www.moomoo.com/403', content: 'ok' }],
+    ['empty_result', { title: 'z9xx.com', url: 'https://z9xx.com', content: '', source: { host: 'z9xx.com' } }],
+    ['empty_result', { title: '', url: 'https://example.org/', content: '', source: { host: 'example.org' } }],
+  ];
+  for (const [reason, result] of cases) assert.equal(classifyLowQualityResult(result), reason, `${result.url} :: ${result.title}`);
+});
+
+test('error-page detection never drops a genuine headline that merely starts with a status code', () => {
+  const result = {
+    title: '404 Not Found: how the web handles missing pages',
+    url: 'https://blog.example.org/404-not-found',
+    content: 'A long article body that a real publisher produced.',
+    source: { host: 'blog.example.org' },
+  };
+  assert.equal(classifyLowQualityResult(result), null);
+});
+
+test('filterLowQualityResults reports counts and can be disabled', () => {
+  const results = [
+    { title: 'Real', url: 'https://example.org/real', content: 'body', source: { host: 'example.org' } },
+    { title: '403 - Operations too frequent', url: 'https://www.moomoo.com/403', content: '', source: { host: 'www.moomoo.com' } },
+    { title: '404 Not Found', url: 'https://example.org/missing', content: '', source: { host: 'example.org' } },
+  ];
+  const filtered = filterLowQualityResults(results);
+  assert.deepEqual(filtered.results.map(result => result.title), ['Real']);
+  assert.deepEqual(filtered.filtered, [
+    { url: 'https://www.moomoo.com/403', reason: 'http_error_page' },
+    { url: 'https://example.org/missing', reason: 'http_error_page' },
+  ]);
+
+  const disabled = filterLowQualityResults(results, { enabled: false });
+  assert.equal(disabled.results.length, 3);
+  assert.deepEqual(disabled.filtered, []);
+});
+
+test('time range compliance distinguishes within, outside, and unverified evidence', () => {
+  const retrievedAt = '2026-10-08T12:00:00.000Z';
+  const dated = value => ({ temporal_evidence: [{ kind: 'published_at', value, on: value.slice(0, 10), precision: 'instant', source: 'test' }] });
+  assert.equal(timeRangeCompliance(dated('2026-10-08T06:00:00.000Z'), 'day', retrievedAt), 'within');
+  assert.equal(timeRangeCompliance(dated('2026-08-12T00:00:00.000Z'), 'day', retrievedAt), 'outside');
+  assert.equal(timeRangeCompliance(dated('2026-02-10T00:00:00.000Z'), 'year', retrievedAt), 'within');
+  // A result with no date evidence can never be proven inside the window.
+  assert.equal(timeRangeCompliance({ temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }] }, 'day', retrievedAt), 'unverified');
+  // A month-precision URL date cannot prove a day window but can prove a year window.
+  const month = normalizeSearchResult({ title: 'News', url: 'https://example.org/archive/2026/10/story', content: 's' }, retrievedAt);
+  assert.equal(month.precision, 'month');
+  assert.equal(timeRangeCompliance(month, 'day', retrievedAt), 'unverified');
+  assert.equal(timeRangeCompliance(month, 'year', retrievedAt), 'within');
 });

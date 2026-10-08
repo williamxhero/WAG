@@ -251,3 +251,95 @@ test('initial search and fallback share one caller deadline and cancellation', a
   }), error => error === deadline);
   assert.deepEqual(signals, [controller.signal, controller.signal]);
 });
+
+test('garbage error-page results are filtered out and reported with reasons', async () => {
+  const { result } = await searchFixture([{
+    results: [
+      { title: '403 - Operations too frequent', url: 'https://www.moomoo.com/403', content: '', engine: 'yandex' },
+      { title: 'z9xx.com', url: 'https://z9xx.com', content: '', engine: 'yandex' },
+      { title: '英伟达最新行情', url: 'https://example.com/news/2026/10/02/nvda', content: '正文', engine: 'yandex' },
+    ],
+    number_of_results: 3,
+  }]);
+  assert.equal(result.filtered_out, 2);
+  assert.deepEqual(result.filtered_reasons, { http_error_page: 1, empty_result: 1 });
+  assert.deepEqual(result.results.map(item => item.title), ['英伟达最新行情']);
+});
+
+test('quality filtering can be disabled per call or via the environment', async () => {
+  const body = () => ({ results: [{ title: '404 Not Found', url: 'https://example.org/missing', content: '' }], number_of_results: 1 });
+  const raw = await searchSearxng({
+    baseUrl: 'http://searxng.test',
+    input: { query: 'example' },
+    fetchImpl: async () => ({ ok: true, json: async () => body() }),
+    qualityFilter: false,
+  });
+  assert.equal(raw.filtered_out, 0);
+  assert.equal(raw.results.length, 1);
+
+  const previous = process.env.WAG_SEARCH_QUALITY_FILTER;
+  process.env.WAG_SEARCH_QUALITY_FILTER = 'off';
+  try {
+    const relaxed = await searchSearxng({
+      baseUrl: 'http://searxng.test',
+      input: { query: 'example' },
+      fetchImpl: async () => ({ ok: true, json: async () => body() }),
+    });
+    assert.equal(relaxed.filtered_out, 0);
+    assert.equal(relaxed.results.length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.WAG_SEARCH_QUALITY_FILTER;
+    else process.env.WAG_SEARCH_QUALITY_FILTER = previous;
+  }
+});
+
+test('responses without a requested time_range carry no temporal annotation', async () => {
+  const { result } = await searchFixture([{ results: [{ title: 'One', url: 'https://example.org/one', content: 'Text' }] }]);
+  for (const key of ['time_range', 'time_range_applied', 'time_range_enforced', 'time_range_note']) {
+    assert.equal(Object.hasOwn(result, key), false, key);
+  }
+  assert.equal(result.filtered_out, 0);
+  assert.deepEqual(result.filtered_reasons, {});
+});
+
+test('time_range day is proven enforced when every result is recent', async () => {
+  const recent = new Date(Date.now() - 3_600_000).toISOString();
+  const { result } = await searchFixture([{
+    results: [{ title: 'Fresh', url: 'https://example.org/news/fresh', content: 'body', engine: 'yandex', publishedDate: recent }],
+  }], { query: '英伟达', time_range: 'day' });
+  assert.equal(result.time_range, 'day');
+  assert.equal(result.time_range_applied, true);
+  assert.equal(result.time_range_enforced, true);
+  assert.equal(result.time_range_note, null);
+  assert.equal(result.results[0].time_range_status, 'within');
+});
+
+test('time_range day is annotated when results fall outside or have no date', async () => {
+  const recent = new Date(Date.now() - 3_600_000).toISOString();
+  const { result } = await searchFixture([{
+    results: [
+      { title: 'Fresh', url: 'https://example.org/fresh', content: 'body', engine: 'yandex', publishedDate: recent },
+      { title: 'Stale', url: 'https://example.org/stale', content: 'body', engine: 'yandex', publishedDate: '2026-02-10' },
+      { title: 'Undated', url: 'https://example.org/undated', content: 'body', engine: 'yandex' },
+    ],
+  }], { query: '英伟达', time_range: 'day' });
+  assert.equal(result.time_range_applied, true);
+  assert.equal(result.time_range_enforced, false);
+  assert.deepEqual(result.results.map(item => item.time_range_status), ['within', 'outside', 'unverified']);
+  assert.match(result.time_range_note, /1 result\(s\) fall outside the window and 1 are not proven within it/);
+});
+
+test('a relaxed retry that drops time_range is reported as not applied', async () => {
+  const recent = new Date(Date.now() - 3_600_000).toISOString();
+  const { result, requests } = await searchFixture([
+    { results: [] },
+    { results: [{ title: 'Fresh', url: 'https://example.org/fresh', content: 'body', engine: 'yandex', publishedDate: recent }] },
+  ], { query: '英伟达', time_range: 'day' });
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(requests.map(url => url.searchParams.has('time_range')), [true, false]);
+  assert.equal(result.time_range, 'day');
+  assert.equal(result.time_range_applied, false);
+  assert.equal(result.time_range_enforced, false);
+  assert.match(result.time_range_note, /empty-result retry dropped it/);
+  assert.equal(result.results[0].time_range_status, 'within');
+});

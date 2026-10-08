@@ -153,20 +153,37 @@ function validUrlDate(year, month, day = null) {
   };
 }
 
+const URL_DATE_PARAM_KEYS = /^(?:date|pubdate|publishdate|publisheddate|publish_date|published_at|newsdate|dt)$/i;
+
+function urlQueryDate(searchParams) {
+  for (const [key, raw] of searchParams) {
+    if (!URL_DATE_PARAM_KEYS.test(key)) continue;
+    const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})$/.exec(text(raw));
+    const normalized = match && validUrlDate(match[1], match[2], match[3]);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
 function urlDate(value) {
-  const pathname = parseHttpUrl(value)?.pathname ?? '';
+  const url = parseHttpUrl(value);
+  if (!url) return null;
+  const pathname = url.pathname;
   const patterns = [
     /(?:^|\/)(\d{4})-(\d{2})-(\d{2})(?=$|[\/_-])/,
     /(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?=$|[\/_-])/,
     /(?:^|\/)(\d{4})(\d{2})(\d{2})(?=$|[\/_-])/,
+    // CMS-style compact dates such as `t20260722_` or `content_20260722.htm`.
+    /(?:^|[\/_.-]|[a-z])_?(\d{4})(\d{2})(\d{2})(?=$|[\/_.-])/i,
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(pathname);
     const normalized = match && validUrlDate(match[1], match[2], match[3]);
     if (normalized) return normalized;
   }
-  const monthMatch = /(?:^|\/)(\d{4})[-\/](\d{2})(?=$|\/)/.exec(pathname);
-  return monthMatch ? validUrlDate(monthMatch[1], monthMatch[2]) : null;
+  const monthMatch = /(?:^|\/)(\d{4})[-/](\d{2})(?=$|\/)/.exec(pathname);
+  const month = monthMatch ? validUrlDate(monthMatch[1], monthMatch[2]) : null;
+  return month ?? urlQueryDate(url.searchParams);
 }
 
 export function normalizeSearchResult(item, retrievedAt = new Date().toISOString()) {
@@ -227,6 +244,73 @@ export function normalizeSearchResults(items, retrievedAt = new Date().toISOStri
     if (!previous || searchResultCompleteness(result) > searchResultCompleteness(previous)) unique.set(key, result);
   }
   return [...unique.values()].slice(0, limit);
+}
+
+// Titles that are HTTP error banners rather than article titles. Both patterns are anchored to the
+// whole title so a genuine headline that merely starts with a status code is never dropped.
+const ERROR_PAGE_TITLE_WITH_STATUS = /^\s*(?:error\s+)?\d{3}\s*[-–—:.]?\s*(?:operations? too frequent|too many requests|not found|forbidden|access denied|denied|unauthorized|bad gateway|service unavailable|internal server error|gateway time-?out|request timeout|error)\s*$/i;
+const ERROR_PAGE_TITLE_EXACT = /^\s*(?:access denied|403 forbidden|404 not found|not found|forbidden|unauthorized|too many requests|just a moment\.?|attention required!?|enable javascript and cookies to continue|are you a robot\??|verify you are human|checking your browser|service unavailable|bad gateway)\s*$/i;
+const ERROR_PAGE_PATH_TOKENS = new Set(['401', '403', '404', '429', '500', '502', '503', 'error', 'denied', 'forbidden', 'blocked', 'captcha', 'challenge', 'unavailable', 'access-denied']);
+
+export function classifyLowQualityResult(result) {
+  const title = text(result?.title);
+  if (ERROR_PAGE_TITLE_WITH_STATUS.test(title) || ERROR_PAGE_TITLE_EXACT.test(title)) return 'http_error_page';
+  const pathname = (parseHttpUrl(result?.url)?.pathname ?? '').replace(/\/+$/, '').toLowerCase();
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length === 1 && ERROR_PAGE_PATH_TOKENS.has(segments[0])) return 'error_endpoint';
+  const host = text(result?.source?.host);
+  const bareTitle = !title || (host !== '' && (title.toLowerCase() === host || title.toLowerCase() === `www.${host}`));
+  if (bareTitle && !text(result?.content)) return 'empty_result';
+  return null;
+}
+
+export function filterLowQualityResults(results, { enabled = true } = {}) {
+  const list = Array.isArray(results) ? results : [];
+  if (!enabled) return { results: list, filtered: [] };
+  const kept = [];
+  const filtered = [];
+  for (const result of list) {
+    const reason = classifyLowQualityResult(result);
+    if (reason) filtered.push({ url: result?.url ?? '', reason });
+    else kept.push(result);
+  }
+  return { results: kept, filtered };
+}
+
+const TEMPORAL_WINDOW_MS = { hour: 3_600_000, day: 86_400_000, week: 604_800_000, month: 2_678_400_000, year: 31_622_400_000 };
+
+function publishedBounds(result) {
+  const evidence = Array.isArray(result?.temporal_evidence) ? result.temporal_evidence : [];
+  const instant = evidence.find(item => item.kind === 'published_at' && item.value);
+  if (instant) {
+    const milliseconds = Date.parse(instant.value);
+    return Number.isFinite(milliseconds) ? { start: milliseconds, end: milliseconds } : null;
+  }
+  // Date-only metadata arrives either as `published_at` (SearXNG date field) or `published_on`
+  // (URL pattern); both carry `on` plus a precision and are handled identically here.
+  const dated = evidence.find(item => item.on && (item.kind === 'published_at' || item.kind === 'published_on'));
+  if (!dated) return null;
+  if (dated.precision === 'month') {
+    const start = Date.parse(`${dated.on}-01T00:00:00.000Z`);
+    if (!Number.isFinite(start)) return null;
+    const next = new Date(start);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    return { start, end: next.getTime() - 1 };
+  }
+  const start = Date.parse(`${dated.on}T00:00:00.000Z`);
+  return Number.isFinite(start) ? { start, end: start + 86_400_000 - 1 } : null;
+}
+
+export function timeRangeCompliance(result, timeRange, retrievedAt = new Date().toISOString()) {
+  const windowMs = TEMPORAL_WINDOW_MS[timeRange];
+  const retrievedMs = Date.parse(retrievedAt);
+  if (!windowMs || !Number.isFinite(retrievedMs)) return 'unverified';
+  const bounds = publishedBounds(result);
+  if (!bounds) return 'unverified';
+  const windowStart = retrievedMs - windowMs;
+  if (bounds.end < windowStart) return 'outside';
+  if (bounds.start >= windowStart) return 'within';
+  return 'unverified';
 }
 
 export function prependPublishedEvidence(markdown, evidence) {

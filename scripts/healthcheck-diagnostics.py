@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded, redacted command diagnostics and core/public readiness classification."""
 import json
+import math
 import os
 import re
 import sys
@@ -67,8 +68,26 @@ def dependencies(items):
     return result
 
 
+def responsive_engine_count(headers, unresponsive_engines):
+    failed = {item[0] for item in unresponsive_engines}
+    timings = []
+    for line in headers.splitlines():
+        if line.startswith("HTTP/"):
+            timings = []  # Only the final response, not CONNECT or interim headers.
+        elif line.lower().startswith("server-timing:"):
+            timings.append(line.split(":", 1)[1])
+    responsive = set()
+    # Mirror gateway/readiness.mjs: only completed per-engine total timings,
+    # excluding engines also reported failed, prove a zero-hit search worked.
+    for metric in ",".join(timings).split(","):
+        match = re.fullmatch(r"total_\d+_([^;]+);dur=(\d+(?:\.\d+)?)", metric.strip(), re.ASCII)
+        if match and match[1].strip() and math.isfinite(float(match[2])) and match[1] not in failed:
+            responsive.add(match[1])
+    return len(responsive)
+
+
 def main():
-    layer, code, mode, body_path, error_path, status_path = sys.argv[1:]
+    layer, code, mode, body_path, error_path, status_path, headers_path = sys.argv[1:]
     code = int(code)
     report = {"layer": layer, "ok": False}
 
@@ -101,7 +120,7 @@ def main():
         report["http_status"] = http_status
         if mode == "playwright":
             return finish(0) if http_status in (200, 400, 405, 406) else finish(1, "dependency_http_status", f"Playwright returned HTTP {http_status}: {body}")
-        if mode not in ("ready", "ready-core") and not 200 <= http_status < 300:
+        if (mode == "search" and http_status != 200) or (mode not in ("ready", "ready-core") and not 200 <= http_status < 300):
             return finish(1, "dependency_http_status", f"HTTP {http_status}: {body}")
         if mode == "http":
             return finish(0)
@@ -126,19 +145,32 @@ def main():
         if mode == "search":
             if not isinstance(data.get("results"), list):
                 raise ValueError("SearXNG response must contain a results array")
-            report["unresponsive_engines"] = engines(data.get("unresponsive_engines"))
+            unresponsive = data.get("unresponsive_engines", [])
+            if not isinstance(unresponsive, list) or not all(isinstance(item, list) and len(item) >= 2 and isinstance(item[0], str) and item[0].strip() and isinstance(item[1], str) for item in unresponsive):
+                raise ValueError("SearXNG returned invalid engine diagnostics")
+            report["unresponsive_engines"] = engines(unresponsive)
+            failed = {item[0] for item in unresponsive}
+            responsive = responsive_engine_count(read(headers_path), unresponsive)
+            if responsive:
+                report["responsive_engine_count"] = responsive
             usable = set()
             for item in data["results"]:
                 if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+                    continue
+                if isinstance(item.get("engine"), str) and item["engine"] in failed:
                     continue
                 if any(item.get(key) is not None and not isinstance(item[key], str) for key in ("title", "content")):
                     continue
                 url = urlsplit(item["url"])
                 if url.scheme in ("http", "https") and url.hostname and not url.username and not url.password and ((isinstance(item.get("title"), str) and item["title"].strip()) or (isinstance(item.get("content"), str) and item["content"].strip())):
                     usable.add(item["url"])
-            if not usable:
-                return finish(1, "search_empty", "SearXNG returned no usable results")
             report["result_count"] = min(20, len(usable))
+            if not usable:
+                if data["results"] or "unresponsive_engines" not in data or not responsive:
+                    return finish(1, "search_empty", "SearXNG returned no usable results or evidence of a responsive engine")
+                report["status"] = "degraded"
+                return finish(0)
+            report["status"] = "passed"
             return finish(0)
         raise ValueError("unsupported healthcheck validation mode")
     except (ValueError, OSError) as exc:

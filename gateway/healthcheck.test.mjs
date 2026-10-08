@@ -13,7 +13,7 @@ const gatewayToken = 'offline-shell-gateway-secret-'.repeat(2);
 const crawlerToken = 'offline-shell-crawler-secret-'.repeat(2);
 const posix = value => value.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, drive) => `/${drive.toLowerCase()}`);
 
-async function fixture(t, { gatewayEnv, realGateway = false } = {}) {
+async function fixture(t, { gatewayEnv, realGateway = false, search = {} } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'wag-shell-health-'));
   await Promise.all(['scripts', 'bin', 'secrets'].map(name => mkdir(path.join(root, name))));
   // Exercise the old script too during the initial red cycle.
@@ -28,9 +28,9 @@ exec /usr/bin/timeout "$@"
 `);
   await writeFile(path.join(root, 'bin/curl'), `#!/usr/bin/env bash
 original=("$@")
-output=''; writeout=false; url=''; max_time=''
+output=''; headers=''; writeout=false; url=''; max_time=''
 while (($#)); do
-  case "$1" in --output) output="$2"; shift;; --write-out) writeout=true; shift;; --max-time) max_time="$2"; shift;; -H|--proxy) shift;; http*) url="$1";; esac
+  case "$1" in --output) output="$2"; shift;; --dump-header) headers="$2"; shift;; --write-out) writeout=true; shift;; --max-time) max_time="$2"; shift;; -H|--proxy) shift;; http*) url="$1";; esac
   shift
 done
 printf '%s %s\\n' "$max_time" "$url" >> "$WAG_ROOT/request-deadlines"
@@ -50,7 +50,10 @@ case "$url" in
       malformed) body='<html>invalid readiness</html>';;
     esac;;
   */search*) body='{"results":[{"url":"https://example.com/","title":"Example","content":"Example"}]}'
-    if [[ "$FIXTURE_MODE" == empty ]]; then body='{"results":[],"unresponsive_engines":[["bing","timeout"]]}'; fi;;
+    if [[ "$FIXTURE_MODE" == empty ]]; then body='{"results":[],"unresponsive_engines":[["bing","timeout"]]}'; fi
+    if [[ -n "$FIXTURE_SEARCH_BODY" ]]; then body="$FIXTURE_SEARCH_BODY"; fi
+    status="$FIXTURE_SEARCH_STATUS"
+    if [[ "$FIXTURE_SEARCH_CODE" != 0 ]]; then printf 'curl: search connection failed\\n' >&2; exit "$FIXTURE_SEARCH_CODE"; fi;;
 esac
 if [[ "$FIXTURE_MODE" == curl-timeout && "$url" == */healthz ]]; then
   printf 'curl: (28) timeout %s %s offline-other-secret https://user:password@engine.test/?token=unknown-token Authorization: Bearer unknown-header-secret\\n' "$GATEWAY_TOKEN" "$CRAWL4AI_TOKEN" >&2
@@ -59,6 +62,11 @@ fi
 if [[ "$FIXTURE_MODE" == http-error && "$url" == */healthz ]]; then status=503; body='{"detail":"backend init failed","token":"unknown-json-secret","Authorization":"Basic unknown-basic-secret"}'; fi
 if [[ "$FIXTURE_MODE" == curl-6 && "$url" == */healthz ]]; then printf 'curl: DNS resolution failed\\n' >&2; exit 6; fi
 if [[ "$FIXTURE_MODE" == curl-60 && "$url" == */healthz ]]; then printf 'curl: TLS certificate verification failed\\n' >&2; exit 60; fi
+if [[ -n "$headers" ]]; then
+  printf 'HTTP/1.1 %s Fixture\\r\\n' "$status" > "$headers"
+  if [[ "$url" == */search* ]]; then printf '%s\\r\\n' "$FIXTURE_SEARCH_HEADERS" >> "$headers"; fi
+  printf '\\r\\n' >> "$headers"
+fi
 if [[ -n "$output" ]]; then printf '%s' "$body" > "$output"; else printf '%s' "$body"; fi
 if [[ "$writeout" == true ]]; then printf '%s' "$status"; fi
 `);
@@ -71,7 +79,7 @@ if [[ "$writeout" == true ]]; then printf '%s' "$status"; fi
     delete environment.MSYS_NO_PATHCONV;
     delete environment.MSYS2_ARG_CONV_EXCL;
     const child = spawn(bash, [...(extra.trace ? ['-x'] : []), posix(path.join(root, 'scripts/healthcheck.sh')), ...args], {
-      env: { ...environment, PATH: `${path.join(root, 'bin')}${path.delimiter}${process.env.PATH}`, WAG_ROOT: posix(root), TMPDIR: posix(root), BASH_ENV: posix(path.join(root, 'shell-env')), FIXTURE_MODE: mode, FIXTURE_REAL_GATEWAY: realGateway ? '1' : '0', FIXTURE_REAL_CURL: process.platform === 'win32' ? posix(path.join(process.env.SystemRoot, 'System32/curl.exe')) : '/usr/bin/curl', WAG_HEALTHCHECK_TIMEOUT_SECONDS: extra.deadline ?? '45' }, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...environment, PATH: `${path.join(root, 'bin')}${path.delimiter}${process.env.PATH}`, WAG_ROOT: posix(root), TMPDIR: posix(root), BASH_ENV: posix(path.join(root, 'shell-env')), FIXTURE_MODE: mode, FIXTURE_SEARCH_BODY: typeof search.body === 'string' ? search.body : search.body === undefined ? '' : JSON.stringify(search.body), FIXTURE_SEARCH_STATUS: String(search.status ?? 200), FIXTURE_SEARCH_CODE: String(search.code ?? 0), FIXTURE_SEARCH_HEADERS: search.headers ?? `Server-Timing: ${search.timing ?? ''}`, FIXTURE_REAL_GATEWAY: realGateway ? '1' : '0', FIXTURE_REAL_CURL: process.platform === 'win32' ? posix(path.join(process.env.SystemRoot, 'System32/curl.exe')) : '/usr/bin/curl', WAG_HEALTHCHECK_TIMEOUT_SECONDS: extra.deadline ?? '45' }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = ''; let stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk; });
@@ -259,6 +267,65 @@ test('shell preserves healthy core versus degraded public deployment outcomes', 
   assert.equal(empty.code, 1);
   assert.equal(empty.lines.find(line => line.layer === 'public-search').error.kind, 'search_empty');
   assert.deepEqual(empty.lines.find(line => line.layer === 'public-search').unresponsive_engines, [['bing', 'timeout']]);
+});
+
+test('shell full search repeatedly reports completed zero hits as nonfatal degradation', async t => {
+  const blocked = [['google', 'CAPTCHA'], ['brave', 'rate limited'], ['yandex', 'timeout']];
+  const run = await fixture(t, { search: {
+    body: { results: [], unresponsive_engines: blocked },
+    timing: 'total;dur=8000, render;dur=1, total_0_bing;dur=0, total_1_bing;dur=1, total_2_other_engine name;dur=1.25',
+  } });
+  for (let i = 0; i < 3; i++) {
+    const result = await run('healthy');
+    assert.equal(result.code, 0, JSON.stringify(result));
+    const search = result.lines.find(line => line.layer === 'public-search');
+    assert.equal(search.ok, true);
+    assert.equal(search.status, 'degraded');
+    assert.equal(search.result_count, 0);
+    assert.equal(search.responsive_engine_count, 2);
+    assert.deepEqual(search.unresponsive_engines, blocked);
+    assert.equal(result.lines.find(line => line.layer === 'proxy-restarts').ok, true);
+  }
+  const core = await run('healthy', ['--core-only']);
+  assert.equal(core.code, 0);
+  assert.ok(!core.lines.some(line => line.layer === 'public-search'));
+});
+
+test('shell search rejects dead-but-200, failed engines and malformed evidence like readiness', async t => {
+  for (const search of [
+    { body: { results: [] } },
+    { body: { results: [], unresponsive_engines: [] }, timing: '' },
+    { body: { results: [], unresponsive_engines: [] }, timing: 'total;dur=1, render;dur=1, load_0_bing;dur=1' },
+    { body: { results: [], unresponsive_engines: [] }, timing: 'total_0_bing;dur=NaN, total_1_google;dur=-1, total_2_brave;dur=Infinity' },
+    { body: { results: [], unresponsive_engines: [['bing', 'timeout'], ['google', 'CAPTCHA']] }, timing: 'total_0_bing;dur=1, total_1_google;dur=2' },
+    { body: { results: [], unresponsive_engines: [] }, headers: 'Server-Timing: total_0_bing;dur=1\r\n\r\nHTTP/1.1 200 OK\r\nServer-Timing: total;dur=1' },
+    { body: { results: [{ url: 'javascript:alert(1)', title: 'Bad' }], unresponsive_engines: [] } },
+    { body: { results: [{ url: 'https://example.com/', title: 'Example', engine: 'bing' }], unresponsive_engines: [['bing', 'timeout']] } },
+    ...[null, 'invalid', [[]], [['bing']], [[42, 'timeout']]].map(unresponsive_engines => ({ body: { results: [], unresponsive_engines } })),
+    { body: '<html>invalid search</html>' },
+    { body: {} },
+    { body: { results: 'invalid' } },
+  ]) {
+    const run = await fixture(t, { search: { timing: 'total_0_bing;dur=1', ...search } });
+    const result = await run('healthy');
+    assert.equal(result.code, 1, JSON.stringify({ search, result }));
+    assert.equal(result.lines.find(line => line.layer === 'public-search').ok, false);
+  }
+});
+
+test('shell full search keeps unreachable SearXNG and non-200 responses fatal', async t => {
+  for (const [search, kind] of [
+    [{ code: 7 }, 'curl_connect'], [{ code: 28 }, 'curl_timeout'],
+    [{ status: 503 }, 'dependency_http_status'], [{ status: 201 }, 'dependency_http_status'],
+  ]) {
+    const run = await fixture(t, { search });
+    const result = await run('healthy');
+    assert.equal(result.code, 1, JSON.stringify(result));
+    assert.equal(result.lines.find(line => line.layer === 'public-search').error.kind, kind);
+    const core = await run('healthy', ['--core-only']);
+    assert.equal(core.code, 0);
+    assert.ok(!core.requests.some(request => request.url.includes('/search')));
+  }
 });
 
 test('shell preserves curl categories and redacts diagnostics even under inherited tracing', async t => {

@@ -39,7 +39,7 @@ trap 'exit 129' HUP
 umask 077
 
 diagnose() {
-  python3 "$SCRIPT_DIR/healthcheck-diagnostics.py" "$1" "$2" "$3" "$work/body" "$work/error" "$work/status"
+  python3 "$SCRIPT_DIR/healthcheck-diagnostics.py" "$1" "$2" "$3" "$work/body" "$work/error" "$work/status" "$work/headers"
 }
 # Keep inner commands in the outer timeout's process group for prompt teardown.
 check_command() {
@@ -50,6 +50,11 @@ check_command() {
 }
 check_http() {
   local layer="$1" validation="$2" status=0 request_seconds=8 remaining; shift 2
+  local -a header_args=()
+  if [[ "$validation" == search ]]; then
+    : > "$work/headers"
+    header_args=(--dump-header "$work/headers")
+  fi
   # Reserve 1 s for the wrapper, 1 s for forced teardown, and 1 s for diagnostics.
   remaining=$((healthcheck_seconds - SECONDS - 3))
   if [[ "$validation" == ready || "$validation" == ready-core ]]; then
@@ -91,7 +96,7 @@ PY
     return 1
   fi
   : > "$work/body"
-  timeout --foreground --signal=TERM --kill-after=1 "$((request_seconds + 1))s" curl --silent --show-error --max-time "$request_seconds" --max-filesize 65536 --output "$work/body" --write-out '%{http_code}' "$@" > "$work/status" 2> "$work/error" || status=$?
+  timeout --foreground --signal=TERM --kill-after=1 "$((request_seconds + 1))s" curl --silent --show-error --max-time "$request_seconds" --max-filesize 65536 --output "$work/body" --write-out '%{http_code}' "${header_args[@]}" "$@" > "$work/status" 2> "$work/error" || status=$?
   diagnose "$layer" "$status" "$validation"
 }
 
@@ -123,6 +128,8 @@ if check_http gateway-ready ready --noproxy '*' -H "$gateway_host_header" -H "Au
   degraded=1
 fi
 check_http egress-connect http --proxy http://127.0.0.1:7895 https://example.com/ || degraded=1
+# Completed zero-hit searches report degradation but return 0; broken paths
+# still return nonzero and fail the full run. Third-party hits are not a gate.
 check_http public-search search "http://yosef-server:8801/search?q=healthcheck&format=json" || degraded=1
 check_command proxy-restarts systemctl show web-access-egress-proxy.service --property=NRestarts --value || degraded=1
 exit "$degraded"

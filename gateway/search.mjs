@@ -1,4 +1,4 @@
-import { normalizeSearchResults } from './evidence-metadata.mjs';
+import { filterLowQualityResults, normalizeSearchResults, timeRangeCompliance } from './evidence-metadata.mjs';
 
 const searchParameters = ['categories', 'engines', 'language'];
 
@@ -17,6 +17,20 @@ function searchError(message, kind, extra = {}) {
   return error;
 }
 
+// Result-quality filtering is on by default so callers see the intended behavior without extra
+// wiring; it can be turned off per call (qualityFilter: false) or globally via the environment for
+// operators who want the raw engine output.
+function qualityFilterDefault() {
+  const raw = String(process.env.WAG_SEARCH_QUALITY_FILTER ?? '').trim().toLowerCase();
+  return !['0', 'false', 'off', 'no', 'disabled'].includes(raw);
+}
+
+function countReasons(filtered) {
+  const reasons = {};
+  for (const item of filtered) reasons[item.reason] = (reasons[item.reason] ?? 0) + 1;
+  return reasons;
+}
+
 async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
   const params = buildSearchParams(input, { relaxed });
   const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal });
@@ -26,7 +40,7 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
   return response.json();
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter } = {}) {
   const stages_ms = {};
   const firstStarted = Date.now();
   const firstBody = await requestSearch({ baseUrl, input, fetchImpl, signal, relaxed: false });
@@ -48,12 +62,43 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   }
 
   const retrievedAt = new Date().toISOString();
-  const results = normalizeSearchResults(body.results, retrievedAt, 20);
+  const normalized = normalizeSearchResults(body.results, retrievedAt, 20);
+  const filterEnabled = qualityFilter === undefined ? qualityFilterDefault() : Boolean(qualityFilter);
+  const { results: filteredResults, filtered } = filterLowQualityResults(normalized, { enabled: filterEnabled });
+
+  // Temporal honesty: when the caller pinned a time window we must say whether the results can be
+  // proven to fall inside it, including when the relaxed retry silently dropped the filter.
+  let results = filteredResults;
+  let temporalFields = {};
+  const timeRange = input.time_range ?? null;
+  if (timeRange) {
+    results = filteredResults.map(result => ({ ...result, time_range_status: timeRangeCompliance(result, timeRange, retrievedAt) }));
+    const applied = attempts === 1;
+    const outside = results.filter(result => result.time_range_status === 'outside').length;
+    const unverified = results.filter(result => result.time_range_status === 'unverified').length;
+    const enforced = applied && results.length > 0 && outside === 0 && unverified === 0;
+    temporalFields = {
+      time_range: timeRange,
+      time_range_applied: applied,
+      time_range_enforced: enforced,
+      time_range_note: !applied
+        ? `Requested time_range '${timeRange}', but the empty-result retry dropped it; returned results are not proven within the window.`
+        : results.length === 0
+          ? `Requested time_range '${timeRange}'; no results were returned.`
+          : outside > 0 || unverified > 0
+            ? `Requested time_range '${timeRange}'; ${outside} result(s) fall outside the window${unverified > 0 ? ` and ${unverified} are not proven within it` : ''}.`
+            : null,
+    };
+  }
+
   return {
     results,
     number_of_results: body.number_of_results ?? results.length,
     stages_ms,
     attempts,
+    filtered_out: filtered.length,
+    filtered_reasons: countReasons(filtered),
+    ...temporalFields,
     ...(Object.prototype.hasOwnProperty.call(body, 'unresponsive_engines')
       ? { unresponsive_engines: body.unresponsive_engines }
       : {}),

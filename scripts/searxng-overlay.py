@@ -117,7 +117,7 @@ def effective(settings, names):
         item = {"name": name, "disabled": engine.get("disabled", False)}
         if type(item["disabled"]) is not bool:
             raise ReleaseError("invalid effective engine state")
-        for key in ("engine", "categories"):
+        for key in ("engine", "categories", "timeout"):
             if key in engine:
                 value = engine[key]
                 if key == "engine" and (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value)):
@@ -125,6 +125,13 @@ def effective(settings, names):
                 if key == "categories" and (not isinstance(value, list) or any(
                         not isinstance(v, str) or not re.fullmatch(r"[A-Za-z0-9 _-]+", v) for v in value)):
                     raise ReleaseError("invalid engine categories")
+                # A reviewed engine timeout shares the query budget with
+                # outgoing.max_request_timeout, so it stays a plain finite number.
+                if key == "timeout":
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ReleaseError("invalid engine timeout")
+                    if not (0 < value < 1e6):
+                        raise ReleaseError("invalid engine timeout")
                 item[key] = sorted(value) if isinstance(value, list) else value
         if "proxies" in engine:
             item["proxies"] = proxies(engine["proxies"])

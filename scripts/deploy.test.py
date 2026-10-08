@@ -213,9 +213,15 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
         self.assertEqual(result.returncode, 0, result.stderr)
         effective = yaml.safe_load(self.settings.read_text())
         engines = {e["name"]: e for e in effective["engines"]}
-        self.assertFalse(engines["google"]["disabled"])
+        # The reviewed overlay pins google off (retired search endpoint) while the
+        # operator's backend entry and its credential must survive untouched, and
+        # a reviewed enabled engine plus the reviewed query budget must land.
+        self.assertTrue(engines["google"]["disabled"])
         self.assertEqual(engines["google"]["engine"], "operator-google-backend")
         self.assertEqual(engines["google"]["api_key"], "dummy-engine-secret")
+        self.assertFalse(engines["quark"]["disabled"])
+        self.assertEqual(engines["quark"]["timeout"], 3.0)
+        self.assertEqual(effective["outgoing"]["request_timeout"], 3.0)
         self.assertEqual(engines["operator-engine"]["engine"], "custom")
         self.assertEqual(effective["outgoing"]["proxies"]["all://"],
                          ["http://dummy-user:dummy-password@127.0.0.1:7999"])
@@ -266,7 +272,10 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                 self.assertEqual(self.command("activate", tx).returncode, 0)
                 value = yaml.safe_load(self.settings.read_text())
                 if drift == "engine":
-                    value["engines"][0]["disabled"] = True
+                    # Invert the reviewed state of the first engine instead of
+                    # assuming it is on: the reviewed overlay may pin it either
+                    # way, and either direction has to be detected as drift.
+                    value["engines"][0]["disabled"] = not value["engines"][0].get("disabled", False)
                 else:
                     value["outgoing"]["proxies"]["all://"] = ["http://127.0.0.1:7888"]
                 self.settings.write_text(yaml.safe_dump(value))
@@ -612,7 +621,9 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                     (tx / "candidate/runtime/gateway/node_modules/express/package.json").write_text('{"version":"0.0.0"}')
                 else:
                     value = yaml.safe_load(self.settings.read_text())
-                    value["engines"][0]["disabled"] = True
+                    # Same as the engine drift above: invert the reviewed state so
+                    # the mutation is real whatever the overlay pins.
+                    value["engines"][0]["disabled"] = not value["engines"][0].get("disabled", False)
                     self.settings.write_text(yaml.safe_dump(value))
                 result = self.command("commit", tx)
                 self.assertNotEqual(result.returncode, 0)

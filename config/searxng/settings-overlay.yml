@@ -5,6 +5,11 @@
 # Existing operator/backend proxy maps are preserved; this proxy is a default
 # only when no outgoing proxy map exists. Coordinated release provenance verifies
 # the effective preserved map, not just the values in this overlay file.
+#
+# Engine set and timeout budget were reviewed together against measured behaviour
+# of the current egress; every claim below is reproducible from
+# docs/searxng-engine-pool-timeouts-20261008.md (live instance 192.168.50.2:8801,
+# read-only GET/POST /search probes, 2026-10-08).
 
 outgoing:
   # Google, Bing, DuckDuckGo and the other public engines are not reachable
@@ -12,9 +17,20 @@ outgoing:
   proxies:
     "all://":
       - http://127.0.0.1:7890
-  # Keep an individual engine from holding up the whole SearXNG response.
-  request_timeout: 8.0
-  max_request_timeout: 8.0
+  # One query has one shared wall-clock budget: searx/search/__init__.py
+  # _get_requests() sets default_timeout = max(engine.timeout of the selected
+  # engines) and the deadline becomes min(default_timeout, max_request_timeout);
+  # every engine thread then only joins with the remaining time.  A per-engine
+  # `timeout:` is therefore not a cap of its own, it raises the shared budget.
+  # 3.0 is SearXNG's own upstream default and was the value already carried by
+  # the locally tuned engine entries.  Measured against the pool enabled below:
+  # a 2.0s budget kills Yandex (1/3 probes returned results), 3.0s returns
+  # results on 3/3 probes (0.97-1.90s, 25 results), and the whole query is now
+  # bounded by 3.0s instead of the previous 8.0s.  max_request_timeout repeats
+  # the same ceiling so a larger engine timeout (e.g. 360search's 20.0) or a
+  # caller supplied ?timeout_limit= can no longer stretch a single query to 8s.
+  request_timeout: 3.0
+  max_request_timeout: 3.0
   pool_connections: 100
   pool_maxsize: 20
   # A single transport retry handles short proxy/upstream blips without
@@ -23,37 +39,82 @@ outgoing:
   retry_on_http_error: false
 
 engines:
-  # Main general/news sources: explicitly enabled so a stale local setting
-  # cannot silently leave the proxy-backed pool empty.
-  - name: google
-    disabled: false
-    categories: [general, news]
-  - name: bing
-    disabled: false
-    categories: [general, news]
-  - name: duckduckgo
-    disabled: false
-    categories: [general, news]
-  - name: brave
-    disabled: false
-    categories: [general, news]
-  - name: mojeek
-    disabled: false
-    categories: [general, news]
-  - name: qwant
-    disabled: false
-    categories: [general, news]
-  # Keep Yandex available as a fallback engine; it was one of the few engines
-  # observed to work intermittently before proxy routing was fixed.
+  # Enabled general engines.  Yandex is the only engine that consistently
+  # returns results from this egress (10-15 results, 0.86-1.81s).  Quark does
+  # too (7-11 results with dates, 0.89-2.33s under the 3.0s budget) but is
+  # rate limited into a CAPTCHA every so often; that fails in ~0.1s and
+  # suspends it, so it can slow a query down only when it does answer.
+  # Bing stays enabled per the egress card's instruction even though it
+  # currently answers nothing here: it completes in 0.1-0.7s, reports no error
+  # and never consumes the shared budget, so it costs nothing while it is
+  # broken (see the report for the evidence and the open cause).
   - name: yandex
     disabled: false
     categories: [general, news]
+    timeout: 3.0
+  - name: quark
+    disabled: false
+    categories: [general, news]
+    timeout: 3.0
+  - name: bing
+    disabled: false
+    categories: [general, news]
+    timeout: 3.0
 
-  # These engines were observed timing out or requiring a CAPTCHA in the
-  # current environment.  Disable them so they do not consume the request
-  # budget or make an otherwise useful response look unhealthy.
+  # Chinese results carrying real publication dates.  It is also the only engine
+  # in the enabled pool that both works and honours time_range (10 dated
+  # results, 0.32-0.97s, English and Chinese queries) - but it only serves the
+  # news category, and a default-category time_range query still selects no
+  # working engine at all (see the report's findings section).
+  - name: chinaso news
+    disabled: false
+    categories: [news]
+    timeout: 3.0
+
+  # Disabled: measured to fail on every query from the current egress, with the
+  # failure mode that makes them expensive.  Disabling is not optional - the
+  # apply script merges by name and never deletes, so an engine left out here
+  # keeps whatever a previous overlay or a stale local edit enabled.
+  #
+  # google: 403 on every request because this SearXNG release asks the retired
+  #   /wml/search endpoint; independent of the egress IP.
+  # google news: NOT a workaround for google - in this release it uses the same
+  #   retired /wml/search endpoint (&tbm=nws) and answers 403 as well.
+  - name: google
+    disabled: true
+  - name: google news
+    disabled: true
+  # brave: HTTP 429 on the egress IP (suspended_time=180).
+  - name: brave
+    disabled: true
+  # mojeek: server-side hard 403 (suspended_time=180).
+  - name: mojeek
+    disabled: true
+  # duckduckgo: anti-bot challenge page reported as CAPTCHA with
+  #   suspended_time=0, i.e. it is retried on every single query.
+  - name: duckduckgo
+    disabled: true
+  # qwant: CAPTCHA with suspended_time=0 (retried on every query).  The one
+  #   configuration that answered was a specific proxy node, which is a
+  #   sing-box decision outside this repository's scope.
+  - name: qwant
+    disabled: true
+  # baidu / sogou: reachable as pages but the SearXNG parsers get a CAPTCHA
+  #   (suspended_time=3600).  Chinese coverage is not regressed by keeping them
+  #   off: they are disabled today as well, and yandex/quark/chinaso news answer.
   - name: baidu
     disabled: true
+  - name: sogou
+    disabled: true
+  # 360search: never answers inside the shared budget and carries a 20.0s
+  #   engine timeout.
+  - name: 360search
+    disabled: true
+  # startpage: redirected to /sp/captcha (suspended_time=3600).  Pinned here so
+  #   a stale local setting cannot silently bring it back.
+  - name: startpage
+    disabled: true
+  # Kept disabled from the previous review: no engine in this group answered.
   - name: crowdview
     disabled: true
   - name: mwmbl

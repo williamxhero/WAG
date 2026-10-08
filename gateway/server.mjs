@@ -8,6 +8,7 @@ import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { JSDOM } from 'jsdom';
 import TurndownService from 'turndown';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -50,6 +51,21 @@ const cfg = Object.freeze({
   allowedHosts: (process.env.GATEWAY_ALLOWED_HOSTS ?? 'yosef-server').split(',').map(v => v.trim()),
 });
 
+// Public, browser-consistent request identity for lightweight reads. Many public
+// sites reject clients that do not look like a browser (401/403); these headers
+// let an ordinary read look like a normal browsing session. This is deliberately
+// a real browser user agent, never a claimed search-engine crawler or a cookie.
+const READ_REQUEST_HEADERS = Object.freeze({
+  'User-Agent': process.env.GATEWAY_READ_USER_AGENT ?? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': process.env.GATEWAY_READ_ACCEPT_LANGUAGE ?? 'en-US,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+});
+// Responses in these classes usually mean the origin mistook our client for a
+// bot; the read path retries them through the renderer unless render is pinned.
+const BOT_CHALLENGE_STATUSES = new Set([401, 403, 406, 429]);
+const RESPONSE_BODY_LIMIT = 5 * 1024 * 1024;
+
 if (!['0', '1'].includes(process.env.GATEWAY_ALLOW_ANONYMOUS ?? '0')) throw new Error('GATEWAY_ALLOW_ANONYMOUS must be unset, 0 or 1');
 if (!cfg.allowAnonymous && cfg.token.length < 32) throw new Error('GATEWAY_TOKEN must be at least 32 characters');
 if (!Number.isSafeInteger(cfg.crawlResponseMaxBytes) || cfg.crawlResponseMaxBytes <= 0) throw new Error('CRAWL4AI_RESPONSE_MAX_BYTES must be a positive safe integer');
@@ -86,6 +102,12 @@ function rejectError(message, kind, extra = {}) {
   error.kind = kind;
   Object.assign(error, extra);
   return error;
+}
+// Stable blocked_reason categories shared by the lightweight origin read and the
+// renderer's observed status so a fallback that is still blocked reports the same
+// kind of reason as a direct failure.
+function blockedReasonForStatus(status) {
+  return status === 403 ? 'upstream_forbidden' : status === 429 ? 'upstream_rate_limited' : status >= 500 ? 'upstream_server_error' : 'upstream_http_error';
 }
 const requireToken = (req, res, next) => {
   const authorization = req.get('authorization');
@@ -138,6 +160,30 @@ async function resolvePublicUrl(raw) {
 const proxyUrl = new URL(cfg.egressProxy);
 if (proxyUrl.protocol !== 'http:' || proxyUrl.username || proxyUrl.password) {
   throw new Error('EGRESS_PROXY must be an unauthenticated HTTP CONNECT proxy; other transports cannot enforce address pinning');
+}
+// Decode Content-Encoding for the raw http.request path (Node's fetch already
+// decodes, but the pinned CONNECT transport does not). The output is bounded so
+// a small compressed payload cannot expand past the read budget.
+function decodeContentEncoding(buffer, encoding) {
+  if (!encoding) return buffer;
+  const codings = encoding.split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  let output = buffer;
+  for (const coding of codings.reverse()) {
+    if (coding === 'identity') continue;
+    try {
+      if (coding === 'gzip' || coding === 'x-gzip') output = zlib.gunzipSync(output, { maxOutputLength: RESPONSE_BODY_LIMIT });
+      else if (coding === 'br') output = zlib.brotliDecompressSync(output, { maxOutputLength: RESPONSE_BODY_LIMIT });
+      else if (coding === 'deflate') {
+        try { output = zlib.inflateSync(output, { maxOutputLength: RESPONSE_BODY_LIMIT }); }
+        catch { output = zlib.inflateRawSync(output, { maxOutputLength: RESPONSE_BODY_LIMIT }); }
+      } else throw rejectError(`unsupported content-encoding: ${coding}`, 'upstream_encoding');
+    } catch (error) {
+      if (error?.kind) throw error;
+      if (error?.code === 'ERR_BUFFER_TOO_LARGE') throw rejectError('decompressed response exceeds 5 MiB', 'response_too_large');
+      throw rejectError(`could not decode ${coding} response: ${error.message}`, 'upstream_decode_error');
+    }
+  }
+  return output;
 }
 function requestOnce(url, records, signal) {
   const timeoutMs = 30000;
@@ -201,7 +247,7 @@ function requestOnce(url, records, signal) {
           const request = downstreamRequest = transport.request({
             protocol: url.protocol, hostname: url.hostname.replace(/^\[|\]$/g, ''), port: url.port || undefined, path: `${url.pathname}${url.search}`,
             method: 'GET', agent,
-            headers: { 'Host': url.host, 'User-Agent': 'WebAccessGateway/1.0', 'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1', 'Accept-Encoding': 'identity', 'Connection': 'close' },
+            headers: { 'Host': url.host, ...READ_REQUEST_HEADERS, 'Connection': 'close' },
             timeout: timeoutMs,
           }, page => {
             const parts = [];
@@ -217,7 +263,10 @@ function requestOnce(url, records, signal) {
             });
             page.once('error', error => complete(rejectError(error.message, 'upstream_network', { cause: error })));
             page.on('end', () => {
-              const result = { status: page.statusCode ?? 0, headers: page.headers, body: Buffer.concat(parts) };
+              let body;
+              try { body = decodeContentEncoding(Buffer.concat(parts), page.headers['content-encoding']); }
+              catch (error) { complete(error); request.destroy(); return; }
+              const result = { status: page.statusCode ?? 0, headers: page.headers, body };
               if (result.status < 200 || result.status >= 400) {
                 const error = rejectError(`upstream returned HTTP ${result.status}`, 'upstream_http_status', {
                   httpStatus: result.status,
@@ -225,7 +274,7 @@ function requestOnce(url, records, signal) {
                   contentType: result.headers['content-type'] ?? null,
                   bytes: result.body.length,
                   contentHash: crypto.createHash('sha256').update(result.body).digest('hex'),
-                  blockedReason: result.status === 403 ? 'upstream_forbidden' : result.status === 429 ? 'upstream_rate_limited' : result.status >= 500 ? 'upstream_server_error' : 'upstream_http_error',
+                  blockedReason: blockedReasonForStatus(result.status),
                 });
                 complete(error);
                 request.destroy();
@@ -272,7 +321,15 @@ async function fetchPublic(raw) {
   let current = raw;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const { url, records } = await resolvePublicUrl(current);
-    const response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records));
+    let response;
+    try {
+      response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records));
+    } catch (error) {
+      // Keep the already checked URL that produced the failure so the read path
+      // can hand a validated target to the renderer when it falls back.
+      if (error && typeof error === 'object' && !error.finalUrl) error.finalUrl = url.href;
+      throw error;
+    }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       if (!response.headers.location) throw rejectError(`upstream returned redirect ${response.status} without a location`, 'redirect_without_location', { httpStatus: response.status });
       current = new URL(response.headers.location, url).href;
@@ -297,6 +354,8 @@ function errorResult(traceId, error) {
     ...(error.blockedReason ? { blocked_reason: error.blockedReason } : {}),
     ...(error.host ? { target_host: error.host } : {}),
     ...(error.retryAfter ? { retry_after: error.retryAfter } : {}),
+    ...(error.renderer ? { renderer: error.renderer } : {}),
+    ...(error.renderFallback ? { render_fallback: error.renderFallback } : {}),
   };
   return { isError: true, structuredContent: payload, content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 }
@@ -355,6 +414,37 @@ function fetchedMetadata(fetched) {
     bytes: fetched.bytes,
     content_hash: fetched.contentHash,
     blocked_reason: null,
+  };
+}
+// Metadata for a read whose only successful response came from the renderer
+// (the lightweight origin read never returned usable content). Never invent an
+// upstream figure: report the renderer's observed status and the Markdown it gave.
+function renderedMetadata(rendered) {
+  const status = Number.isInteger(rendered?.result?.status_code) ? rendered.result.status_code : null;
+  const markdown = rendered?.markdown ?? '';
+  return {
+    http_status: status,
+    content_type: 'text/markdown',
+    bytes: Buffer.byteLength(markdown, 'utf8'),
+    content_hash: crypto.createHash('sha256').update(markdown, 'utf8').digest('hex'),
+    blocked_reason: null,
+  };
+}
+// Publisher evidence for a renderer-only read. Prefer the renderer's own HTML so
+// canonical/published metadata is preserved; otherwise emit the contract's
+// required fields with explicit nulls rather than dropping them.
+function evidenceFromRendered(rendered, finalUrl) {
+  const html = rendered?.result?.html;
+  if (typeof html === 'string' && html) return extractPageEvidence(html, finalUrl, {});
+  const retrievedAt = new Date().toISOString();
+  return {
+    published_at: null,
+    published_on: null,
+    precision: null,
+    modified_at: null,
+    retrieved_at: retrievedAt,
+    source: { url: finalUrl, host: new URL(finalUrl).hostname.toLowerCase(), site_name: null, author: null },
+    temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }],
   };
 }
 async function withSlot(pool, job) {
@@ -607,33 +697,87 @@ function getServer() {
     return executeTool('web_read', trace_id, async () => {
       let fetched;
       let light;
+      let renderFallback = null;
       if (input.render !== 'always') {
         const fetchStarted = Date.now();
-        fetched = await fetchPublic(input.url);
+        try {
+          fetched = await fetchPublic(input.url);
+        } catch (error) {
+          // A public page that answers our lightweight client with a bot-challenge
+          // status (401/406), a block (403) or throttling (429) is retried through
+          // the renderer, which presents a real browser. An explicit
+          // `render: never` stays authoritative and never falls back.
+          if (input.render === 'auto' && BOT_CHALLENGE_STATUSES.has(error?.httpStatus)) {
+            renderFallback = {
+              occurred: true, from: 'lightweight', to: 'crawl4ai',
+              reason: error.blockedReason ?? 'upstream_http_status',
+              http_status: error.httpStatus,
+              url: error.finalUrl ?? input.url,
+            };
+          } else throw error;
+        }
         stages_ms.fetch_ms = Date.now() - fetchStarted;
-        const type = fetched.contentType;
-        const decoded = decodePageBody(fetched.body, type);
-        if (!type.toLowerCase().includes('html') && input.output === 'markdown') throw rejectError(`unsupported content type: ${type}`, 'unsupported_content_type', { httpStatus: fetched.status });
-        const extractStarted = Date.now();
-        light = lightExtract(decoded.text, fetched.finalUrl);
-        stages_ms.extract_ms = Date.now() - extractStarted;
-        if (input.render === 'never' || (light.markdown.length >= 700 && input.output === 'markdown')) {
-          const evidence = extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
-          return textResult({ trace_id, telemetry: { first_valid_result_ms: Date.now() - started, stages_ms }, url: fetched.finalUrl, renderer: 'lightweight', title: light.title, markdown: trimText(prependPublishedEvidence(light.markdown, evidence)), ...fetchedMetadata(fetched), charset: decoded.charset, ...evidence });
+        if (fetched) {
+          const type = fetched.contentType;
+          const decoded = decodePageBody(fetched.body, type);
+          if (!type.toLowerCase().includes('html') && input.output === 'markdown') throw rejectError(`unsupported content type: ${type}`, 'unsupported_content_type', { httpStatus: fetched.status });
+          const extractStarted = Date.now();
+          light = lightExtract(decoded.text, fetched.finalUrl);
+          stages_ms.extract_ms = Date.now() - extractStarted;
+          if (input.render === 'never' || (light.markdown.length >= 700 && input.output === 'markdown')) {
+            const evidence = extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
+            return textResult({ trace_id, telemetry: { first_valid_result_ms: Date.now() - started, stages_ms }, url: fetched.finalUrl, renderer: 'lightweight', title: light.title, markdown: trimText(prependPublishedEvidence(light.markdown, evidence)), ...fetchedMetadata(fetched), charset: decoded.charset, ...evidence });
+          }
         }
       }
-      if (!fetched) { const fetchStarted = Date.now(); fetched = await fetchPublic(input.url); stages_ms.fetch_ms = Date.now() - fetchStarted; }
+      let renderUrl = fetched?.finalUrl ?? renderFallback?.url;
+      if (!renderUrl) { const fetchStarted = Date.now(); fetched = await fetchPublic(input.url); stages_ms.fetch_ms = Date.now() - fetchStarted; renderUrl = fetched.finalUrl; }
+      // Falling back to the renderer never bypasses address policy: the validated
+      // target is re-checked against SSRF rules before the renderer fetches it.
+      if (!fetched) renderUrl = (await resolvePublicUrl(renderUrl)).url.href;
       const renderStarted = Date.now();
-      const rendered = await callCrawl4ai(fetched.finalUrl, input.output);
+      let rendered;
+      try {
+        rendered = await callCrawl4ai(renderUrl, input.output);
+      } catch (error) {
+        if (renderFallback) {
+          error.renderer = 'crawl4ai';
+          error.renderFallback = renderFallback;
+          if (!error.blockedReason) error.blockedReason = 'render_fallback_failed';
+          if (error.httpStatus == null) error.httpStatus = renderFallback.http_status;
+        }
+        throw error;
+      }
       stages_ms.render_ms = Date.now() - renderStarted;
-      const decoded = decodePageBody(fetched.body, fetched.contentType);
-      const evidence = extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
-      if (input.output === 'markdown') return textResult({ trace_id, telemetry: { first_valid_result_ms: Date.now() - started, stages_ms }, url: fetched.finalUrl, renderer: 'crawl4ai', markdown: trimText(prependPublishedEvidence(rendered.markdown, evidence)), ...fetchedMetadata(fetched), charset: decoded.charset, ...evidence });
+      let charset = 'utf-8';
+      let evidence;
+      let metadata;
+      if (fetched) {
+        const decoded = decodePageBody(fetched.body, fetched.contentType);
+        charset = decoded.charset;
+        evidence = extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
+        metadata = fetchedMetadata(fetched);
+      } else {
+        evidence = evidenceFromRendered(rendered, renderUrl);
+        metadata = renderedMetadata(rendered);
+      }
+      // A renderer that still observes an error status has not recovered the page.
+      // Report the block honestly (with any fallback context) instead of returning
+      // a challenge page as a successful read.
+      if (Number.isInteger(metadata.http_status) && metadata.http_status >= 400) {
+        const error = rejectError(`renderer observed HTTP ${metadata.http_status}`, 'upstream_http_status', {
+          httpStatus: metadata.http_status, blockedReason: blockedReasonForStatus(metadata.http_status),
+        });
+        if (renderFallback) { error.renderer = 'crawl4ai'; error.renderFallback = renderFallback; }
+        throw error;
+      }
+      const base = { trace_id, telemetry: { first_valid_result_ms: Date.now() - started, stages_ms }, url: renderUrl, renderer: 'crawl4ai', ...metadata, charset, ...evidence, ...(renderFallback ? { render_fallback: renderFallback } : {}) };
+      if (input.output === 'markdown') return textResult({ ...base, markdown: trimText(prependPublishedEvidence(rendered.markdown, evidence)) });
       const saveStarted = Date.now();
       const artifact = await saveArtifact(input.output === 'screenshot' ? rendered.result.screenshot : rendered.result.pdf, input.output === 'screenshot' ? 'png' : 'pdf');
       stages_ms.artifact_save_ms = Date.now() - saveStarted;
       if (!artifact) throw rejectError(`Crawl4AI did not return a ${input.output} artifact`, 'artifact_missing');
-      return textResult({ trace_id, telemetry: { first_valid_result_ms: Date.now() - started, stages_ms }, url: fetched.finalUrl, renderer: 'crawl4ai', artifact, expires_after_days: 7, ...fetchedMetadata(fetched), charset: decoded.charset, ...evidence });
+      return textResult({ ...base, artifact, expires_after_days: 7 });
     }, new URL(input.url).hostname);
   });
   server.registerTool('web_browser', { description: 'Interact with a public page through the isolated Playwright MCP browser. Sessions expire after 15 minutes and never preserve login state.', inputSchema: { session_id: z.string().uuid().optional(), actions: z.array(z.object({ type: z.enum(['navigate', 'click', 'wait', 'scroll', 'snapshot', 'screenshot', 'close']), url: z.string().url().optional(), ref: z.string().optional(), element: z.string().optional(), ms: z.number().int().min(0).max(10000).optional(), pixels: z.number().int().min(-3000).max(3000).optional() })).min(1).max(8) }, outputSchema: browserOutputSchema }, async input => {

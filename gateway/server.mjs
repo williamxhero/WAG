@@ -688,22 +688,29 @@ async function browserAction(session, action) {
 const temporalEvidenceSchema = z.object({ kind: z.string(), value: z.string().nullable().optional(), on: z.string().nullable().optional(), precision: z.string().nullable().optional(), source: z.string() });
 const sourceSchema = z.object({ url: z.string(), host: z.string(), canonical_url: z.string().nullable().optional(), site_name: z.string().nullable().optional(), author: z.string().nullable().optional(), search_engine: z.string().nullable().optional() });
 const telemetrySchema = z.object({ first_valid_result_ms: z.number().optional(), stages_ms: z.record(z.string(), z.number()).optional() }).passthrough();
-const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), unresponsive_engines: z.unknown().optional(), telemetry: telemetrySchema }).passthrough();
+const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), time_range_status: z.string().optional(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), time_range: z.string().nullable().optional(), time_range_applied: z.boolean().optional(), time_range_enforced: z.boolean().optional(), time_range_note: z.string().nullable().optional(), time_window_strict: z.boolean().optional(), filtered_out: z.number().optional(), filtered_reasons: z.record(z.string(), z.number()).optional(), unresponsive_engines: z.unknown().optional(), telemetry: telemetrySchema }).passthrough();
 const readOutputSchema = z.object({ trace_id: z.string(), url: z.string().optional(), renderer: z.string().optional(), title: z.string().optional(), markdown: z.string().optional(), http_status: z.number().optional(), content_type: z.string().nullable().optional(), bytes: z.number().optional(), content_hash: z.string().optional(), charset: z.string().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), artifact: z.record(z.string(), z.unknown()).optional(), expires_after_days: z.number().optional(), blocked_reason: z.string().nullable().optional(), telemetry: telemetrySchema.optional() }).passthrough();
 const browserOutputSchema = z.object({ trace_id: z.string(), session_id: z.string().optional(), expires_in_seconds: z.number().optional(), url: z.string().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), outputs: z.array(z.record(z.string(), z.unknown())).optional(), closed: z.boolean().optional(), telemetry: telemetrySchema }).passthrough();
 function getServer() {
   const server = new McpServer({ name: 'web-access-gateway', version: '1.0.0' });
-  server.registerTool('web_search', { description: 'Search public web pages through the local SearXNG instance.', inputSchema: { query: z.string().min(1).max(500), categories: z.string().optional(), engines: z.string().optional(), language: z.string().optional(), time_range: z.enum(['day', 'month', 'year']).optional(), page: z.number().int().min(1).max(10).optional() }, outputSchema: searchOutputSchema }, async input => {
+  server.registerTool('web_search', { description: 'Search public web pages through the local SearXNG instance.', inputSchema: { query: z.string().min(1).max(500), categories: z.string().optional(), engines: z.string().optional(), language: z.string().optional(), time_range: z.enum(['day', 'month', 'year']).optional(), time_window_strict: z.boolean().optional(), page: z.number().int().min(1).max(10).optional() }, outputSchema: searchOutputSchema }, async input => {
     const trace_id = crypto.randomUUID(); const started = Date.now();
     return executeTool('web_search', trace_id, async () => {
-      const search = await searchSearxng({ baseUrl: cfg.searxUrl, input, signal: AbortSignal.timeout(30000) });
+      const search = await searchSearxng({ baseUrl: cfg.searxUrl, input, signal: AbortSignal.timeout(30000), timeWindowStrict: input.time_window_strict });
       const duration_ms = Date.now() - started;
+      // Search-module diagnostics that callers rely on for temporal honesty; forwarded only when the
+      // module actually produced them so compatibility responses keep their previous shape.
+      const diagnostics = {};
+      for (const key of ['time_range', 'time_range_applied', 'time_range_enforced', 'time_range_note', 'time_window_strict', 'filtered_out', 'filtered_reasons']) {
+        if (Object.prototype.hasOwnProperty.call(search, key)) diagnostics[key] = search[key];
+      }
       return textResult({
         trace_id,
         telemetry: { first_valid_result_ms: duration_ms, stages_ms: search.stages_ms },
         query: input.query,
         number_of_results: search.number_of_results,
         results: search.results,
+        ...diagnostics,
         ...(Object.prototype.hasOwnProperty.call(search, 'unresponsive_engines')
           ? { unresponsive_engines: search.unresponsive_engines }
           : {}),

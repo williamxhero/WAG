@@ -30,9 +30,11 @@ class Crawler:
     starts = 0
     crawls = 0
     fail_start = False
+    last_config = None
 
     def __init__(self, **kwargs):
         self.closed = False
+        Crawler.last_config = kwargs.get("config")
 
     async def start(self):
         Crawler.starts += 1
@@ -47,7 +49,7 @@ class Crawler:
         raise AssertionError("readiness must not crawl")
 
 
-def load_app():
+def load_app(env=None):
     crawler = types.ModuleType("crawl4ai")
     crawler.AsyncWebCrawler = Crawler
     crawler.BrowserConfig = crawler.CrawlerRunConfig = lambda **kwargs: kwargs
@@ -62,7 +64,8 @@ def load_app():
     pydantic.Field = lambda **kwargs: None
     spec = importlib.util.spec_from_file_location("offline_crawler_app", Path(__file__).with_name("app.py"))
     app = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, {"crawl4ai": crawler, "fastapi": fastapi, "pydantic": pydantic}), patch.dict(os.environ, {"CRAWL4AI_TOKEN": "offline-test-token", "CRAWL4AI_DATA_DIR": "/offline"}):
+    environment = {"CRAWL4AI_TOKEN": "offline-test-token", "CRAWL4AI_DATA_DIR": "/offline", **(env or {})}
+    with patch.dict(sys.modules, {"crawl4ai": crawler, "fastapi": fastapi, "pydantic": pydantic}), patch.dict(os.environ, environment):
         spec.loader.exec_module(app)
     return app
 
@@ -71,6 +74,7 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         Crawler.starts = Crawler.crawls = 0
         Crawler.fail_start = False
+        Crawler.last_config = None
         self.module = load_app()
 
     async def test_failed_start_never_publishes_an_initialized_crawler(self):
@@ -111,6 +115,31 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(Crawler.starts, 1)
         self.assertEqual(Crawler.crawls, 0)
+
+    async def test_browser_recycles_its_context_after_a_bounded_number_of_pages(self):
+        # A long-lived browser context keeps its CONNECT socket pool open for
+        # minutes, so a burst of renders can hold the whole shared egress budget
+        # and starve the gateway's lightweight reads. Recycling the context every
+        # N pages releases that pool; the setting must reach BrowserConfig.
+        #
+        # The default is 1 (recycle after every page): Crawl4AI 0.9.2 only queues a
+        # context for close when the per-page counter reaches the threshold, so any
+        # N > 1 leaves the trailing context of a batch alive (a single render at N=2
+        # never recycles at all). N=1 gives each page its own context so the pool is
+        # always returned when that render finishes.
+        for env, expected in [({}, 1), ({"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "2"}, 2), ({"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "8"}, 8)]:
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE", None)
+                os.environ.update(env)
+                module = load_app()
+                async with module.lifespan(module.app):
+                    self.assertEqual(module.MAX_PAGES_BEFORE_RECYCLE, expected)
+                    self.assertEqual(Crawler.last_config["max_pages_before_recycle"], expected)
+
+    async def test_an_invalid_recycle_setting_is_rejected(self):
+        with patch.dict(os.environ, {"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "-1"}, clear=False):
+            with self.assertRaisesRegex(ValueError, "CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE"):
+                load_app()
 
 
 if __name__ == "__main__":

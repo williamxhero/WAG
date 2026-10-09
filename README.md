@@ -161,6 +161,8 @@ SearXNG 返回有效标准化结果即可证明搜索能力，但不能将已报
 - 爬取 Markdown 按 UTF-8 字节计数，上限 5 MiB（`markdown_too_large`）；截图与 PDF 各自限制为 25 MiB（`ARTIFACT_MAX_BYTES`），在 base64 解码前校验编码长度、格式和精确解码大小（`artifact_too_large` / `artifact_invalid`）。所有这些预算在发布任一产物前校验，存储总配额仍为 1 GiB（`ARTIFACT_QUOTA_BYTES`）。无效 JSON 或结果结构返回 `render_invalid_response`，错误不会回显完整负载。
 - 离线回归：`npm --prefix gateway ci && npm --prefix gateway test`，包括 MCP 网关边界的受控分块流测试及产物下载/配额测试；无需公网网站、运行时服务或真实凭据。
 - Crawl4AI 渲染与浏览器任务的并发上限均为 2；浏览器 service 的内存上限为 6 GiB。
+- Crawl4AI 默认每渲染 1 个页面就回收一次浏览器上下文（`CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE`，默认 1，`0` 表示不回收）。长时间存活的 Chromium 上下文会把已建立的 CONNECT 隧道池持续挂在出口代理上：实测连续 6 次渲染把隧道数推到 10，且批次结束后 >30s 不释放，一两个渲染批次就足以吃满 32 条全局预算、让同一时刻的轻量读取也被代理合成 429。默认 1 会在每页渲染结束时立即归还这些槽位；大于 1 不够——Crawl4AI 0.9.2 只在每页计数达到阈值后才排队关闭上下文，单次渲染（计数=1）在 N>1 时一次都不会回收，奇数尾批也会把末页上下文留在池里。
+- 轻量读取遇到**出口代理自己合成**的 403/429 时不再回退渲染：那是 WAG 自身的限流（`egress_proxy_blocked` / `egress_proxy_rate_limited`），经同一条代理再渲染只会加重拥塞；结果直接回报该状态与 `retry_after`。只有**源站**返回的 401/403/406/429 才触发回退渲染。
 - 出网沿用小电脑的 sing-box 代理；本机服务地址被加入 `NO_PROXY`。
 - 每次 CONNECT 连接尝试只解析一次目的域名，任一 DNS 答案非公网即拒绝；发给上游的 CONNECT authority 必须是已校验的 IPv4 或带方括号的 IPv6 地址，失败重试只遍历这组答案，不重新解析。整个过程共用一个连接配额和握手截止时间。`EGRESS_UPSTREAM` 仅支持无认证的 HTTP CONNECT 代理，其他传输启动即拒绝；隧道不终止 TLS，客户端原始 Host、SNI 和证书校验保持不变。这封闭了连接时再次解析 DNS 的设计风险，不代表已证明此前存在可利用的重绑定攻击。
 - 既有普通 absolute-form HTTP 代理请求仍不转发：公网目标返回 `501 CONNECT required`，非法目标返回 `403`。轻量读取可通过 CONNECT:80 使用 HTTP，但使用普通 HTTP 代理模式的浏览器/Crawl4AI 不能直接浏览明文 HTTP 页面；HTTPS 导航、重定向和渲染子请求通过受校验的 CONNECT 隧道。

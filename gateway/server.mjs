@@ -109,6 +109,14 @@ function rejectError(message, kind, extra = {}) {
 function blockedReasonForStatus(status) {
   return status === 403 ? 'upstream_forbidden' : status === 429 ? 'upstream_rate_limited' : status >= 500 ? 'upstream_server_error' : 'upstream_http_error';
 }
+// A bot challenge the renderer (a real browser) could plausibly answer. Only the
+// origin's own HTTP response qualifies: a status synthesized by the local egress
+// proxy (`egress_proxy_status`) is this gateway's own rate limit, and re-fetching
+// the same URL through the same saturated proxy would only amplify the overload
+// (issue #51 D2 self-harm).
+function isOriginBotChallenge(error) {
+  return error?.kind === 'upstream_http_status' && BOT_CHALLENGE_STATUSES.has(error.httpStatus);
+}
 const requireToken = (req, res, next) => {
   const authorization = req.get('authorization');
   const anonymous = cfg.allowAnonymous && authorization === undefined;
@@ -232,7 +240,11 @@ function requestOnce(url, records, signal) {
         connection.setTimeout(0);
         if (response.statusCode < 200 || response.statusCode >= 300) {
           socket.destroy();
-          const error = rejectError(`egress proxy returned ${response.statusCode}`, 'egress_proxy_status', { httpStatus: response.statusCode, blockedReason: response.statusCode === 403 ? 'egress_proxy_blocked' : null });
+          const error = rejectError(`egress proxy returned ${response.statusCode}`, 'egress_proxy_status', {
+            httpStatus: response.statusCode,
+            retryAfter: response.headers['retry-after'] ?? null,
+            blockedReason: response.statusCode === 403 ? 'egress_proxy_blocked' : response.statusCode === 429 ? 'egress_proxy_rate_limited' : null,
+          });
           return response.statusCode >= 500 ? retry(error) : complete(error);
         }
         handedOff = true;
@@ -712,8 +724,10 @@ function getServer() {
           // A public page that answers our lightweight client with a bot-challenge
           // status (401/406), a block (403) or throttling (429) is retried through
           // the renderer, which presents a real browser. An explicit
-          // `render: never` stays authoritative and never falls back.
-          if (input.render === 'auto' && BOT_CHALLENGE_STATUSES.has(error?.httpStatus)) {
+          // `render: never` stays authoritative and never falls back, and a status
+          // the local egress proxy synthesized is never treated as an origin
+          // challenge (see isOriginBotChallenge).
+          if (input.render === 'auto' && isOriginBotChallenge(error)) {
             renderFallback = {
               occurred: true, from: 'lightweight', to: 'crawl4ai',
               reason: error.blockedReason ?? 'upstream_http_status',

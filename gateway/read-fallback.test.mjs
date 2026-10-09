@@ -70,9 +70,22 @@ async function fixture(t, { dns } = {}) {
   // gateway presents, then answer with the configured origin response.
   let originResponse = { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body: '<article>identity</article>' };
   const received = [];
+  // A CONNECT reply is assembled from raw bytes; build the CRLF sequence at runtime
+  // so the fixture source stays free of embedded control characters.
+  const crlf = String.fromCharCode(13, 10);
+  // When set, the proxy answers CONNECT with this status instead of establishing a
+  // tunnel: the shape of the local egress limiter's synthesized reply.
+  let proxyConnect = null;
+  const proxyConnects = [];
   const proxy = http.createServer();
   proxy.on('connect', (req, socket) => {
     socket.on('error', () => {});
+    if (proxyConnect) {
+      proxyConnects.push({ authority: req.url });
+      const headers = Object.entries(proxyConnect.headers ?? {}).map(([name, value]) => `${name}: ${value}`).join(crlf);
+      socket.end(`HTTP/1.1 ${proxyConnect.status} ${proxyConnect.statusText ?? 'Status'}${crlf}${headers}${crlf}${crlf}`);
+      return;
+    }
     socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
     let buffer = Buffer.alloc(0);
     const onData = chunk => {
@@ -157,9 +170,11 @@ async function fixture(t, { dns } = {}) {
 
   return {
     received,
+    proxyConnects,
     crawlRequests,
     setOrigin(value) { originResponse = value; },
     setCrawl(value) { crawlResponse = value; },
+    setProxyConnect(value) { proxyConnect = value; },
     async read(url, render = 'auto', output = 'markdown') {
       const result = await client.callTool({ name: 'web_read', arguments: { url, render, output } }, undefined, { timeout: 8000 });
       return { result, payload: result.structuredContent ?? JSON.parse(result.content[0].text) };
@@ -285,6 +300,29 @@ test('auto reads do not fall back for non-bot-challenge failures', { timeout: 20
       assert.equal(payload.blocked_reason, reason);
       assert.equal(Object.hasOwn(payload, 'render_fallback'), false);
       assert.equal(gateway.crawlRequests.length, 0);
+    });
+  }
+});
+
+// A status the *local* egress proxy synthesizes is WAG's own limiter, not a bot
+// challenge from the origin. Falling back to the renderer here would re-fetch the
+// same URL through the same saturated proxy and deepen the overload (issue #51 D2
+// self-harm), so the read must report the proxy's answer as-is.
+test('a read throttled by the local egress proxy is reported, never sent to the renderer', { timeout: 30000 }, async t => {
+  for (const [status, blocked_reason] of [[429, 'egress_proxy_rate_limited'], [403, 'egress_proxy_blocked']]) {
+    await t.test(`egress proxy HTTP ${status}`, async t => {
+      const gateway = await fixture(t);
+      gateway.setProxyConnect({ status, headers: { 'retry-after': '5' } });
+      const { result, payload } = await gateway.read('http://blocked.example.test/article', 'auto');
+      assert.equal(result.isError, true, JSON.stringify(result));
+      assert.equal(payload.error.kind, 'egress_proxy_status');
+      assert.equal(payload.http_status, status);
+      assert.equal(payload.blocked_reason, blocked_reason);
+      assert.equal(payload.retry_after, '5');
+      assert.equal(Object.hasOwn(payload, 'render_fallback'), false);
+      assert.equal(Object.hasOwn(payload, 'renderer'), false);
+      assert.equal(gateway.proxyConnects.length, 1, 'exactly one lightweight attempt');
+      assert.equal(gateway.crawlRequests.length, 0, 'the renderer must never re-fetch through a saturated proxy');
     });
   }
 });

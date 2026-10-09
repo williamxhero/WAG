@@ -13,6 +13,15 @@ from pydantic import BaseModel, Field
 TOKEN = os.environ["CRAWL4AI_TOKEN"]
 EGRESS_PROXY = os.environ.get("EGRESS_PROXY", "http://127.0.0.1:7895")
 MAX_CONCURRENCY = int(os.environ.get("CRAWL4AI_MAX_CONCURRENCY", "2"))
+# Every render goes out through the shared egress proxy, and a long-lived Chromium
+# context keeps its CONNECT socket pool open for minutes after a page finishes.
+# A burst of renders therefore accumulates idle tunnels until the shared egress
+# budget (EGRESS_MAX_CONNECTIONS) is exhausted, which then rejects the gateway's
+# lightweight reads too. Recycling the browser context every N pages drops that
+# pool and returns the budget to the whole gateway instead of holding it.
+MAX_PAGES_BEFORE_RECYCLE = int(os.environ.get("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE", "2"))
+if MAX_PAGES_BEFORE_RECYCLE < 0:
+    raise ValueError("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE must be a non-negative integer")
 DATA_DIR = os.environ["CRAWL4AI_DATA_DIR"]
 semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 crawler: AsyncWebCrawler | None = None
@@ -52,7 +61,7 @@ async def lifespan(_: FastAPI):
     crawler_lifecycle = "starting"
     instance = None
     try:
-        browser = BrowserConfig(headless=True, verbose=False, proxy_config={"server": EGRESS_PROXY}, extra_args=["--disable-quic", "--disable-features=ServiceWorker"])
+        browser = BrowserConfig(headless=True, verbose=False, proxy_config={"server": EGRESS_PROXY}, extra_args=["--disable-quic", "--disable-features=ServiceWorker"], max_pages_before_recycle=MAX_PAGES_BEFORE_RECYCLE)
         instance = AsyncWebCrawler(config=browser, base_directory=DATA_DIR, thread_safe=True)
         await instance.start()
         crawler = instance

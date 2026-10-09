@@ -405,3 +405,22 @@ sudo ss -ltnp '( sport = :8930 or sport = :8931 or sport = :11235 )'
 看板从每次报告读取并显示门限，不使用独立常量。历史结构化及旧格式报告的原有结论保留；缺少门限时按 suite 使用以上默认值，未知 suite 使用 smoke 默认值，标记 `thresholds_source: legacy_defaults`。这是兼容显示，不是重新认证历史报告。
 
 验收还应覆盖：MCP 鉴权、SearXNG 搜索、静态页面正文、JS 渲染、浏览器快照/点击、截图/PDF、两个并发任务、超时，以及私网 URL 拦截。评测结果页为 [http://yosef-server:8930/evals](http://yosef-server:8930/evals)，仅展示已完成的评测报告；报告保留 30 天，截图/PDF 保留 7 天。MCP、健康检查和通用产物接口仍要求 Token。
+
+### 搜索质量只读探针（固定候选，有界读取）
+
+`gateway/search-quality-probe.mjs` 是**只读**诊断，不是门禁：它不改变原生 `evidence-live-smoke.mjs` 判级，也不提高引擎相关性。搜索模式对固定查询保存完整 `temporal_evidence` / `published_on` / `engine` / 请求参数 / `trace_id` 并校验 UTF-8 `query` 回显。
+
+候选模式（SPEC #67）按**固定候选集**做**有界、串行**页面复核，产出分母恒为全部候选的完整质量报告，并逐候选记录 `read_status`（`unread`/`read_ok`/`read_failure`）、来源时间精度、窗内/窗外/未知与人工标签。**未读（预算外）候选记为 `unread`，绝不判为「页面无日期」**；读取失败与未知不从分母移除、不跳过凑成功。
+
+```bash
+# 需要 GATEWAY_TOKEN（>=32 字符）；候选模式示例（默认预算 0，不读取任何页面）
+GATEWAY_TOKEN=... \
+PROBE_CANDIDATES=gateway/fixtures/search-quality-candidates.json \
+PROBE_MAX_READS=6 \
+PROBE_READ_TIMEOUT_MS=20000 \
+PROBE_WINDOW_START=2026-10-08T08:00:00Z PROBE_WINDOW_END=2026-10-09T08:00:00Z \
+PROBE_OUTPUT=wag-search-quality-probe.json \
+node gateway/search-quality-probe.mjs
+```
+
+`PROBE_MAX_READS` 串行生效并有硬上限（`PROBE_READ_HARD_CAP=12`），误配不会触发批量抓取。固定候选与人工标签见 `gateway/fixtures/search-quality-candidates.json`；标签仅作离线判据，不作为在线自动相关性判断。缺凭据时脚本明确非零退出。

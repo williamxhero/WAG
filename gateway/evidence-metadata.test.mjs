@@ -1,15 +1,47 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { classifyLowQualityResult, extractPageEvidence, filterLowQualityResults, normalizeSearchResult, normalizeSearchResults, normalizeUrlForDedup, prependPublishedEvidence, publisherPublicationInstant, timeRangeCompliance } from './evidence-metadata.mjs';
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const fixturesDir = path.join(moduleDir, 'fixtures', 'page-evidence');
 const TODAY_HEADER = { date: 'Fri, 09 Oct 2026 00:00:00 GMT' };
 const RETRIEVED_AT = '2026-10-09T01:00:00.000Z';
-const fixture = name => fs.readFileSync(path.join(fixturesDir, name), 'utf8');
+
+// Fixed page HTML fixtures for SPEC issue #73. They are embedded rather than read from disk: the
+// offline release rehearsal (scripts/deploy.test.py) stages only this module and its test file into a
+// temp tree with `gateway/fixtures` excluded, so the suite must stay self-contained. Each value is the
+// raw HTML of one fixed page — a negative old article behind a today header, a today-header-only page
+// with no publisher date, body/JSON-LD positives, and date/conflict edge cases.
+const PAGE_FIXTURES = {
+  'old-article-today-header.html': `<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><title>Asia Daily: recirculated 2024 story on a today header</title>
+<meta property="og:site_name" content="Asia Daily">
+<meta property="article:published_time" content="2024-11-28T10:35:33+09:00">
+</head><body>
+<header><nav><span class="today">Today &middot; <time datetime="2026-10-09T00:00:00+00:00">2026-10-09</time></span></nav></header>
+<main>
+<article><h1>An old story that recirculated today</h1><p>Body text of a story first published in 2024 but surfaced again today.</p></article>
+<aside class="recommendations"><ul><li><time datetime="2026-10-09T08:15:00+00:00">08:15 today</time> Trending now</li></ul></aside>
+</main></body></html>`,
+  'today-header-only.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Company homepage</title><meta name="generator" content="cms"></head>
+<body><header><time datetime="2026-10-09T00:00:00+00:00">2026-10-09</time></header>
+<main><aside class="recommendations"><time datetime="2026-10-09T07:00:00+00:00">7:00</time></aside><p>This page declares no publication date anywhere.</p></main></body></html>`,
+  'body-time.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>正文时间正例</title></head>
+<body><article><h1>正文里带发布时间的新闻</h1>
+<p class="byline">记者 张三 <time itemprop="datePublished" datetime="2026-10-08T21:30:00+08:00">2026-10-08 21:30</time></p>
+<p>正文内容……</p></article></body></html>`,
+  'jsonld-newsarticle.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>JSON-LD dated story</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"JSON-LD dated story","datePublished":"2026-10-08T09:00:00Z","dateModified":"2026-10-08T10:00:00Z"}</script>
+</head><body><article><h1>JSON-LD dated story</h1><p>body</p></article></body></html>`,
+  'date-published-day.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>公告</title><meta name="datePublished" content="2026-09-28"><meta property="og:site_name" content="Example Gov"></head>
+<body><article><h1>公告</h1><p>发布日期只有日精度。</p></article></body></html>`,
+  'unknown-timezone.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Timezone-less publisher time</title><meta property="og:site_name" content="No TZ Times"><meta property="article:published_time" content="2026-10-08 21:30:00"></head>
+<body><article><h1>Timezone-less publisher time</h1><p>body</p></article></body></html>`,
+  'conflict-meta-jsonld.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Conflicting publication dates</title><meta property="article:published_time" content="2026-10-08T10:00:00+00:00">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","datePublished":"2024-11-28T10:35:33+09:00"}</script>
+</head><body><article><h1>Conflicting publication dates</h1><p>body</p></article></body></html>`,
+  'monthly-archive.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Monthly archive</title><meta name="datePublished" content="2026-10"></head>
+<body><article><h1>Monthly archive</h1><p>Month-precision declaration.</p></article></body></html>`,
+};
+const fixture = name => PAGE_FIXTURES[name];
 
 test('page evidence keeps publisher time separate from retrieval and response time', () => {
   const html = `<!doctype html><html><head>
@@ -339,7 +371,7 @@ test('a generic <time> outside an article is never promoted to a publication dat
 });
 
 test('publisher date extraction coverage over the fixed page fixture set (fixed denominator)', () => {
-  const names = fs.readdirSync(fixturesDir).filter(name => name.endsWith('.html')).sort();
+  const names = Object.keys(PAGE_FIXTURES).sort();
   const dated = [];
   const undated = [];
   for (const name of names) {

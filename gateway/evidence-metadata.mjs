@@ -18,12 +18,35 @@ function timestamp(value) {
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
 }
 
-function temporalValue(value) {
+// A civil (calendar) date, optionally month-only, valid in the proleptic Gregorian calendar.
+function civilDate(value) {
+  const match = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(value);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, day == null ? 1 : Number(day)));
+  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1) return null;
+  if (day != null && date.getUTCDate() !== Number(day)) return null;
+  return value;
+}
+
+// A declared publisher time. `precision` is the granularity the publisher gave: `instant` (a
+// timezone-bearing moment, carried in `value`), `day`, `month`, or `unknown-timezone` (a
+// time-of-day with no offset — the civil date is real but the exact UTC moment is not, so `value`
+// stays null and it can never be promoted to a verified instant). Month support and unanchored
+// support are opt-in so the search-result path keeps its previous behaviour.
+function temporalValue(value, options = {}) {
   const raw = text(value);
   if (!raw) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { value: null, on: raw, precision: 'day' };
+  if (options.month && /^\d{4}-\d{2}$/.test(raw) && civilDate(raw)) return { value: null, on: raw, precision: 'month' };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && civilDate(raw)) return { value: null, on: raw, precision: 'day' };
   const normalized = timestamp(raw);
-  return normalized ? { value: normalized, on: normalized.slice(0, 10), precision: 'instant' } : null;
+  if (normalized) return { value: normalized, on: normalized.slice(0, 10), precision: 'instant' };
+  if (options.unanchored) {
+    const match = /^(\d{4}-\d{2}-\d{2})[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.exec(raw);
+    const on = match && civilDate(match[1]);
+    if (on) return { value: null, on, precision: 'unknown-timezone' };
+  }
+  return null;
 }
 
 function parseHttpUrl(value, base) {
@@ -80,38 +103,98 @@ function authorName(value) {
   return value && typeof value === 'object' ? text(value.name) : '';
 }
 
-function declaredDate(document, jsonLd, kind) {
-  const selectors = kind === 'published_at' ? [
-    ['meta[property="article:published_time"]'],
-    ['meta[property="og:published_time"]'],
-    ['meta[name="datePublished"]'],
-    ['meta[itemprop="datePublished"]'],
-    ['meta[name="publishdate"]'],
-    ['meta[name="pubdate"]'],
-    ['article time[datetime]', 'datetime'],
-  ] : [
-    ['meta[property="article:modified_time"]'],
-    ['meta[property="og:updated_time"]'],
-    ['meta[name="dateModified"]'],
-    ['meta[itemprop="dateModified"]'],
-  ];
-  const meta = firstMeta(document, selectors);
-  const normalized = temporalValue(meta?.value);
-  if (normalized) return { ...normalized, source: `html.${meta.selector}` };
-  const property = kind === 'published_at' ? 'datePublished' : 'dateModified';
-  for (let index = 0; index < jsonLd.length; index++) {
-    const normalizedJson = temporalValue(jsonLd[index]?.[property]);
-    if (normalizedJson) return { ...normalizedJson, source: `html.jsonld[${index}].${property}` };
+// Ordered by trust: a publisher's own article meta / JSON-LD / article time first. A bare `<time>`
+// is only read when it sits inside an <article> or carries an explicit date hook, so page-header and
+// recommendation clocks are never mistaken for a publication date. The search-result path is
+// unaffected because it calls temporalValue without these options.
+const PAGE_TEMPORAL_OPTIONS = { month: true, unanchored: true };
+
+const PUBLISHED_AT_SELECTORS = [
+  ['meta[property="article:published_time" i]'],
+  ['meta[property="og:published_time" i]'],
+  ['meta[property="og:article:published_time" i]'],
+  ['meta[property="article:published" i]'],
+  ['meta[property="rnews:datePublished" i]'],
+  ['meta[name="datePublished" i]'],
+  ['meta[itemprop="datePublished" i]'],
+  ['meta[name="publishdate" i]'],
+  ['meta[name="publish_date" i]'],
+  ['meta[name="pubdate" i]'],
+  ['meta[name="pub_date" i]'],
+  ['meta[name="parsely-pub-date" i]'],
+  ['meta[name="sailthru.date" i]'],
+  ['meta[name="DC.date" i]'],
+  ['meta[name="dc.date" i]'],
+  ['meta[name="dc.date.issued" i]'],
+  ['meta[name="dcterms.date" i]'],
+  ['meta[name="article.published" i]'],
+  ['meta[property="bt:pubdate" i]'],
+  ['time[itemprop="datePublished" i]', 'datetime'],
+  ['time[pubdate]', 'datetime'],
+  ['article time[datetime]', 'datetime'],
+];
+const MODIFIED_AT_SELECTORS = [
+  ['meta[property="article:modified_time" i]'],
+  ['meta[property="og:updated_time" i]'],
+  ['meta[property="article:modified" i]'],
+  ['meta[name="dateModified" i]'],
+  ['meta[itemprop="dateModified" i]'],
+  ['meta[name="lastmod" i]'],
+  ['time[itemprop="dateModified" i]', 'datetime'],
+];
+// dateCreated / uploadDate are fallbacks, only consulted when datePublished is absent.
+const PUBLISHED_AT_JSONLD = ['datePublished', 'dateCreated', 'uploadDate'];
+const MODIFIED_AT_JSONLD = ['dateModified'];
+
+// Every publisher-declared date for one kind, in trust order. Keeping the whole list (instead of only
+// the first hit) lets the caller record conflicting declarations and lets a lower-priority source win
+// when a higher-priority element is present but unparseable.
+function declaredCandidates(document, jsonLd, kind) {
+  const published = kind === 'published_at';
+  const selectors = published ? PUBLISHED_AT_SELECTORS : MODIFIED_AT_SELECTORS;
+  const properties = published ? PUBLISHED_AT_JSONLD : MODIFIED_AT_JSONLD;
+  const candidates = [];
+  for (const [selector, attribute = 'content'] of selectors) {
+    const value = text(document.querySelector(selector)?.getAttribute(attribute));
+    if (!value) continue;
+    const normalized = temporalValue(value, PAGE_TEMPORAL_OPTIONS);
+    // The provenance label keeps the plain selector text (the `i` case-insensitive flag is dropped)
+    // so evidence sources stay stable across builds.
+    if (normalized) candidates.push({ ...normalized, source: `html.${selector.replace(/ i\]$/, ']')}` });
   }
-  return null;
+  for (let index = 0; index < jsonLd.length; index++) {
+    for (const property of properties) {
+      const normalized = temporalValue(jsonLd[index]?.[property], PAGE_TEMPORAL_OPTIONS);
+      if (normalized) { candidates.push({ ...normalized, source: `html.jsonld[${index}].${property}` }); break; }
+    }
+  }
+  return candidates;
+}
+
+// Distinct dates other than the primary one that the page also declares. They are surfaced as
+// evidence, never merged into the primary date and never silently discarded.
+function declaredConflicts(candidates) {
+  const primary = candidates[0] ?? null;
+  const primaryKey = primary ? primary.value ?? primary.on : null;
+  const conflicts = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const key = candidate.value ?? candidate.on;
+    if (key === primaryKey || seen.has(key)) continue;
+    seen.add(key);
+    conflicts.push({ kind: 'published_at', value: candidate.value ?? null, on: candidate.on, precision: candidate.precision, source: candidate.source });
+  }
+  return conflicts;
 }
 
 export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = new Date().toISOString()) {
   const dom = new JSDOM(html, { url: finalUrl });
   const document = dom.window.document;
   const jsonLd = jsonLdValues(document);
-  const published = declaredDate(document, jsonLd, 'published_at');
-  const declaredModified = declaredDate(document, jsonLd, 'modified_at');
+  const publishedCandidates = declaredCandidates(document, jsonLd, 'published_at');
+  const published = publishedCandidates[0] ?? null;
+  const conflicts = declaredConflicts(publishedCandidates);
+  const declaredModified = declaredCandidates(document, jsonLd, 'modified_at')[0] ?? null;
   const headerModified = timestamp(headers['last-modified']);
   const modified = declaredModified ?? (headerModified ? { value: headerModified, source: 'http.header.last-modified' } : null);
   const responseDate = timestamp(headers.date);
@@ -121,7 +204,7 @@ export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = 
   const authorMeta = firstMeta(document, [['meta[name="author"]'], ['meta[property="article:author"]']]);
   const jsonAuthor = jsonLd.map(value => authorName(value.author)).find(Boolean) ?? '';
   const temporalEvidence = [];
-  if (published) temporalEvidence.push({ kind: 'published_at', value: published.value, on: published.on, precision: published.precision, source: published.source });
+  if (published) temporalEvidence.push({ kind: 'published_at', value: published.value, on: published.on, precision: published.precision, source: published.source, ...(conflicts.length ? { conflict: true } : {}) });
   if (modified) temporalEvidence.push({ kind: 'modified_at', ...modified });
   if (responseDate) temporalEvidence.push({ kind: 'response_date', value: responseDate, source: 'http.header.date' });
   temporalEvidence.push({ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' });
@@ -130,6 +213,8 @@ export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = 
     published_on: published?.on ?? null,
     precision: published?.precision ?? null,
     modified_at: modified?.value ?? null,
+    // Other dates the page declares besides the primary one. Recorded, never silently overwritten.
+    conflicts,
     retrieved_at: retrievedAt,
     source: {
       url: finalUrl,

@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
-import { classifyLowQualityResult, extractPageEvidence, filterLowQualityResults, normalizeSearchResult, normalizeSearchResults, normalizeUrlForDedup, prependPublishedEvidence, timeRangeCompliance } from './evidence-metadata.mjs';
+import { fileURLToPath } from 'node:url';
+import { classifyLowQualityResult, extractPageEvidence, filterLowQualityResults, normalizeSearchResult, normalizeSearchResults, normalizeUrlForDedup, prependPublishedEvidence, publisherPublicationInstant, timeRangeCompliance } from './evidence-metadata.mjs';
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const fixturesDir = path.join(moduleDir, 'fixtures', 'page-evidence');
+const TODAY_HEADER = { date: 'Fri, 09 Oct 2026 00:00:00 GMT' };
+const RETRIEVED_AT = '2026-10-09T01:00:00.000Z';
+const fixture = name => fs.readFileSync(path.join(fixturesDir, name), 'utf8');
 
 test('page evidence keeps publisher time separate from retrieval and response time', () => {
   const html = `<!doctype html><html><head>
@@ -218,4 +227,131 @@ test('time range compliance distinguishes within, outside, and unverified eviden
   assert.equal(month.precision, 'month');
   assert.equal(timeRangeCompliance(month, 'day', retrievedAt), 'unverified');
   assert.equal(timeRangeCompliance(month, 'year', retrievedAt), 'within');
+});
+
+// --- SPEC issue #73: publisher date extraction on fixed page HTML fixtures ---------------------------------
+
+test('fixed page fixtures: a publisher date wins over the page-header today and recommendation times', () => {
+  const evidence = extractPageEvidence(
+    fixture('old-article-today-header.html'),
+    'https://www.ajudaily.com/view/20241128080617057',
+    TODAY_HEADER,
+    RETRIEVED_AT,
+  );
+  assert.equal(evidence.published_at, '2024-11-28T01:35:33.000Z');
+  assert.equal(evidence.published_on, '2024-11-28');
+  assert.equal(evidence.precision, 'instant');
+  assert.equal(evidence.temporal_evidence.find(item => item.kind === 'published_at').source,
+    'html.meta[property="article:published_time"]');
+  // The page-header "today" clock and the HTTP Date header stay out of the publication date.
+  assert.notEqual(evidence.published_at.slice(0, 10), '2026-10-09');
+});
+
+test('fixed page fixtures: no publisher date means no publication date, even with a today header', () => {
+  const evidence = extractPageEvidence(fixture('today-header-only.html'), 'https://pcgpower.com/', TODAY_HEADER, RETRIEVED_AT);
+  assert.equal(evidence.published_at, null);
+  assert.equal(evidence.published_on, null);
+  assert.equal(evidence.precision, null);
+  assert.equal(evidence.temporal_evidence.some(item => item.kind === 'published_at'), false);
+  assert.ok(evidence.temporal_evidence.some(item => item.kind === 'response_date'));
+  assert.equal(prependPublishedEvidence('Company homepage', evidence), 'Company homepage');
+});
+
+test('fixed page fixtures: article time and JSON-LD datePublished are extracted', () => {
+  const body = extractPageEvidence(fixture('body-time.html'), 'https://example.org/news/body', {}, RETRIEVED_AT);
+  assert.equal(body.published_at, '2026-10-08T13:30:00.000Z');
+  assert.equal(body.precision, 'instant');
+  assert.match(body.temporal_evidence.find(item => item.kind === 'published_at').source, /time\[/);
+
+  const jsonld = extractPageEvidence(fixture('jsonld-newsarticle.html'), 'https://example.org/news/jsonld', {}, RETRIEVED_AT);
+  assert.equal(jsonld.published_at, '2026-10-08T09:00:00.000Z');
+  assert.equal(jsonld.temporal_evidence.find(item => item.kind === 'published_at').source, 'html.jsonld[0].datePublished');
+  assert.equal(jsonld.temporal_evidence.find(item => item.kind === 'modified_at').value, '2026-10-08T10:00:00.000Z');
+});
+
+test('fixed page fixtures: day and month precision are preserved without faking a UTC instant', () => {
+  const day = extractPageEvidence(fixture('date-published-day.html'), 'https://example.gov.cn/notice', {}, RETRIEVED_AT);
+  assert.equal(day.published_at, null);
+  assert.equal(day.published_on, '2026-09-28');
+  assert.equal(day.precision, 'day');
+
+  const month = extractPageEvidence(fixture('monthly-archive.html'), 'https://example.org/archive/2026/10', {}, RETRIEVED_AT);
+  assert.equal(month.published_at, null);
+  assert.equal(month.published_on, '2026-10');
+  assert.equal(month.precision, 'month');
+});
+
+test('fixed page fixtures: a timezone-less publisher time keeps its civil date but never a UTC instant', () => {
+  const evidence = extractPageEvidence(fixture('unknown-timezone.html'), 'https://example.org/no-tz', {}, RETRIEVED_AT);
+  assert.equal(evidence.published_at, null);
+  assert.equal(evidence.published_on, '2026-10-08');
+  assert.equal(evidence.precision, 'unknown-timezone');
+  const record = evidence.temporal_evidence.find(item => item.kind === 'published_at');
+  assert.equal(record.value, null);
+  assert.equal(record.on, '2026-10-08');
+  // Downstream strict freshness must never promote an unanchored time to a verified instant.
+  assert.equal(publisherPublicationInstant(evidence), null);
+});
+
+test('fixed page fixtures: conflicting publisher dates are recorded, not silently overwritten', () => {
+  const evidence = extractPageEvidence(fixture('conflict-meta-jsonld.html'), 'https://example.org/conflict', {}, RETRIEVED_AT);
+  assert.equal(evidence.published_at, '2026-10-08T10:00:00.000Z');
+  const primary = evidence.temporal_evidence.find(item => item.kind === 'published_at');
+  assert.equal(primary.source, 'html.meta[property="article:published_time"]');
+  assert.equal(primary.conflict, true);
+  assert.equal(evidence.conflicts.length, 1);
+  assert.equal(evidence.conflicts[0].value, '2024-11-28T01:35:33.000Z');
+  assert.equal(evidence.conflicts[0].source, 'html.jsonld[0].datePublished');
+});
+
+test('additional publisher meta selectors and JSON-LD fallbacks are extracted', () => {
+  const cases = [
+    ['<meta property="og:article:published_time" content="2026-10-08T09:00:00Z">', 'html.meta[property="og:article:published_time"]'],
+    ['<meta name="parsely-pub-date" content="2026-10-08T09:00:00Z">', 'html.meta[name="parsely-pub-date"]'],
+    ['<meta name="DC.date" content="2026-10-08T09:00:00Z">', 'html.meta[name="DC.date"]'],
+    ['<meta name="sailthru.date" content="2026-10-08T09:00:00Z">', 'html.meta[name="sailthru.date"]'],
+  ];
+  for (const [meta, source] of cases) {
+    const evidence = extractPageEvidence(`<html><head>${meta}</head><body><article>body</article></body></html>`, 'https://example.org/a', {}, RETRIEVED_AT);
+    assert.equal(evidence.published_at, '2026-10-08T09:00:00.000Z', meta);
+    assert.equal(evidence.temporal_evidence.find(item => item.kind === 'published_at').source, source, meta);
+  }
+  const created = extractPageEvidence('<html><head><script type="application/ld+json">{"@type":"Article","dateCreated":"2026-10-08T09:00:00Z"}</script></head><body><article>b</article></body></html>', 'https://example.org/b', {}, RETRIEVED_AT);
+  assert.equal(created.published_at, '2026-10-08T09:00:00.000Z');
+  assert.equal(created.temporal_evidence.find(item => item.kind === 'published_at').source, 'html.jsonld[0].dateCreated');
+});
+
+test('publisher date meta is matched case-insensitively on the attribute value', () => {
+  const upper = extractPageEvidence('<html><head><meta name="PUBDATE" content="2026-10-08T09:00:00Z"></head><body><article>b</article></body></html>', 'https://example.org/u', {}, RETRIEVED_AT);
+  assert.equal(upper.published_at, '2026-10-08T09:00:00.000Z');
+  assert.equal(upper.temporal_evidence.find(item => item.kind === 'published_at').source, 'html.meta[name="pubdate"]');
+
+  const mixed = extractPageEvidence('<html><head><meta property="Article:Published_Time" content="2026-10-08T09:00:00Z"></head><body><article>b</article></body></html>', 'https://example.org/m', {}, RETRIEVED_AT);
+  assert.equal(mixed.published_at, '2026-10-08T09:00:00.000Z');
+  assert.equal(mixed.temporal_evidence.find(item => item.kind === 'published_at').source, 'html.meta[property="article:published_time"]');
+});
+
+test('a generic <time> outside an article is never promoted to a publication date', () => {
+  const html = '<html><body><div class="recommendations"><time datetime="2026-10-09T08:00:00Z">8:00</time></div><p>no article here</p></body></html>';
+  const evidence = extractPageEvidence(html, 'https://example.org/recs', {}, RETRIEVED_AT);
+  assert.equal(evidence.published_at, null);
+  assert.equal(evidence.temporal_evidence.some(item => item.kind === 'published_at'), false);
+});
+
+test('publisher date extraction coverage over the fixed page fixture set (fixed denominator)', () => {
+  const names = fs.readdirSync(fixturesDir).filter(name => name.endsWith('.html')).sort();
+  const dated = [];
+  const undated = [];
+  for (const name of names) {
+    const evidence = extractPageEvidence(fixture(name), `https://example.org/${name}`, TODAY_HEADER, RETRIEVED_AT);
+    (evidence.published_at || evidence.published_on ? dated : undated).push(name);
+  }
+  // The denominator is every fixture page; nothing is dropped to make a count look complete.
+  assert.equal(names.length, 8);
+  // The only page without a publisher date is the one that declares none; a today header is not a date.
+  assert.deepEqual(undated, ['today-header-only.html']);
+  assert.equal(dated.length, 7);
+  // The two pages the pre-#73 extractor dropped (timezone-less / month-only) now yield a date.
+  assert.ok(dated.includes('unknown-timezone.html'));
+  assert.ok(dated.includes('monthly-archive.html'));
 });

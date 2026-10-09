@@ -33,13 +33,18 @@
 
 响应级新增（仅新闻模式）：`news_mode: true`、`news_ranking`（`total/moved/demoted/promoted/reasons` 计数）、`dedup`（`raw_results/unique_urls/merged/multi_source/sources`）。**去重保留多来源证据**：同一规范化 URL 由多个引擎返回时，合并后仍记录 `sources: [{url, engines:[…]}]`，不静默丢弃。
 
-> 接口说明：`news_mode`/`news_ranking`/`dedup` 为响应级键，`server.mjs` 的 `web_search` 分支目前未转发它们（外层 schema 为 `passthrough`）。按 SPEC “必要接口由协调集成”，`server.mjs` 白名单接线留给协调者；本卡不改 `server.mjs`。
+> 接口说明（已接线）：`news_mode`/`news_ranking`/`dedup` 为响应级键。`server.mjs` 的 `web_search`
+> 分支现已完成 SPEC 要求的 MCP 接口接线——输入位 `news_mode: z.boolean().optional()`（显式覆盖，
+> 否则按 `categories` 含 `news` 自动 opt-in），按白名单只把该控制量作为 `newsMode` 选项传给
+> `searchSearxng`（不透传原始 input 到查询串），并把搜索结果层新增字段按存在性转发到最终响应；
+> 普通检索不新增这三个键。见 `gateway/server-search.test.mjs`。
 
 ## 测试
 
 - 测试先行：先写 `search-news-mode.test.mjs`（红：缺导出），再实现（绿）。
 - 覆盖：受控正负例（导航根/空摘要/跳转包装/导航占位/日期/查询命中）、中文分词、无日期、规范 URL 去重与多来源证据、`category`/`engine`/`source` schema 回归、稳定排序不增删结果、普通模式兼容（无 `news_mode`、顺序不变）。
 - 配对真实样本：`fixtures/news-mode-samples.json`（生产 SearXNG **只读** JSON API 采样的固定真实结果 + 人工离线标签），比较前后 Precision@5、重复比例、召回、排序耗时。
+- MCP 边界回归：`server-search.test.mjs`（离线固定 SearXNG 应答，spawn 真实网关 → MCP `web_search`）验证 news 分类自动 opt-in、显式 `news_mode` 开关、普通检索无新增键、`category/engine/source` 保真、响应同时经 `structuredContent` 与 text 通道转发 `news_mode/news_ranking/dedup`。红→绿已验证（移除 `server.mjs` 接线则该文件失败）。
 
 ## 实测配对结果（真实样本）
 

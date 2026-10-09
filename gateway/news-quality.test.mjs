@@ -135,3 +135,61 @@ test('an empty candidate set never passes by default', () => {
   assert.equal(result.gate.passed, false);
   assert.match(result.gate.reasons.join(' '), /no candidates/);
 });
+
+test('report exposes read_ok and the publisher time precision proven by successful reads', () => {
+  const result = report();
+  assert.equal(result.read_ok, 6);
+  assert.deepEqual(result.time_precision, { instant: 2, day: 1, month: 0, none: 3 });
+  assert.equal(result.unread, 0);
+});
+
+test('a candidate with no read record is unread, never judged to be a date-less page', () => {
+  const candidates = [
+    { url: 'https://a.example/x', label: 'relevant' },
+    { url: 'https://b.example/y', label: 'relevant' },
+  ];
+  const result = evaluateNewsQuality({
+    window: WINDOW,
+    candidates,
+    // Only the first candidate was read; the second is left out of a bounded read budget.
+    reads: { 'https://a.example/x': read({ published_at: null, published_on: null, temporal_evidence: [] }) },
+  });
+  const byUrl = Object.fromEntries(result.entries.map(entry => [entry.url, entry]));
+  assert.equal(byUrl['https://a.example/x'].category, 'unknown');
+  assert.equal(byUrl['https://a.example/x'].read_status, 'ok');
+  assert.equal(byUrl['https://b.example/y'].category, 'unread');
+  assert.equal(byUrl['https://b.example/y'].read_status, 'unread');
+  assert.equal(byUrl['https://b.example/y'].time_status, 'unverified');
+  assert.match(byUrl['https://b.example/y'].error, /not read/);
+  assert.equal(result.unread, 1);
+  assert.equal(result.denominator, 2);
+  // The denominator still accounts for every candidate, unread included.
+  assert.equal(result.both_satisfied + result.irrelevant + result.stale + result.unknown + result.read_failure + result.unread, result.denominator);
+  assert.ok(result.failures.some(item => item.url === 'https://b.example/y' && item.category === 'unread'));
+});
+
+test('an attempted-but-failed read stays read_failure, distinct from unread', () => {
+  const result = evaluateNewsQuality({
+    window: WINDOW,
+    candidates: [{ url: 'https://c.example/z', label: 'relevant' }],
+    reads: { 'https://c.example/z': { ok: false, error: 'connection reset' } },
+  });
+  assert.equal(result.entries[0].read_status, 'failed');
+  assert.equal(result.entries[0].category, 'read_failure');
+  assert.equal(result.entries[0].error, 'connection reset');
+  assert.equal(result.unread, 0);
+});
+
+test('unread candidates can be gated explicitly without changing the default', () => {
+  const candidates = [
+    { url: 'https://a.example/x', label: 'relevant' },
+    { url: 'https://b.example/y', label: 'relevant' },
+  ];
+  const reads = { 'https://a.example/x': read({ published_at: '2026-10-08T12:00:00.000Z', temporal_evidence: [{ kind: 'published_at', value: '2026-10-08T12:00:00.000Z', source: 'html.meta[x]' }] }) };
+  // Default tolerates unread (listed, not hidden).
+  assert.equal(evaluateNewsQuality({ window: WINDOW, candidates, reads }).gate.passed, true);
+  // An explicit allowance of 0 makes the run fail honestly.
+  const strict = evaluateNewsQuality({ window: WINDOW, candidates, reads, require: { maxReadFailure: 0, maxUnread: 0, minBothSatisfied: 1 } });
+  assert.equal(strict.gate.passed, false);
+  assert.match(strict.gate.reasons.join(' '), /not read/);
+});

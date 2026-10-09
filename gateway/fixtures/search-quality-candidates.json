@@ -1,0 +1,43 @@
+{
+  "note": "Fixed candidate set for the bounded search-quality verification probe (SPEC issue #67). Labels are manual offline annotations; they are never treated as an online automatic relevance judgment. The denominator is always every candidate below. The recent-source sample was read for real: its publisher instant comes from article:published_time / JSON-LD datePublished and is not fabricated.",
+  "query": "全球 市场 最新 新闻",
+  "language": "zh-CN",
+  "time_range": "day",
+  "candidates": [
+    {
+      "url": "https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending",
+      "label": "relevant",
+      "note": "legitimate recent source sample: real read confirmed datePublished 2026-10-09T00:20:50.000Z (timezone-bearing, inside the day window)"
+    },
+    {
+      "url": "https://www.ajudaily.com/view/20241128080617057",
+      "label": "relevant",
+      "note": "old-article time negative: article:published_time 2024-11-28T10:35:33+09:00 (outside a day window)"
+    },
+    {
+      "url": "https://www.pingwest.com/a/255024",
+      "label": "relevant",
+      "note": "old-article negative: body shows 2021-12-14, no reliable published meta (date-only / unknown)"
+    },
+    {
+      "url": "https://docs.searxng.org/",
+      "label": "relevant",
+      "note": "English relevance positive; no publication time"
+    },
+    {
+      "url": "https://pcgpower.com/",
+      "label": "negative",
+      "note": "company homepage, global-news negative"
+    },
+    {
+      "url": "https://www.ft.com/",
+      "label": "relevant",
+      "note": "anti-bot / blocked candidate (HTTP 403); used to exercise read_failure without any bypass"
+    },
+    {
+      "url": "http://map.baidu.com/",
+      "label": "negative",
+      "note": "map entry, global-news negative; first candidate dropped by a bounded PROBE_MAX_READS budget"
+    }
+  ]
+}

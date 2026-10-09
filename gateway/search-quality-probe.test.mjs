@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildSearchEvidenceRecord, checkUtf8Echo, summarizeProbe } from './search-quality-probe.mjs';
+import { buildCandidateReadRecord, buildSearchEvidenceRecord, checkUtf8Echo, PROBE_READ_HARD_CAP, selectCandidateReads, summarizeProbe } from './search-quality-probe.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,5 +83,70 @@ test('the probe refuses to run without a gateway token', async () => {
   child.stderr.on('data', chunk => { stderr += chunk; });
   const code = await new Promise(resolve => child.once('exit', resolve));
   assert.notEqual(code, 0, 'the probe must exit non-zero without a token');
+  assert.match(stderr, /GATEWAY_TOKEN is required/);
+});
+
+test('selectCandidateReads bounds the budget, dedupes and keeps the full denominator', () => {
+  const candidates = [
+    { url: 'https://a/', label: 'relevant' },
+    { url: 'https://b/', label: 'relevant' },
+    { url: 'https://c/', label: 'negative' },
+    { url: 'ftp://d/', label: 'relevant' },
+    { url: 'https://a/', label: 'relevant' },
+  ];
+  const { budget, planned, toRead, unread } = selectCandidateReads(candidates, 2);
+  assert.equal(budget, 2);
+  assert.equal(planned, 2);
+  assert.deepEqual(toRead.map(c => c.url), ['https://a/', 'https://b/']);
+  assert.deepEqual(unread.map(c => c.url), ['https://c/', 'ftp://d/', 'https://a/']);
+});
+
+test('selectCandidateReads never exceeds the hard cap and reads nothing at a zero budget', () => {
+  const many = Array.from({ length: 30 }, (_, index) => ({ url: `https://host/${index}`, label: 'relevant' }));
+  assert.equal(selectCandidateReads(many, 999).planned, PROBE_READ_HARD_CAP);
+  const none = selectCandidateReads(many, 0);
+  assert.equal(none.planned, 0);
+  assert.equal(none.unread.length, many.length);
+});
+
+test('buildCandidateReadRecord preserves the complete raw payload and never promotes a failure', () => {
+  const response = {
+    trace_id: 'trace-read',
+    url: 'https://a/',
+    published_at: '2026-10-08T00:00:00.000Z',
+    published_on: '2026-10-08',
+    precision: 'instant',
+    retrieved_at: '2026-10-09T00:00:00.000Z',
+    temporal_evidence: [{ kind: 'published_at', value: '2026-10-08T00:00:00.000Z', source: 'html.meta[x]' }],
+    markdown: 'article body',
+  };
+  const ok = buildCandidateReadRecord({ candidate: { url: 'https://a/', label: 'relevant' }, url: 'https://a/', response });
+  assert.equal(ok.read_status, 'read_ok');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.precision, 'instant');
+  assert.equal(ok.raw.markdown, 'article body', 'the full raw MCP payload must be preserved');
+  const failed = buildCandidateReadRecord({ candidate: { url: 'https://b/' }, url: 'https://b/', error: new Error('web_read timed out after 20000ms') });
+  assert.equal(failed.read_status, 'read_failure');
+  assert.equal(failed.ok, false);
+  assert.match(failed.error, /timed out/);
+  assert.equal(failed.raw, undefined);
+});
+
+test('the shipped candidate fixture parses and pins a labelled recent source sample', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(moduleDir, 'fixtures', 'search-quality-candidates.json'), 'utf8'));
+  assert.ok(Array.isArray(fixture.candidates) && fixture.candidates.length >= 5);
+  assert.ok(fixture.candidates.every(c => /^https?:\/\//.test(c.url) && ['relevant', 'negative'].includes(c.label)));
+  assert.ok(fixture.candidates.some(c => c.url.includes('theguardian.com') && /recent source sample/i.test(c.note)));
+});
+
+test('the probe still refuses to run without a token even in candidate mode', async () => {
+  const child = spawn(process.execPath, [path.join(moduleDir, 'search-quality-probe.mjs')], {
+    env: { ...process.env, GATEWAY_TOKEN: '', PROBE_CANDIDATES: path.join(moduleDir, 'fixtures', 'search-quality-candidates.json') },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  const code = await new Promise(resolve => child.once('exit', resolve));
+  assert.notEqual(code, 0);
   assert.match(stderr, /GATEWAY_TOKEN is required/);
 });

@@ -1,6 +1,12 @@
 import { filterLowQualityResults, normalizeSearchResults, normalizeUrlForDedup, strictTimeRangeCompliance, timeRangeCompliance } from './evidence-metadata.mjs';
+import { applyEnginePool, createEngineHealth, enginePoolConfig, failureClasses } from './engine-health.mjs';
 
 const searchParameters = ['categories', 'engines', 'language'];
+
+// Engine-supply governance state (SPEC #74). The pool configuration is re-read from the environment on
+// every search (cheap, and operator-friendly), while the cooldown state is a single bounded in-memory
+// instance shared across requests — a process restart forgets it, which is intended.
+const defaultEngineHealth = createEngineHealth();
 
 export function buildSearchParams(input, { relaxed = false } = {}) {
   const params = new URLSearchParams({ q: input.query, format: 'json' });
@@ -45,6 +51,15 @@ const NEWS_CATEGORY = /(?:^|[\s,])(?:news)(?:$|[\s,])/i;
 // Auto opt-in: a caller that already asked SearXNG for the `news` category gets the news ranking.
 export function isNewsCategory(categories) {
   return typeof categories === 'string' && NEWS_CATEGORY.test(categories);
+}
+
+// Engine-pool layer for a request (SPEC #74 §2.1). A pinned `time_range` needs the strict layer, whose
+// engines are the only ones that honour a window; otherwise a `news` category uses the news layer, and
+// everything else the general layer. The layer only *takes effect* when its pool is configured.
+export function selectEngineLayer(input = {}) {
+  if (input.time_range) return 'strict';
+  if (isNewsCategory(input.categories)) return 'news';
+  return 'general';
 }
 
 // Query tokens without a tokenizer: latin/number runs are kept whole, and each CJK run is expanded
@@ -178,10 +193,21 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
   return response.json();
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now } = {}) {
   const stages_ms = {};
+  // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
+  // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
+  // and the outgoing query stays byte-for-byte the caller's own request.
+  const pools = enginePools ?? enginePoolConfig().pools;
+  // An explicit caller `engines` list is authoritative; a configured pool never overrides it.
+  const poolSelection = input.engines
+    ? null
+    : applyEnginePool({ layer: selectEngineLayer(input), pools, health: engineHealth, now });
+  const effectiveInput = poolSelection && poolSelection.engines.length
+    ? { ...input, engines: poolSelection.engines.join(',') }
+    : input;
   const firstStarted = Date.now();
-  const firstBody = await requestSearch({ baseUrl, input, fetchImpl, signal, relaxed: false });
+  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, relaxed: false });
   stages_ms.search_ms = Date.now() - firstStarted;
 
   const strictWindow = Boolean(timeWindowStrict);
@@ -196,7 +222,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     const retryStarted = Date.now();
     body = await requestSearch({
       baseUrl,
-      input: { ...input, time_range: undefined },
+      input: { ...effectiveInput, time_range: undefined },
       fetchImpl,
       signal,
       relaxed: true,
@@ -246,6 +272,30 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const newsEnabled = newsMode === undefined ? isNewsCategory(input.categories) : Boolean(newsMode);
   const ranked = newsEnabled ? rankNewsResults(results, input.query) : null;
 
+  // Feed the selected response back into the bounded local health state: engines that answered clear
+  // their cooldown, engines reported unresponsive get one (only for the locally-cooled classes).
+  for (const item of Array.isArray(body.unresponsive_engines) ? body.unresponsive_engines : []) {
+    if (Array.isArray(item) && item[0]) engineHealth.recordFailure(item[0], item[1], now());
+  }
+  for (const result of Array.isArray(body.results) ? body.results : []) {
+    if (result?.engine) engineHealth.recordSuccess(result.engine);
+  }
+
+  // Supply diagnostics are additive only: `engine_pool` appears when a configured layer actually
+  // shaped the query, `failure_classes` whenever the backend reported engine failures, and
+  // `cooldown_engines` alongside a shaped query so the cooldown is explainable. A plain search with no
+  // pool configured and no failures grows no new key.
+  const enginePoolField = poolSelection
+    ? {
+        layer: poolSelection.layer,
+        engines: poolSelection.engines,
+        source: poolSelection.source,
+        ...(poolSelection.rejected.length ? { rejected: poolSelection.rejected } : {}),
+        ...(poolSelection.cooling.length ? { cooling: poolSelection.cooling } : {}),
+      }
+    : null;
+  const cooldownSnapshot = enginePoolField ? engineHealth.snapshot(now()) : null;
+
   return {
     results: ranked ?? results,
     number_of_results: body.number_of_results ?? results.length,
@@ -254,6 +304,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     filtered_out: filtered.length,
     filtered_reasons: countReasons(filtered),
     ...temporalFields,
+    ...(enginePoolField ? { engine_pool: enginePoolField } : {}),
     ...(newsEnabled
       ? {
           news_mode: true,
@@ -262,7 +313,10 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
         }
       : {}),
     ...(Object.prototype.hasOwnProperty.call(body, 'unresponsive_engines')
-      ? { unresponsive_engines: body.unresponsive_engines }
+      ? { unresponsive_engines: body.unresponsive_engines, failure_classes: failureClasses(body.unresponsive_engines) }
+      : {}),
+    ...(cooldownSnapshot && cooldownSnapshot.cooldown_engines.length
+      ? { cooldown_engines: cooldownSnapshot.cooldown_engines }
       : {}),
   };
 }

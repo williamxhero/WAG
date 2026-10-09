@@ -19,6 +19,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import * as z from 'zod/v4';
 import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
+import { enginePoolConfig, validateStrictPool } from './engine-health.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
 import { createReadiness, DEFAULT_PROBE_TIMEOUT_MS } from './readiness.mjs';
 import { isPublicAddress as classifyPublicAddress } from '../proxy/public-address.mjs';
@@ -688,7 +689,7 @@ async function browserAction(session, action) {
 const temporalEvidenceSchema = z.object({ kind: z.string(), value: z.string().nullable().optional(), on: z.string().nullable().optional(), precision: z.string().nullable().optional(), source: z.string() });
 const sourceSchema = z.object({ url: z.string(), host: z.string(), canonical_url: z.string().nullable().optional(), site_name: z.string().nullable().optional(), author: z.string().nullable().optional(), search_engine: z.string().nullable().optional() });
 const telemetrySchema = z.object({ first_valid_result_ms: z.number().optional(), stages_ms: z.record(z.string(), z.number()).optional() }).passthrough();
-const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), time_range_status: z.string().optional(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), time_range: z.string().nullable().optional(), time_range_applied: z.boolean().optional(), time_range_enforced: z.boolean().optional(), time_range_note: z.string().nullable().optional(), time_window_strict: z.boolean().optional(), filtered_out: z.number().optional(), filtered_reasons: z.record(z.string(), z.number()).optional(), unresponsive_engines: z.unknown().optional(), news_mode: z.boolean().optional(), news_ranking: z.object({ applied: z.boolean(), total: z.number(), moved: z.number(), demoted: z.number(), promoted: z.number(), reasons: z.record(z.string(), z.number()) }).passthrough().optional(), dedup: z.object({ raw_results: z.number(), unique_urls: z.number(), merged: z.number(), multi_source: z.number(), sources: z.array(z.object({ url: z.string(), engines: z.array(z.string()) })) }).passthrough().optional(), telemetry: telemetrySchema }).passthrough();
+const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), time_range_status: z.string().optional(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema) })), time_range: z.string().nullable().optional(), time_range_applied: z.boolean().optional(), time_range_enforced: z.boolean().optional(), time_range_note: z.string().nullable().optional(), time_window_strict: z.boolean().optional(), filtered_out: z.number().optional(), filtered_reasons: z.record(z.string(), z.number()).optional(), unresponsive_engines: z.unknown().optional(), engine_pool: z.object({ layer: z.string(), engines: z.array(z.string()), source: z.string() }).passthrough().optional(), failure_classes: z.record(z.string(), z.number()).optional(), cooldown_engines: z.array(z.object({ engine: z.string(), reason: z.string(), failure_class: z.string(), until_ms: z.number() }).passthrough()).optional(), news_mode: z.boolean().optional(), news_ranking: z.object({ applied: z.boolean(), total: z.number(), moved: z.number(), demoted: z.number(), promoted: z.number(), reasons: z.record(z.string(), z.number()) }).passthrough().optional(), dedup: z.object({ raw_results: z.number(), unique_urls: z.number(), merged: z.number(), multi_source: z.number(), sources: z.array(z.object({ url: z.string(), engines: z.array(z.string()) })) }).passthrough().optional(), telemetry: telemetrySchema }).passthrough();
 const readOutputSchema = z.object({ trace_id: z.string(), url: z.string().optional(), renderer: z.string().optional(), title: z.string().optional(), markdown: z.string().optional(), http_status: z.number().optional(), content_type: z.string().nullable().optional(), bytes: z.number().optional(), content_hash: z.string().optional(), charset: z.string().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), artifact: z.record(z.string(), z.unknown()).optional(), expires_after_days: z.number().optional(), blocked_reason: z.string().nullable().optional(), telemetry: telemetrySchema.optional() }).passthrough();
 const browserOutputSchema = z.object({ trace_id: z.string(), session_id: z.string().optional(), expires_in_seconds: z.number().optional(), url: z.string().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), outputs: z.array(z.record(z.string(), z.unknown())).optional(), closed: z.boolean().optional(), telemetry: telemetrySchema }).passthrough();
 function getServer() {
@@ -705,7 +706,7 @@ function getServer() {
       // only when the module actually produced them so compatibility responses keep their previous
       // shape (a normal search never grows a `news_mode`/`news_ranking`/`dedup` key).
       const diagnostics = {};
-      for (const key of ['time_range', 'time_range_applied', 'time_range_enforced', 'time_range_note', 'time_window_strict', 'filtered_out', 'filtered_reasons', 'news_mode', 'news_ranking', 'dedup']) {
+      for (const key of ['time_range', 'time_range_applied', 'time_range_enforced', 'time_range_note', 'time_window_strict', 'filtered_out', 'filtered_reasons', 'engine_pool', 'failure_classes', 'cooldown_engines', 'news_mode', 'news_ranking', 'dedup']) {
         if (Object.prototype.hasOwnProperty.call(search, key)) diagnostics[key] = search[key];
       }
       return textResult({
@@ -920,4 +921,14 @@ app.all('/mcp', (_req, res) => res.status(405).json({ error: 'method not allowed
 app.listen(cfg.port, cfg.bindHost, () => {
   if (cfg.allowAnonymous) console.warn('WARNING: GATEWAY_ALLOW_ANONYMOUS=1 — gateway is running WITHOUT authentication.');
   console.log(`web-access-gateway listening on ${cfg.host}:${cfg.port}`);
+  // Startup validation + visibility for the opt-in engine pools (SPEC #74 §2.1): print the resolved
+  // layers so the strict layer's `time_range_support` filtering is auditable, and so an all-empty
+  // (default) configuration is visibly a no-op.
+  const poolConfig = enginePoolConfig();
+  const pools = {};
+  for (const [layer, engines] of Object.entries(poolConfig.pools)) {
+    const validated = layer === 'strict' ? validateStrictPool(engines) : { engines, rejected: [] };
+    pools[layer] = { engines: validated.engines, ...(validated.rejected.length ? { rejected: validated.rejected } : {}) };
+  }
+  console.log(JSON.stringify({ component: 'search-engine-pool', pools, cooldown_ms: poolConfig.cooldownMs, state_ttl_ms: poolConfig.stateTtlMs }));
 });

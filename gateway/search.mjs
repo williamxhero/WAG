@@ -1,4 +1,4 @@
-import { filterLowQualityResults, normalizeSearchResults, timeRangeCompliance } from './evidence-metadata.mjs';
+import { filterLowQualityResults, normalizeSearchResults, strictTimeRangeCompliance, timeRangeCompliance } from './evidence-metadata.mjs';
 
 const searchParameters = ['categories', 'engines', 'language'];
 
@@ -40,15 +40,21 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
   return response.json();
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict } = {}) {
   const stages_ms = {};
   const firstStarted = Date.now();
   const firstBody = await requestSearch({ baseUrl, input, fetchImpl, signal, relaxed: false });
   stages_ms.search_ms = Date.now() - firstStarted;
 
+  const strictWindow = Boolean(timeWindowStrict);
+  const requestedTimeRange = input.time_range ?? null;
   let body = firstBody;
   let attempts = 1;
-  if (!Array.isArray(firstBody.results) || firstBody.results.length === 0) {
+  const emptyFirst = !Array.isArray(firstBody.results) || firstBody.results.length === 0;
+  // Strict opt-in: when a caller pins a time window and asks for strict handling, an empty first
+  // response is a real answer about that window — the filter is never silently dropped to retry.
+  const mayRelax = !(strictWindow && requestedTimeRange);
+  if (emptyFirst && mayRelax) {
     const retryStarted = Date.now();
     body = await requestSearch({
       baseUrl,
@@ -67,12 +73,14 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const { results: filteredResults, filtered } = filterLowQualityResults(normalized, { enabled: filterEnabled });
 
   // Temporal honesty: when the caller pinned a time window we must say whether the results can be
-  // proven to fall inside it, including when the relaxed retry silently dropped the filter.
+  // proven to fall inside it, including when the relaxed retry silently dropped the filter. Strict
+  // mode additionally refuses to count unknown / URL-inferred / timezone-less evidence as fresh.
   let results = filteredResults;
   let temporalFields = {};
   const timeRange = input.time_range ?? null;
   if (timeRange) {
-    results = filteredResults.map(result => ({ ...result, time_range_status: timeRangeCompliance(result, timeRange, retrievedAt) }));
+    const classify = strictWindow ? strictTimeRangeCompliance : timeRangeCompliance;
+    results = filteredResults.map(result => ({ ...result, time_range_status: classify(result, timeRange, retrievedAt) }));
     const applied = attempts === 1;
     const outside = results.filter(result => result.time_range_status === 'outside').length;
     const unverified = results.filter(result => result.time_range_status === 'unverified').length;
@@ -84,12 +92,15 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
       time_range_note: !applied
         ? `Requested time_range '${timeRange}', but the empty-result retry dropped it; returned results are not proven within the window.`
         : results.length === 0
-          ? `Requested time_range '${timeRange}'; no results were returned.`
+          ? strictWindow
+            ? `Requested strict time_range '${timeRange}'; no results were returned and the filter was not relaxed.`
+            : `Requested time_range '${timeRange}'; no results were returned.`
           : outside > 0 || unverified > 0
             ? `Requested time_range '${timeRange}'; ${outside} result(s) fall outside the window${unverified > 0 ? ` and ${unverified} are not proven within it` : ''}.`
             : null,
     };
   }
+  if (strictWindow) temporalFields.time_window_strict = true;
 
   return {
     results,

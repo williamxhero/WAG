@@ -171,9 +171,6 @@ test('web_search preserves the selected SearXNG contract through HTTP/MCP', { ti
   });
 
   await t.test('error-page results are filtered and per-result temporal honesty survives the MCP contract', async () => {
-    // Note: server.mjs (owned by the read-path card) whitelists top-level search fields, so the
-    // module-level filtered_out / time_range_* diagnostics are not forwarded here yet; the per-result
-    // time_range_status and the filtering itself do cross the wire.
     const recent = new Date(Date.now() - 3_600_000).toISOString();
     const value = await search([
       {
@@ -187,6 +184,41 @@ test('web_search preserves the selected SearXNG contract through HTTP/MCP', { ti
     assert.equal(value.results.length, 1);
     assert.equal(value.results[0].title, 'Fresh');
     assert.equal(value.results[0].time_range_status, 'within');
+  });
+
+  await t.test('response-level temporal diagnostics and the strict opt-in cross the MCP contract', async () => {
+    const recent = new Date(Date.now() - 3_600_000).toISOString();
+    const value = await search([
+      {
+        results: [
+          { title: '403 - Operations too frequent', url: 'https://www.moomoo.com/403', content: '', engine: 'yandex' },
+          { title: 'Fresh', url: 'https://example.com/news/fresh2', content: 'body', engine: 'yandex', publishedDate: recent },
+        ],
+        number_of_results: 2,
+      },
+    ], { query: '英伟达行情', time_range: 'day', time_window_strict: true });
+    assert.equal(value.time_range, 'day');
+    assert.equal(value.time_range_applied, true);
+    assert.equal(value.time_range_enforced, true);
+    assert.equal(value.time_window_strict, true);
+    assert.equal(value.time_range_note, null);
+    assert.equal(value.filtered_out, 1);
+    assert.deepEqual(value.filtered_reasons, { http_error_page: 1 });
+    assert.equal(value.results[0].time_range_status, 'within');
+  });
+
+  await t.test('a strict empty result is returned without relaxing the time filter over MCP', async () => {
+    const value = await search(
+      [{ results: [], number_of_results: 0, unresponsive_engines: [['quark', 'captcha']] }],
+      { query: '全球 市场 最新 新闻', language: 'zh-CN', time_range: 'day', time_window_strict: true },
+    );
+    assert.deepEqual(value.results, []);
+    assert.equal(value.time_range, 'day');
+    assert.equal(value.time_range_applied, true);
+    assert.equal(value.time_range_enforced, false);
+    assert.equal(value.time_window_strict, true);
+    assert.match(value.time_range_note, /not relaxed/);
+    assert.equal(requests.length, 1);
   });
 
   for (const malformed of [{ status: 503, body: {} }, { status: 200, raw: 'not JSON' }, { status: 200, body: null }]) {

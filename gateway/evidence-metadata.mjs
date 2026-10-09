@@ -313,6 +313,33 @@ export function timeRangeCompliance(result, timeRange, retrievedAt = new Date().
   return 'unverified';
 }
 
+// Strict freshness only trusts a publisher-declared *instant* (article meta/JSON-LD/time, or a
+// SeXNG date field that carried a timezone). URL-pattern guesses, the gateway clock, the HTTP
+// Date/Last-Modified headers and response dates can never be promoted into strict fresh evidence.
+const NON_PUBLISHER_TIME_SOURCES = new Set(['url.pattern', 'gateway.clock', 'http.header.date', 'http.header.last-modified']);
+
+export function publisherPublicationInstant(result) {
+  const evidence = Array.isArray(result?.temporal_evidence) ? result.temporal_evidence : [];
+  const record = evidence.find(item => item.kind === 'published_at' && item.value && !NON_PUBLISHER_TIME_SOURCES.has(item.source));
+  if (!record) return null;
+  const milliseconds = Date.parse(record.value);
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
+// Same five verdicts as timeRangeCompliance, but `within` is only returned when a publisher-sourced
+// instant is proven inside the window. Unknown, URL-inferred, timezone-less and date-only evidence
+// all stay `unverified`; a timestamp ahead of retrieval (clock skew / future date) is `unverified`,
+// never silently treated as fresh.
+export function strictTimeRangeCompliance(result, timeRange, retrievedAt = new Date().toISOString()) {
+  const windowMs = TEMPORAL_WINDOW_MS[timeRange];
+  const retrievedMs = Date.parse(retrievedAt);
+  if (!windowMs || !Number.isFinite(retrievedMs)) return 'unverified';
+  const instant = publisherPublicationInstant(result);
+  if (instant === null) return 'unverified';
+  if (instant > retrievedMs) return 'unverified';
+  return instant >= retrievedMs - windowMs ? 'within' : 'outside';
+}
+
 export function prependPublishedEvidence(markdown, evidence) {
   if (!evidence?.published_at && !evidence?.published_on) return markdown;
   const record = evidence.temporal_evidence.find(item => item.kind === 'published_at');

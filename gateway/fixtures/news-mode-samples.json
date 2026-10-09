@@ -1,0 +1,415 @@
+{
+  "note": "Fixed, manually labelled real search samples for the opt-in news-mode ranking (SPEC issue #72). Results were captured read-only from the production SearXNG JSON API. Labels are offline annotations compared before/after the opt-in news ranking; they are never promoted into an online automatic relevance judgment.",
+  "samples": [
+    {
+      "id": "zh-finance",
+      "category": "中文金融",
+      "query": "英伟达 财报",
+      "categories": null,
+      "captured_from": "http://yosef-server:8801/search (production SearXNG, read-only JSON API)",
+      "captured_at": "2026-10-09",
+      "note": "中文金融样本（生产 SearXNG 真实结果）。索引 3 是 UC 移动搜索的视频跳转包装页，10 是空摘要社媒标签页；其余为话题相关的新闻/资讯内容页。",
+      "results": [
+        {
+          "url": "https://www.szhzxw.cn/181763.html",
+          "title": "半年狂赚1180亿美元！英伟达交出“核爆级”财报，下一代AI芯片全面量产-数智化转型网",
+          "content": "AI淘金热中赚得盆满钵满的“卖水人”，再次交出了一份...英伟达正式公布了 2027 财年半年报及第二季度业绩，各项核心财务指标全线大涨，不仅印证了全球AI基础设施建设的强劲需求，也标志着其新一代硬件平台正加速驶入量产快车道。",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": null,
+          "pubdate": "2026-10-09 08:23:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://m.toutiao.com/article/7694079582743446052/",
+          "title": "英伟达财报中被市场忽略的重点信息",
+          "content": "为什么股价从-3%翻到+4%过去五个季度英伟达次次超预期，股价次次跌。财报前它已经八连阴中的第八天。反转原因是市场早就不缺\"beat\"，缺的是\"beat能持续到什么时候\"，也就是能见度。",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://aiqicha.baidu.com/details/ugknowledge?id=a0d95cf5644ca1fb3b475e4e8434f0f9",
+          "title": "英伟达公司财报-爱企查",
+          "content": "季度营收创下 681 亿美元纪录，全年营收达到 2,159 亿美元，数据中心业务持续强劲增长。详细财报数据及官方公告可访问 NVIDIA 官方博客(https://blogs.nvidia.cn/?p=928...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": "2026-05-03T16:00:00",
+          "pubdate": "2026-05-03 16:00:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://page.sm.cn/blm/video-page-710/video?h=tv.sohu.com&id=27_c09647662634048f53a7ac52a49b3ec6&uc_param_str=dnntnwvepffrbijbprsvchgputdemennosstodcaaagidsdieini&q=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5&title=%E8%8B%B1%E4%BC%9F%E8%BE%BE%E8%B4%A2%E6%8A%A5%E7%82%B8%E5%9C%BA%EF%BC%81670%E4%BA%BF%E8%B5%84%E9%87%91%E6%8A%84%E5%BA%95A%E8%82%A1%EF%BC%8C%E5%8F%98%E7%9B%98%E4%BF%A1%E5%8F%B7%E5%B7%B2%E7%8E%B0&bucket=medical_bs2%3Don%26medical_l4_model%3Dmodel1%26medical_query_recommend%3Dbucket_10%26medical_sgs%3Dnew%26medical_sgs_offline_switch%3Don%26",
+          "title": "英伟达财报炸场！670亿资金抄底A股，变盘信号已现",
+          "content": "8月27日凌晨，全球最贵的一份财报落地了，英伟达季度营收920亿美元，数据中心业务暴涨108%。但我告诉你，真正值得盯的不是数字本身，而是数字背后的信号。先说本质，英伟达这份财报，本质上是全球AI资本开支的期末考试成绩单，数据中心收入857亿美元，同比翻倍说明什么？说明全球科技巨头砸钱建算力的节奏没停，但市场更关心的是，下一季度指引1080亿美元能不能冲上去？这才是决定全球AI产业链情绪的关键一票。再说A股，8月19日大跌之后，短短五个交易日，超670亿元大资金通过ETF逆势进场，华夏科创50ETF净流入80亿，沪深300ETF净流入63亿。谁在买？不是散户，是汇金、社保、保险资这些国家队，记住一句话，散户在恐慌时割肉，国家队在恐慌时接货。这670亿不是来抄底的，是来托底的，但别光看多，风险也得算清楚。8月28日晚上十点，美联储主席沃什在杰克逊霍尔首秀讲话，30年期美债收益率已经飙到5.25%，处于2007年以来最高位。他要是偏鹰，全球成长股承压，偏鸽A股硬科技可能借势起飞，再叠加中东局势紧张，油价连涨两周，霍尔木兹海峡通行量骤降，通胀压力又来了。所以我的判断是什么？缩量到极致就是变盘，前夜1.88万亿的地量，说明空头已经打不动了，但多头也没子弹。英伟达财报是导火索，沃什讲话是方向盘。这两件事叠加，本周就是全球资产重新定价的窗口。别人恐惧时，国家队在买，别人贪婪时，你得清醒，看懂信号的人从来不是在赌方向，而是在等确认。",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QVPZ%2BTLO5acyZh5joWkawQLoFIHgOp8HN2aB7k4N4qhTA%3D%3D&pos=0&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "英伟达和美光即将主宰本轮财报季",
+          "content": "英伟达（NVDA）与美光科技（MU）将在本次财报披露季释放巨大的业绩影响力。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-07T16:58:38",
+          "pubdate": "2026-10-07 16:58:38",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QUBKFVAVk1saplMxkd9k2QR30Bl%2FcEfigSpFwx96iOudYKs%2Furo3LDdlYhLZX9TkT8%3D&pos=1&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "美股Q3财报季将登场 英伟达美光“唱主角”",
+          "content": "【美股Q3财报季将登场 英伟达美光“唱主角”】财联社10月8日电，美股Q3财报季将于下周正式拉开帷幕。据ZeroHedge的一项分析，英伟达和美光预计将占标普500指数Q3每股收益增长的三分之一以上。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-08T07:50:13",
+          "pubdate": "2026-10-08 07:50:13",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QUnH5WyDw%2Bnw%2BWyKYLfH66eoFIHgOp8HN2aB7k4N4qhTA%3D%3D&pos=2&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "纳指、英伟达均创历史新高 市场关注财报季",
+          "content": "第三季度财报季将于下周拉开帷幕，美国大型银行将率先发布业绩。数据显示，分析师平均预计标普500指数盈利将同比增长超过30%，主要得益于AI相关股票。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-05T22:39:03",
+          "pubdate": "2026-10-05 22:39:03",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QWuSAa7WDJlB%2FBu%2Bk3F850SZOwMGGcbUBh5MDo7Jk5lpR9IoBSoyv45geu7Twz9sr8%3D&pos=3&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "美股Q3财报季将登场：标普500盈利料增近三成 英伟达美光“唱主角”",
+          "content": "下周，随着美国大型银行密集披露财报，美股Q3财报季将正式拉开帷幕。“AI芯片霸主”英伟达和存储芯片巨头美光科技有望主导即将到来的财报季。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-08T03:46:10",
+          "pubdate": "2026-10-08 03:46:10",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QWuIf5mOCfH2rvCqWBg%2B8yX30Bl%2FcEfigSpFwx96iOudYKs%2Furo3LDdlYhLZX9TkT8%3D&pos=4&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "纳指创新高点燃美股财报季期待! 花旗预判近九成科技股“盈利惊喜”，英伟达与AMD领跑超预期榜单",
+          "content": "在纳斯达克综合指数一举创下历史新高，以及占据纳指与标普500指数较高权重的“AI芯片超级霸主”英伟达创历史新高点位之后，美股第三季度财报季即将重磅开启。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-08T11:39:31",
+          "pubdate": "2026-10-08 11:39:31",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QW6eG9RfBYCl97AsIw7eib2oFIHgOp8HN2aB7k4N4qhTA%3D%3D&pos=5&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "10月6日收盘：美股收涨，纳指、英伟达均创历史新高 市场关注财报季",
+          "content": "美股七姐妹多数收涨，英伟达涨2.12%，创历史新高，市值升至5.76万亿美元。特斯拉涨超2%，谷歌、Meta、微软涨超1%，亚马逊、苹果微跌。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-05T20:43:06",
+          "pubdate": "2026-10-05 20:43:06",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=9vjClrSnK%2BMWXMJUsQL0A%2BjDAcNbIqGREO%2BkJMDmjp3Fjc67nHOEATv17WzrvRhwUc%2BLWFP1PTGENy8A7jmRB2lQET%2BsQdRYvMgxSrqmt%2Bo%3D&pos=6&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "美光财报分析20260930#CPI #nvda #美股 #投资 #英伟达 #ai #特斯拉",
+          "content": "",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-01T13:15:16",
+          "pubdate": "2026-10-01 13:15:16",
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=IliMzLa6u34IcTclszrCdcp3WX7u8JNCfjRZT2noo5tYJLYlZizet%2ByFJIZjgtPmk74kbO6XTtJ0XewcUXG8DH%2FGpAZF5I9vLV6%2BE1eilF4%3D&pos=7&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "10 月 6 日收盘：美股收涨，纳指、英伟达均创历史新高 市场关注财报季",
+          "content": "美股七姐妹多数收涨，英伟达涨 2.12%，创历史新高，市值升至 5.76 万亿美元。特斯拉涨超 2%，谷歌、Meta、微软涨超 1%，亚马逊、苹果微跌。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-10-06T04:37:49",
+          "pubdate": "2026-10-06 04:37:49",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=guZlzWorTsr7Naz9yurQWY4bxEaDKBezmYy3RjwW%2BgxThMtF5bWqYpb2%2BodtFfLU&pos=8&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "机构：英伟达FY27 Q2财报超预期，关注半导体材料机会",
+          "content": "【半导体材料（884091）】英伟达（NVDA）FY27 Q2财报超预期，AI高景气持续。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-09-27T02:29:02",
+          "pubdate": "2026-09-27 02:29:02",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.stcn.com/article/detail/4201510.html",
+          "title": "直线拉升！英伟达，追加回购1500亿美元",
+          "content": "记者从英伟达官网获悉，英伟达今日宣布，董事会批准在现有股票回购计划基础上追加1500亿美元回购额度，剩余授权回购总额提升至2350亿美元。公司预计将在2028财年内完成全部剩余回购额度。英伟达创始人兼首席执行官黄仁勋表示：...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": "2026-09-28T00:00:00",
+          "pubdate": "2026-09-28 00:00:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://blogs.nvidia.cn/blog/nvidia-announces-financial-results-for-fourth-quarter-and-fiscal-2025/",
+          "title": "NVIDIA 发布 2025 财年第四季度及全年财务报告-NVIDIA 英伟达博客",
+          "content": "自上次发布财报以来，NVIDIA 在以下领域取得进展： 数据中心 第四季度收入创下 356 亿美元的纪录，较上一季度增长 16%，较去年同期增长 93%。全年收入增长 142%，达到创纪录的 1,152 亿美元。云...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://finance.sina.cn/2026-05-21/detail-inhyrfcx8322271.d.html",
+          "title": "全球“AI总龙头”英伟达披露财报-新浪财经",
+          "content": "来源：白鹿视频北京时间5月21日凌晨，全球“AI总龙头”英伟达披露的最新财报显示，2027财年第一财季实现营收816.2亿美元，同比大幅增长85%，高于市场预期。英伟达预计第二财季营收中值为910亿...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": "2026-05-21T00:08:00",
+          "pubdate": "2026-05-21 00:08:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://m.yicai.com/video/103194379.html",
+          "title": "万众瞩目！英伟达最新财报出炉！刷新最高季度营收纪录！还有业绩哪些亮点？｜20260521从华尔街到陆家嘴-第一财经",
+          "content": "英伟达交出炸裂业绩但仍难逃“财报魔咒”盘后股价下挫反映\"增长惊喜不足\"焦虑 英伟达今晨发布的2027财年Q1财报显示，营收816.2亿美元，同比增长85%，高于分析师预期791.9亿美元约3.1%，但超预期...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": "2026-05-21T05:16:00",
+          "pubdate": "2026-05-21 05:16:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://m.cnstock.com/commonDetail/778055",
+          "title": "英伟达财报超预期 AI算力景气仍处高位-中国证券网",
+          "content": "英伟达最新财报再次成为观察全球AI产业链景气度的重要窗口。当地时间8月26日，英伟达发布2027财年第二季度财报，季度营收为962.21亿美元，同比增长106%，其中数据中心业务收入为890.23亿美元，...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": "2026-08-27T23:51:00",
+          "pubdate": "2026-08-27 23:51:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://m.21jingji.com/article/20260827/herald/b8c61030832de1c5e417bb14027baa9d.html",
+          "title": "Q2日赚44亿元！英伟达：2028财年营收将再涨70%！-21财经",
+          "content": "英伟达此前调整了财报披露方式，将业务重新划分为数据中心（Data Center）与边缘计算（Edge Computing）两大平台。数据中心业...",
+          "engine": "quark",
+          "category": "general",
+          "publishedDate": "2026-08-27T03:00:00",
+          "pubdate": "2026-08-27 03:00:00",
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.chinaso.com/link?url=RVQJnCWogMX1bP%2FnXr3DXHTvpM%2FC%2FW2PJCcY78Eo1QWnAhOCwYN7pmCCXaHJFoeWoFIHgOp8HN2aB7k4N4qhTA%3D%3D&pos=9&wd=%E8%8B%B1%E4%BC%9F%E8%BE%BE+%E8%B4%A2%E6%8A%A5",
+          "title": "V观财报｜两只PCB个股刚刚同时公告：产品纳入英伟达或华为供应体系消息，不属实",
+          "content": "公告表示，市场传言“超声电子高频板通过英伟达认证”情况不属实，目前公司无产品供货给英伟达；公司800G、1.6T光模块配套PCB处于研发跟进阶段。",
+          "engine": "chinaso news",
+          "category": "news",
+          "publishedDate": "2026-09-13T08:38:25",
+          "pubdate": "2026-09-13 08:38:25",
+          "label": "relevant"
+        }
+      ]
+    },
+    {
+      "id": "en-tech",
+      "category": "英文科技",
+      "query": "openai",
+      "categories": null,
+      "captured_from": "http://yosef-server:8801/search (production SearXNG, read-only JSON API)",
+      "captured_at": "2026-10-09",
+      "note": "英文科技样本（生产 SearXNG 真实结果）。索引 0/3 是 Yandex 的 “Link to …” 导航占位；1/4/6/7/8 是非权威/产品/下载页；2/5/9 是 OpenAI 话题的内容页。",
+      "results": [
+        {
+          "url": "https://www.instagram.com/openai/",
+          "title": "Link to instagram.com",
+          "content": "The site owner hides the web page description.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.openai.fm/?ref=completeaitraining.com",
+          "title": "OpenAI.fm",
+          "content": "An interactive demo for developers to try the latest text-to-speech model in the OpenAI API.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.ft.com/content/1f3e5472-f438-4f28-8b4f-4eefb1870790?syn-25a6b1a6=1",
+          "title": "OpenAI is upping the ante massively",
+          "content": "OpenAI chief executive Sam Altman says his company will lay out its detailed financing plan later this year, while Wall Street analysts are hoping Oracle will reveal its own financial blueprint at...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://external.auth.openai.com/",
+          "title": "Link to external.auth.openai.com",
+          "content": "The site owner hides the web page description.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.opendigg.com/janitorai/",
+          "title": "JanitorAI",
+          "content": "Powered by OpenAI's GPT models, JanitorAI offers a unique space for unrestrained creative conversations and character interactions.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.youtube.com/watch?v=Q22hihy6qcw",
+          "title": "Why The OpenAI And Anthropic Rivalry Is Heating Up - YouTube",
+          "content": "The gloves are coming off in the high-stakes rivalry between OpenAI and Anthropic as both companies race towards potential IPOs in late-2026.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://pollo.ai/m/sora",
+          "title": "Sora Free: Try OpenAI Sora AI Video Generator Now | Pollo AI",
+          "content": "Strong realism, audio, social remixing, and OpenAI distribution. Strong cinematic quality, 4K options, and Google ecosystem reach.Is OpenAI's Sora AI video generator free?",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://miniapps.ai/gpt-6-astra",
+          "title": "GPT 6 Astra · Free AI Chatbot",
+          "content": "Access OpenAI's most capable model, GPT 6 Astra, through Miniapps.ai for complex reasoning, coding, and agentic work.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.comss.ru/page.php?id=12392",
+          "title": "ChatGPT для Android - Скачать бесплатно. Искусственный интеллект",
+          "content": "О программе. ChatGPT для Android – это официальное мобильное приложение от OpenAI, предоставляющее мгновенные ответы, советы и творческое вдохновение на основе...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://huggingface.co/spaces/openai/whisper",
+          "title": "Whisper - a Hugging Face Space by openai",
+          "content": "Hugging Face's logo. openai.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        }
+      ]
+    },
+    {
+      "id": "docs",
+      "category": "官方文档",
+      "query": "python asyncio documentation",
+      "categories": null,
+      "captured_from": "http://yosef-server:8801/search (production SearXNG, read-only JSON API)",
+      "captured_at": "2026-10-09",
+      "note": "官方文档样本（生产 SearXNG 真实结果）。索引 4 是 linter 规则页、5 与 asyncio 文档无关；其余为 asyncio/异步 Python 的文档或教程内容页。",
+      "results": [
+        {
+          "url": "https://docs.python.org/3/library/asyncio.html",
+          "title": "asyncio — Asynchronous I/O — Python 3.14.8 documentation",
+          "content": "asyncio.run(main()). asyncio is a library to write concurrent code using the async/await syntax. asyncio is used as a foundation for multiple Python asynchronous frameworks that...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-api-index.html",
+          "title": "High-level API Index — Python 3.14.8 documentation",
+          "content": "Tasks: Utilities to run asyncio programs, create Tasks, and await on multiple things with timeouts.,, run(), Create event loop, run ...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://cheat.readthedocs.io/en/latest/python/asyncio.html",
+          "title": "Asyncio (superseded by async page) — Dan's Cheat Sheets...",
+          "content": "asyncio is a library included in Python 3.5+ that supports a programming model where sometimes, operations that would normally block the thread until some other event happened...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://bbc.github.io/cloudfit-public-docs/asyncio/asyncio-part-1.html",
+          "title": "Python Asyncio Part 1 – Basic Concepts and Patterns",
+          "content": "Using asyncio in your Python code will not make your code multithreaded. It will not cause multiple Python instructions to be executed at once, and it will not in any way allow you to...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://docs.astral.sh/ruff/rules/asyncio-dangling-task/",
+          "title": "Checks for `asyncio.create_task` and `asyncio.ensure_future`...",
+          "content": "Per the asyncio documentation, the event loop only retains a weak reference to tasks.The Heisenbug lurking in your async code. Python documentation: asyncio.create_task.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://removal.eventlet.org/guide/resources/",
+          "title": "Common Resources",
+          "content": "Official Python documentation for the asyncio library, including tutorials and API references.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "irrelevant"
+        },
+        {
+          "url": "https://www.youtube.com/watch?v=czAGd8UCuYY",
+          "title": "python asyncio documentation - YouTube",
+          "content": "Download this code from https://codegive.com Certainly! Let's dive into an informative tutorial on Python asyncio.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html",
+          "title": "Asynchronous I/O (asyncio) — SQLAlchemy 2.0 Documentation",
+          "content": "Using asyncio scoped session. Using the Inspector to inspect schema objects. Engine API Documentation.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://docs.aiohttp.org/en/stable/index.html",
+          "title": "Welcome to AIOHTTP — aiohttp 3.14.4 documentation",
+          "content": "Asynchronous HTTP Client/Server for asyncio and Python. Current version is 3.14.4.All deprecations are reflected in documentation and raises DeprecationWarning.",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        },
+        {
+          "url": "https://www.paulnorvig.com/guides/asynchronous-programming-with-asyncio-in-python.html",
+          "title": "Asynchronous Programming with asyncio in Python (2024)",
+          "content": "Keep an eye on the main Python asyncio documentation, GitHub repositories for libraries like websockets and aiokafka, and ongoing Python Enhancement Proposals (PEPs)...",
+          "engine": "yandex",
+          "category": "general",
+          "publishedDate": null,
+          "label": "relevant"
+        }
+      ]
+    }
+  ]
+}

@@ -19,7 +19,18 @@ MAX_CONCURRENCY = int(os.environ.get("CRAWL4AI_MAX_CONCURRENCY", "2"))
 # budget (EGRESS_MAX_CONNECTIONS) is exhausted, which then rejects the gateway's
 # lightweight reads too. Recycling the browser context every N pages drops that
 # pool and returns the budget to the whole gateway instead of holding it.
-MAX_PAGES_BEFORE_RECYCLE = int(os.environ.get("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE", "2"))
+#
+# Default 1 (recycle after every page). Crawl4AI 0.9.2 only bumps its browser
+# version when `_pages_served >= N` is checked *after* the counter increments
+# (browser_manager.py: `_should_recycle` / `_maybe_bump_browser_version`), and a
+# bumped version is what queues the just-used context for close on release. Any
+# N > 1 therefore leaves the trailing context of a batch un-queued until the next
+# request crosses the threshold again: a *single* render (counter=1) never
+# recycles at all, and an odd/partial tail keeps its tunnels. Measured on the
+# isolated instance: one ft.com render at N=2 ends with 21-22 tunnels still held
+# 30s later; at N=1 the same single render drains to 0. N=1 gives every page its
+# own context, so the pool is always returned when the render finishes.
+MAX_PAGES_BEFORE_RECYCLE = int(os.environ.get("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE", "1"))
 if MAX_PAGES_BEFORE_RECYCLE < 0:
     raise ValueError("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE must be a non-negative integer")
 DATA_DIR = os.environ["CRAWL4AI_DATA_DIR"]

@@ -121,7 +121,13 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         # minutes, so a burst of renders can hold the whole shared egress budget
         # and starve the gateway's lightweight reads. Recycling the context every
         # N pages releases that pool; the setting must reach BrowserConfig.
-        for env, expected in [({}, 2), ({"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "1"}, 1), ({"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "8"}, 8)]:
+        #
+        # The default is 1 (recycle after every page): Crawl4AI 0.9.2 only queues a
+        # context for close when the per-page counter reaches the threshold, so any
+        # N > 1 leaves the trailing context of a batch alive (a single render at N=2
+        # never recycles at all). N=1 gives each page its own context so the pool is
+        # always returned when that render finishes.
+        for env, expected in [({}, 1), ({"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "2"}, 2), ({"CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE": "8"}, 8)]:
             with patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("CRAWL4AI_MAX_PAGES_BEFORE_RECYCLE", None)
                 os.environ.update(env)

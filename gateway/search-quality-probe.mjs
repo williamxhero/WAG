@@ -111,22 +111,60 @@ export function selectCandidateReads(candidates = [], maxReads = 0, hardCap = PR
   return { budget, planned: toRead.length, toRead, unread };
 }
 
+// The bounded read budget is shared, never doubled: in candidate mode the reads go to the fixed
+// candidates only, so the search-derived reads are skipped there — a candidate run must never spend
+// `PROBE_MAX_READS` once on search results and again on candidates. A budget of 0 reads nothing; the
+// result is de-duplicated and clamped to the same hard cap.
+export function planSearchReadUrls({ results = [], maxReads = 0, candidateMode = false, hardCap = PROBE_READ_HARD_CAP }) {
+  if (candidateMode) return [];
+  if (!Number.isFinite(maxReads) || maxReads <= 0) return [];
+  const urls = results.flatMap(search => (search.results ?? []).map(result => result.url)).filter(url => /^https?:\/\//.test(url ?? ''));
+  return [...new Set(urls)].slice(0, Math.min(maxReads, Number.isFinite(hardCap) ? hardCap : PROBE_READ_HARD_CAP));
+}
+
 // One candidate read record. A successful read preserves the *complete* raw MCP payload (`raw`) so no
-// publisher field is lost; a failed read keeps the reason and is never promoted to a success.
-export function buildCandidateReadRecord({ candidate, url, response, error }) {
+// publisher field is lost; a failed read keeps the reason and the raw payload and is never promoted to
+// a success. A read counts as a failure when the call threw, when MCP flagged it with `isError: true`,
+// or when the payload itself is a typed error (`error` / non-null `blocked_reason` / 4xx-5xx
+// `http_status`) — the exact shape of the HTTP 403 → renderer fallback → 502 `render_fallback_failed`
+// case. A successful read always reports a 2xx `http_status`.
+function readFailureDetail(response, isError) {
+  const status = response?.http_status ?? response?.status ?? null;
+  const failed = isError === true || Boolean(response?.error) || Boolean(response?.blocked_reason) || Number(status) >= 400;
+  if (!failed) return null;
+  const parts = [response?.error?.message ?? response?.error?.kind ?? (isError ? 'MCP tool reported an error' : 'read unsuccessful')];
+  if (status != null) parts.push(`http_status=${status}`);
+  if (response?.blocked_reason) parts.push(`blocked_reason=${response.blocked_reason}`);
+  return parts.join(' ');
+}
+
+export function buildCandidateReadRecord({ candidate, url, response, error, isError = false }) {
   const target = url ?? candidate?.url ?? null;
+  const label = candidate?.label ?? null;
   if (error) {
     return {
       url: target,
-      label: candidate?.label ?? null,
+      label,
       read_status: 'read_failure',
       ok: false,
       error: String(error?.message ?? error).slice(0, 200),
+      ...(response !== undefined ? { raw: response ?? null } : {}),
+    };
+  }
+  const failure = readFailureDetail(response, isError);
+  if (failure) {
+    return {
+      url: target,
+      label,
+      read_status: 'read_failure',
+      ok: false,
+      error: failure.slice(0, 200),
+      raw: response ?? null,
     };
   }
   return {
     url: target,
-    label: candidate?.label ?? null,
+    label,
     read_status: 'read_ok',
     ok: true,
     published_at: response?.published_at ?? null,
@@ -137,6 +175,16 @@ export function buildCandidateReadRecord({ candidate, url, response, error }) {
     temporal_evidence: Array.isArray(response?.temporal_evidence) ? response.temporal_evidence : [],
     raw: response ?? null,
   };
+}
+
+// Map a raw MCP `web_read` tool result to a candidate read record. Kept separate from the transport so
+// the `isError` / error-payload classification can be unit-tested against the real envelope shape
+// without a live gateway.
+export function buildCandidateReadFromToolResult({ candidate, result }) {
+  const url = candidate?.url ?? null;
+  const { value, isError, parseError } = parseToolResult(result);
+  if (parseError) return buildCandidateReadRecord({ candidate, url, error: parseError });
+  return buildCandidateReadRecord({ candidate, url, response: value, isError });
 }
 
 export function summarizeProbe(searches, reads = []) {
@@ -160,34 +208,84 @@ export const DEFAULT_QUERIES = [
   { query: '全球 市场 最新 新闻', language: 'zh-CN', time_range: 'day', time_window_strict: true },
 ];
 
-function payload(result) {
-  const raw = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
-  return JSON.parse(raw);
+function toolText(result) {
+  return (result?.content ?? []).filter(item => item?.type === 'text').map(item => item.text).join('\n');
 }
 
-async function withTimeout(promise, ms, label) {
+function payload(result) {
+  return JSON.parse(toolText(result));
+}
+
+// MCP flags a failed tool call with `isError: true` and/or a typed `error` payload — for example an
+// HTTP 403 that falls back to the renderer and ends at HTTP 502 `render_fallback_failed`. Parsing the
+// JSON body alone would drop that verdict, so `isError` is returned alongside the parsed value.
+function parseToolResult(result) {
+  try {
+    return { value: JSON.parse(toolText(result)), isError: result?.isError === true };
+  } catch (error) {
+    return { value: null, isError: result?.isError === true, parseError: error };
+  }
+}
+
+// Await a promise with a hard timeout. On timeout the in-flight call is cancelled via `controller`
+// before rejecting: a bare `Promise.race` would leave the request running, so the next read would
+// stack a second in-flight request on top of the orphaned one. The MCP SDK turns the abort into a
+// `notifications/cancelled` to the server and drops the late response.
+export async function withTimeout(promise, ms, label, controller) {
   let timer;
   try {
     return await Promise.race([
       promise,
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`${label} timed out after ${ms}ms`);
+          controller?.abort(error);
+          reject(error);
+        }, ms);
+      }),
     ]);
   } finally {
     clearTimeout(timer);
   }
 }
 
+function isTimeoutError(error) {
+  return /timed out after \d+ms/.test(String(error?.message ?? error));
+}
+
 async function readCandidate(client, candidate, timeoutMs) {
+  const controller = new AbortController();
   try {
-    const value = payload(await withTimeout(
-      client.callTool({ name: 'web_read', arguments: { url: candidate.url, render: 'auto', output: 'markdown' } }),
+    const result = await withTimeout(
+      client.callTool(
+        { name: 'web_read', arguments: { url: candidate.url, render: 'auto', output: 'markdown' } },
+        undefined,
+        { signal: controller.signal },
+      ),
       timeoutMs,
       'web_read',
-    ));
-    return buildCandidateReadRecord({ candidate, url: candidate.url, response: value });
+      controller,
+    );
+    // A failed read can still return an HTTP 200 MCP envelope that carries `isError: true` and a typed
+    // error payload, so the classification sees the whole tool result, not only its parsed body.
+    return { record: buildCandidateReadFromToolResult({ candidate, result }), timedOut: false };
   } catch (error) {
-    return buildCandidateReadRecord({ candidate, url: candidate.url, error });
+    return { record: buildCandidateReadRecord({ candidate, url: candidate.url, error }), timedOut: isTimeoutError(error) };
   }
+}
+
+// Read the fixed candidates serially under the bounded budget. Reading stays strictly serial — each
+// read is awaited before the next starts — so at most one request is ever in flight. A read that timed
+// out leaves a request behind that the transport cannot abort at the socket level, so the batch stops
+// there: the remaining candidates stay `unread` instead of stacking more in-flight reads.
+export async function runCandidateReads({ toRead = [], read }) {
+  const records = {};
+  for (const candidate of toRead) {
+    const { record, timedOut } = await read(candidate);
+    records[candidate.url] = record;
+    if (timedOut) break;
+  }
+  return records;
 }
 
 async function main() {
@@ -211,15 +309,14 @@ async function main() {
       searches.push(buildSearchEvidenceRecord({ traceId: value.trace_id, params: args, response: value }));
     }
     const reads = [];
-    if (Number.isFinite(maxReads) && maxReads > 0) {
-      const urls = searches.flatMap(search => search.results.map(result => result.url)).filter(url => /^https?:\/\//.test(url ?? ''));
-      for (const url of [...new Set(urls)].slice(0, Math.min(maxReads, PROBE_READ_HARD_CAP))) {
-        try {
-          const value = payload(await client.callTool({ name: 'web_read', arguments: { url, render: 'auto', output: 'markdown' } }));
-          reads.push(buildReadEvidenceRecord({ traceId: value.trace_id, url, response: value }));
-        } catch (error) {
-          reads.push({ url, ok: false, error: String(error.message ?? error).slice(0, 160) });
-        }
+    // Candidate mode reads only the fixed candidates, so the search-derived reads are skipped: the
+    // shared PROBE_MAX_READS budget is never spent twice in a single run.
+    for (const url of planSearchReadUrls({ results: searches, maxReads, candidateMode: Boolean(candidateFixturePath) })) {
+      try {
+        const value = payload(await client.callTool({ name: 'web_read', arguments: { url, render: 'auto', output: 'markdown' } }));
+        reads.push(buildReadEvidenceRecord({ traceId: value.trace_id, url, response: value }));
+      } catch (error) {
+        reads.push({ url, ok: false, error: String(error.message ?? error).slice(0, 160) });
       }
     }
 
@@ -232,8 +329,10 @@ async function main() {
       const fixture = JSON.parse(fs.readFileSync(path.resolve(candidateFixturePath), 'utf8'));
       const candidates = Array.isArray(fixture?.candidates) ? fixture.candidates : Array.isArray(fixture) ? fixture : [];
       const { budget, planned, toRead, unread } = selectCandidateReads(candidates, maxReads);
-      const candidateReads = {};
-      for (const candidate of toRead) candidateReads[candidate.url] = await readCandidate(client, candidate, readTimeoutMs);
+      const candidateReads = await runCandidateReads({
+        toRead,
+        read: candidate => readCandidate(client, candidate, readTimeoutMs),
+      });
       const window = fixture?.window ?? {
         start: process.env.PROBE_WINDOW_START ?? null,
         end: process.env.PROBE_WINDOW_END ?? null,

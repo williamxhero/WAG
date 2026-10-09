@@ -88,6 +88,10 @@ export function evaluateNewsQuality(evaluation = {}) {
       published_at: readOk ? read.published_at ?? null : null,
       published_on: readOk ? read.published_on ?? null : null,
       precision: readOk ? read.precision ?? null : null,
+      // The complete raw MCP read payload is preserved per candidate so the final report can be
+      // audited directly, without a separate capture step. A failed read keeps its raw error payload;
+      // an unread candidate (left out of the bounded budget) has none.
+      raw: hasRead ? read?.raw ?? null : null,
       error: readOk
         ? null
         : readFailed

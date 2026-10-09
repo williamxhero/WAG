@@ -180,6 +180,31 @@ test('an attempted-but-failed read stays read_failure, distinct from unread', ()
   assert.equal(result.unread, 0);
 });
 
+test('every entry preserves its raw MCP read payload, failures included', () => {
+  const result = evaluateNewsQuality({
+    window: WINDOW,
+    candidates: [
+      { url: 'https://a.example/x', label: 'relevant' },
+      { url: 'https://b.example/y', label: 'relevant' },
+      { url: 'https://c.example/z', label: 'relevant' }, // left out of the bounded budget
+    ],
+    reads: {
+      'https://a.example/x': read({ published_at: null, published_on: null, temporal_evidence: [], raw: { markdown: 'body', http_status: 200 } }),
+      'https://b.example/y': { ok: false, error: 'render_fallback_failed', raw: { error: { kind: 'render_backend_status' }, http_status: 502, blocked_reason: 'render_fallback_failed' } },
+    },
+  });
+  const byUrl = Object.fromEntries(result.entries.map(entry => [entry.url, entry]));
+  assert.equal(byUrl['https://a.example/x'].raw.markdown, 'body');
+  assert.equal(byUrl['https://b.example/y'].raw.blocked_reason, 'render_fallback_failed');
+  assert.equal(byUrl['https://b.example/y'].category, 'read_failure');
+  assert.equal(byUrl['https://c.example/z'].raw, null, 'an unread candidate has no raw payload');
+  // The denominator, unread and read_failure accounting stays intact.
+  assert.equal(result.denominator, 3);
+  assert.equal(result.read_failure, 1);
+  assert.equal(result.unread, 1);
+  assert.equal(result.both_satisfied + result.irrelevant + result.stale + result.unknown + result.read_failure + result.unread, result.denominator);
+});
+
 test('unread candidates can be gated explicitly without changing the default', () => {
   const candidates = [
     { url: 'https://a.example/x', label: 'relevant' },

@@ -298,11 +298,21 @@ function publisherKey(evidence = {}) {
   }
 }
 
-// Counts the per-result verdicts and applies the two-part threshold. `distinct_publishers` is
-// counted by the *evidence* host (site identity), never by search engine or feed count, so several
-// articles from one publisher cannot manufacture source breadth. Zero verified results are
-// `no_verified_result`; some-but-below-threshold is `partial`; the threshold is never relaxed.
-export function evaluateVerifiedStatus(results = [], { min_sources = VERIFIED_DEFAULTS.news_min_sources } = {}) {
+// Counts the per-result verdicts and applies the two-part threshold. The verdict counts are emitted
+// as the flat, explicable fields the SPEC fixes (`stale_count`, `unknown_count`, `read_failure_count`,
+// `unread_count`, `irrelevant_count`) so a consumer never has to guess a nested shape.
+//
+// Recall accounting is deliberately separate from the verdicts: `candidate_count` is the *full* recall
+// candidate set (`news_max_reads` bounds reads, never the reported candidate identity), `read_attempts`
+// is how many candidate pages were actually read, and everything the budget never attempted is
+// `unread_count`. A verdict inside `results` that already says `unread` is added to it, so a caller
+// passing only the evaluated page can still account for every candidate.
+//
+// `distinct_publishers` is counted by the *evidence* host (site identity), never by search engine or
+// feed count, so several articles from one publisher cannot manufacture source breadth. Zero verified
+// results are `no_verified_result`; some-but-below-threshold is `partial`; the threshold is never
+// relaxed.
+export function evaluateVerifiedStatus(results = [], { min_sources = VERIFIED_DEFAULTS.news_min_sources, candidate_count, read_attempts, unread_count } = {}) {
   const list = Array.isArray(results) ? results : [];
   const threshold = Number.isInteger(min_sources) ? min_sources : VERIFIED_DEFAULTS.news_min_sources;
   const counts = { verified: 0, stale: 0, unknown: 0, unread: 0, read_failure: 0, irrelevant: 0 };
@@ -323,12 +333,22 @@ export function evaluateVerifiedStatus(results = [], { min_sources = VERIFIED_DE
     : verified_count >= threshold && distinct_publishers >= threshold
       ? 'verified'
       : 'partial';
+  // An explicit candidate total is only accepted when it covers the evaluated list; otherwise the
+  // evaluated list is the accounting we can actually prove.
+  const totalCandidates = Number.isInteger(candidate_count) && candidate_count >= list.length ? candidate_count : list.length;
+  const attempted = Number.isInteger(read_attempts) && read_attempts >= 0 ? read_attempts : list.length;
+  const neverAttempted = Number.isInteger(unread_count) && unread_count > 0 ? unread_count : 0;
   return {
     status,
-    candidate_count: list.length,
+    candidate_count: totalCandidates,
+    read_attempts: attempted,
     verified_count,
     distinct_publishers,
     min_sources: threshold,
-    counts,
+    stale_count: counts.stale,
+    unknown_count: counts.unknown,
+    read_failure_count: counts.read_failure,
+    unread_count: neverAttempted + counts.unread,
+    irrelevant_count: counts.irrelevant,
   };
 }

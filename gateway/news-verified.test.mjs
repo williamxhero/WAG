@@ -239,6 +239,7 @@ test('verified status applies the two-part threshold without relaxing it', () =>
   const verifiedAt = url => ({ news_evidence: { status: 'verified', evidence_url: url } });
   const no = evaluateVerifiedStatus([], { min_sources: 2 });
   assert.deepEqual([no.status, no.candidate_count, no.verified_count, no.distinct_publishers], ['no_verified_result', 0, 0, 0]);
+  assert.deepEqual([no.read_attempts, no.stale_count, no.unknown_count, no.read_failure_count, no.unread_count, no.irrelevant_count], [0, 0, 0, 0, 0, 0]);
 
   // Two verified articles from the SAME publisher do not satisfy a two-source threshold.
   const samePublisher = evaluateVerifiedStatus([verifiedAt('https://news.one.example/a'), verifiedAt('https://news.one.example/b')], { min_sources: 2 });
@@ -261,10 +262,44 @@ test('verified status applies the two-part threshold without relaxing it', () =>
     { news_evidence: { status: 'unknown', evidence_url: 'https://news.three.example/c' } },
   ], { min_sources: 2 });
   assert.equal(mixed.status, 'partial');
-  assert.deepEqual(mixed.counts, { verified: 1, stale: 1, unknown: 1, unread: 0, read_failure: 0, irrelevant: 0 });
+  assert.equal(mixed.verified_count, 1);
+  assert.equal(mixed.stale_count, 1);
+  assert.equal(mixed.unknown_count, 1);
+  assert.equal(mixed.read_failure_count, 0);
+  assert.equal(mixed.unread_count, 0);
 
   // min_sources is never relaxed to fit the result set.
   const strict = evaluateVerifiedStatus([verifiedAt('https://news.one.example/a'), verifiedAt('https://news.two.example/b')], { min_sources: 4 });
   assert.equal(strict.status, 'partial');
   assert.equal(strict.min_sources, 4);
+});
+
+test('verified status keeps recall accounting separate from the verdict counts', () => {
+  // 20 recalled candidates, 6 of them read, 4 of the read pages verified or stale, 2 failed to read:
+  // candidate_count is the full recall set, read_attempts the reads actually issued, and the 14
+  // candidates the budget never reached stay `unread` instead of being judged as date-less pages.
+  const read = status => ({ news_evidence: { status, evidence_url: `https://news.${status}.example/a` } });
+  const accounting = evaluateVerifiedStatus(
+    [read('verified'), read('verified'), read('stale'), read('unknown'), read('read_failure'), read('read_failure')],
+    { min_sources: 2, candidate_count: 20, read_attempts: 6, unread_count: 14 },
+  );
+  assert.equal(accounting.candidate_count, 20);
+  assert.equal(accounting.read_attempts, 6);
+  assert.equal(accounting.verified_count, 2);
+  assert.equal(accounting.stale_count, 1);
+  assert.equal(accounting.unknown_count, 1);
+  assert.equal(accounting.read_failure_count, 2);
+  assert.equal(accounting.unread_count, 14);
+  // Every candidate is accounted for exactly once: the read budget plus the unread tail is the full
+  // recall set, and the per-page verdicts add up to the reads that were issued.
+  const verdicts = accounting.verified_count + accounting.stale_count + accounting.unknown_count
+    + accounting.read_failure_count + accounting.irrelevant_count;
+  assert.equal(verdicts, accounting.read_attempts);
+  assert.equal(accounting.read_attempts + accounting.unread_count, accounting.candidate_count);
+
+  // A candidate the caller reports as `unread` inside the evaluated list still counts, and a
+  // candidate count that does not even cover the evaluated list is never trusted over it.
+  const unreadInside = evaluateVerifiedStatus([read('unread'), read('verified')], { candidate_count: 1, read_attempts: 2, unread_count: 3 });
+  assert.equal(unreadInside.candidate_count, 2);
+  assert.equal(unreadInside.unread_count, 4);
 });

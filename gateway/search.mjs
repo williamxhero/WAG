@@ -1,5 +1,6 @@
 import { filterLowQualityResults, normalizeSearchResults, normalizeUrlForDedup, strictTimeRangeCompliance, timeRangeCompliance } from './evidence-metadata.mjs';
 import { applyEnginePool, createEngineHealth, enginePoolConfig, failureClasses } from './engine-health.mjs';
+import { evaluateResultEvidence, evaluateVerifiedStatus, normalizeNewsMode, normalizeVerifiedParams, resolveNewsWindow, aggregatePublisherEvidence } from './news-verified.mjs';
 
 const searchParameters = ['categories', 'engines', 'language'];
 
@@ -193,7 +194,7 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
   return response.json();
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage } = {}) {
   const stages_ms = {};
   // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
   // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
@@ -269,8 +270,50 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   // Opt-in news mode: an explicit `newsMode` option wins; otherwise a caller that already requested
   // the SearXNG `news` category opts in. It only reorders the already-filtered, already-deduped set,
   // so recall is unchanged and normal-mode output stays byte-for-byte compatible.
-  const newsEnabled = newsMode === undefined ? isNewsCategory(input.categories) : Boolean(newsMode);
+  const requestedNewsMode = newsMode === undefined
+    ? (input.news_mode ?? (isNewsCategory(input.categories) ? 'ranked' : 'off'))
+    : newsMode;
+  const normalizedNewsMode = normalizeNewsMode(requestedNewsMode);
+  const verifiedParams = normalizedNewsMode === 'verified' ? normalizeVerifiedParams(input) : null;
+  const newsEnabled = normalizedNewsMode !== 'off';
   const ranked = newsEnabled ? rankNewsResults(results, input.query) : null;
+  let verifiedResults = ranked ?? results;
+  let newsVerification = null;
+  let sourceFailure = null;
+  if (normalizedNewsMode === 'verified') {
+    const verifiedNow = typeof now === 'function' ? now() : now;
+    const window = resolveNewsWindow({ window: verifiedParams.news_window, now: verifiedNow });
+    const checkedAt = new Date(typeof now === 'function' ? now() : now).toISOString();
+    const candidates = verifiedResults.slice(0, Math.min(verifiedParams.news_max_reads, verifiedResults.length));
+    const evidenceResults = [];
+    for (const candidate of candidates) {
+      let rawEvidence = null;
+      if (verifiedParams.news_source === 'feeds' || verifiedParams.news_source === 'hybrid') {
+        sourceFailure = { code: 'catalog_empty', retryable: false };
+      } else if (verifiedParams.news_source === 'gdelt') {
+        sourceFailure = { code: 'gdelt_unavailable', retryable: false };
+      } else if (typeof verifyPage === 'function') {
+        try { rawEvidence = aggregatePublisherEvidence(await verifyPage(candidate, { signal, render: verifiedParams.news_render }), { url: candidate.url }); }
+        catch { rawEvidence = { source_kind: 'none', evidence_url: candidate.url }; }
+      }
+      const evidence = rawEvidence
+        ? evaluateResultEvidence(rawEvidence, window, { checked_at: checkedAt })
+                : { status: 'unread', source_kind: 'none', source: null, verified_eligible: false, published_at: null, published_on: null, precision: null, evidence_url: candidate.url ?? null, checked_at: checkedAt, conflict_count: 0 };
+      evidenceResults.push({ ...candidate, news_evidence: evidence });
+    }
+    verifiedResults = evidenceResults;
+    const aggregate = evaluateVerifiedStatus(evidenceResults, { min_sources: verifiedParams.news_min_sources });
+    newsVerification = {
+      mode: 'verified',
+      source: verifiedParams.news_source,
+      window: window.window,
+      window_timezone: window.window_timezone,
+      evaluated_at: window.evaluated_at,
+      time_range_is_discovery_hint: true,
+      ...aggregate,
+      ...(sourceFailure ? { source_failure: sourceFailure } : {}),
+    };
+  }
 
   // Feed the selected response back into the bounded local health state: engines that answered clear
   // their cooldown, engines reported unresponsive get one (only for the locally-cooled classes).
@@ -297,7 +340,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const cooldownSnapshot = enginePoolField ? engineHealth.snapshot(now()) : null;
 
   return {
-    results: ranked ?? results,
+    results: verifiedResults,
     number_of_results: body.number_of_results ?? results.length,
     stages_ms,
     attempts,
@@ -310,6 +353,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
           news_mode: true,
           news_ranking: summarizeNewsRanking(results, ranked, input.query),
           dedup: summarizeSourceEvidence(body.results),
+          ...(newsVerification ? { news_verification: newsVerification } : {}),
         }
       : {}),
     ...(Object.prototype.hasOwnProperty.call(body, 'unresponsive_engines')

@@ -168,6 +168,32 @@ test('news mode keeps the multi-source dedup evidence instead of dropping the ex
   assert.deepEqual(merged.engines, ['quark', 'yandex']);
 });
 
+test('ranked and legacy true never invoke page verification, while verified is bounded and serial', async () => {
+  const body = { results: [
+    { title: 'One', url: 'https://one.example/story', content: 'One', engine: 'a' },
+    { title: 'Two', url: 'https://two.example/story', content: 'Two', engine: 'b' },
+  ], number_of_results: 2 };
+  let calls = 0;
+  const verifyPage = async candidate => {
+    calls++;
+    assert.equal(candidate.url, calls === 1 ? 'https://one.example/story' : 'https://two.example/story');
+    return { temporal_evidence: [{ kind: 'published_at', value: '2026-10-10T01:00:00.000Z', precision: 'instant', source: 'html.meta.datePublished' }], source: { url: candidate.url } };
+  };
+  const ranked = await fixtureSearch(body, { query: 'story', news_mode: 'ranked' }, { verifyPage, newsMode: 'ranked' });
+  assert.equal(calls, 0);
+  assert.equal(ranked.news_mode, true);
+  const legacy = await fixtureSearch(body, { query: 'story', news_mode: true }, { verifyPage, newsMode: true });
+  assert.equal(calls, 0);
+  assert.equal(legacy.news_mode, true);
+  const verified = await fixtureSearch(body, { query: 'story', news_mode: 'verified', news_min_sources: 1, news_max_reads: 1 }, { verifyPage, now: '2026-10-10T02:00:00.000Z' });
+  assert.equal(calls, 1);
+  assert.equal(verified.news_verification.mode, 'verified');
+  assert.equal(verified.news_verification.time_range_is_discovery_hint, true);
+  assert.equal(verified.news_verification.status, 'verified');
+  assert.equal(verified.results.length, 1);
+  assert.equal(verified.results[0].news_evidence.status, 'verified');
+});
+
 function precisionAt5(results, labels) {
   const top = results.slice(0, 5);
   if (top.length === 0) return null;

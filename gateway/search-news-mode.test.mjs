@@ -168,6 +168,203 @@ test('news mode keeps the multi-source dedup evidence instead of dropping the ex
   assert.deepEqual(merged.engines, ['quark', 'yandex']);
 });
 
+test('ranked and legacy true never invoke page verification, while verified is bounded and serial', async () => {
+  const body = { results: [
+    { title: 'One', url: 'https://one.example/story', content: 'One', engine: 'a' },
+    { title: 'Two', url: 'https://two.example/story', content: 'Two', engine: 'b' },
+  ], number_of_results: 2 };
+  let calls = 0;
+  const verifyPage = async candidate => {
+    calls++;
+    assert.equal(candidate.url, calls === 1 ? 'https://one.example/story' : 'https://two.example/story');
+    return { temporal_evidence: [{ kind: 'published_at', value: '2026-10-10T01:00:00.000Z', precision: 'instant', source: 'html.meta.datePublished' }], source: { url: candidate.url } };
+  };
+  const ranked = await fixtureSearch(body, { query: 'story', news_mode: 'ranked' }, { verifyPage, newsMode: 'ranked' });
+  assert.equal(calls, 0);
+  assert.equal(ranked.news_mode, true);
+  const legacy = await fixtureSearch(body, { query: 'story', news_mode: true }, { verifyPage, newsMode: true });
+  assert.equal(calls, 0);
+  assert.equal(legacy.news_mode, true);
+  const verified = await fixtureSearch(body, { query: 'story', news_mode: 'verified', news_min_sources: 1, news_max_reads: 1 }, { verifyPage, now: '2026-10-10T02:00:00.000Z' });
+  assert.equal(calls, 1);
+  assert.equal(verified.news_verification.mode, 'verified');
+  assert.equal(verified.news_verification.time_range_is_discovery_hint, true);
+  assert.equal(verified.news_verification.status, 'verified');
+  assert.equal(verified.results.length, 1);
+  assert.equal(verified.results[0].news_evidence.status, 'verified');
+});
+
+// ---------------------------------------------------------------------------------------------
+// SPEC #78 stage C P0 regressions: recall/read accounting, fail-closed source diagnostics,
+// read_failure vs unread, and the news_render=auto posture.
+// ---------------------------------------------------------------------------------------------
+
+const WINDOW_NOW = '2026-10-10T02:00:00.000Z';
+const FRESH = '2026-10-10T01:00:00.000Z';
+const STALE = '2026-10-08T01:00:00.000Z';
+
+function candidateBody(count) {
+  return {
+    results: Array.from({ length: count }, (_, index) => ({
+      title: `Report ${index + 1}`,
+      url: `https://publisher${index + 1}.example/2026/10/10/report-${index + 1}`,
+      content: `The full story number ${index + 1}.`,
+      engine: 'yandex',
+      category: 'news',
+    })),
+    number_of_results: count,
+  };
+}
+
+// A page fixture carrying a publisher-declared instant, i.e. the only evidence that may verify.
+function publishedPage(url, value) {
+  return {
+    source: { url, host: new URL(url).hostname },
+    temporal_evidence: [{ kind: 'published_at', value, on: value.slice(0, 10), precision: 'instant', source: 'html.meta[property="article:published_time"]' }],
+  };
+}
+
+test('verified mode reports the full recall set, the bounded read attempts and returns only verified results', async () => {
+  const body = candidateBody(5);
+  const readOrder = [];
+  // Four of the five candidates fit the read budget: two fresh, one stale, one with no publisher date.
+  const plan = [FRESH, FRESH, STALE, null];
+  const verifyPage = async candidate => {
+    readOrder.push(candidate.url);
+    const value = plan[readOrder.length - 1];
+    return value ? publishedPage(candidate.url, value) : { source: { url: candidate.url }, temporal_evidence: [] };
+  };
+
+  const result = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_min_sources: 1, news_max_reads: 4 }, { verifyPage, now: WINDOW_NOW });
+  const summary = result.news_verification;
+
+  // candidate_count is the full recall set — never the news_max_reads-truncated attempt count.
+  assert.equal(summary.candidate_count, 5);
+  assert.equal(summary.read_attempts, 4);
+  assert.equal(summary.unread_count, 1, 'the candidate the budget never reached is unread');
+  assert.equal(readOrder.length, 4);
+  assert.equal(summary.verified_count, 2);
+  assert.equal(summary.stale_count, 1);
+  assert.equal(summary.unknown_count, 1, 'a page with no publisher date is unknown, not unread');
+  assert.equal(summary.read_failure_count, 0);
+  assert.equal(summary.status, 'verified');
+
+  // SPEC #78 §5.8: only verified results are returned; stale/unknown/unread are counts.
+  assert.equal(result.results.length, 2);
+  for (const item of result.results) {
+    assert.equal(item.news_evidence.status, 'verified');
+    assert.equal(item.news_evidence.published_at, FRESH);
+  }
+  const returned = new Set(result.results.map(item => item.url));
+  assert.deepEqual(returned, new Set(body.results.slice(0, 2).map(item => item.url)));
+
+  // Zero reads is a legitimate budget: the whole recall set is unread, nothing is judged date-less.
+  const noReads = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_max_reads: 0 }, { verifyPage, now: WINDOW_NOW });
+  assert.equal(noReads.news_verification.candidate_count, 5);
+  assert.equal(noReads.news_verification.read_attempts, 0);
+  assert.equal(noReads.news_verification.unread_count, 5);
+  assert.equal(noReads.news_verification.status, 'no_verified_result');
+  assert.deepEqual(noReads.results, []);
+});
+
+test('supplemental sources keep an independent source_failures list that no budget can drop or overwrite', async () => {
+  const body = candidateBody(3);
+  let calls = 0;
+  const verifyPage = async candidate => { calls++; return publishedPage(candidate.url, FRESH); };
+
+  // news_max_reads=0 must not silently discard the fail-closed diagnostic of an unwired catalog.
+  const feeds = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'feeds', news_max_reads: 0 }, { verifyPage, now: WINDOW_NOW });
+  assert.deepEqual(feeds.news_verification.source_failures, [{ source: 'feeds', code: 'catalog_empty', retryable: false }]);
+  assert.equal(feeds.news_verification.read_attempts, 0);
+  assert.equal(feeds.news_verification.candidate_count, 3);
+  assert.equal(feeds.news_verification.unread_count, 3);
+  assert.equal(feeds.news_verification.status, 'no_verified_result');
+  assert.deepEqual(feeds.news_verification.read_failures, []);
+  assert.deepEqual(feeds.results, []);
+
+  const gdelt = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'gdelt', news_max_reads: 0 }, { verifyPage, now: WINDOW_NOW });
+  assert.deepEqual(gdelt.news_verification.source_failures, [{ source: 'gdelt', code: 'gdelt_unavailable', retryable: false }]);
+
+  // hybrid reports both supplemental sources: the second failure must not overwrite the first.
+  const hybrid = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'hybrid', news_max_reads: 0 }, { verifyPage, now: WINDOW_NOW });
+  assert.deepEqual(hybrid.news_verification.source_failures, [
+    { source: 'feeds', code: 'catalog_empty', retryable: false },
+    { source: 'gdelt', code: 'gdelt_unavailable', retryable: false },
+  ]);
+  assert.equal(hybrid.news_verification.read_attempts, 0);
+  assert.equal(calls, 0, 'a source with no wired candidate catalog never reads pages');
+
+  // With a budget, hybrid still verifies its SearXNG recall: a missing supplemental source is a
+  // diagnostic, not a reason to hide results the recall path can actually prove.
+  const hybridRead = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'hybrid', news_min_sources: 1, news_max_reads: 1 }, { verifyPage, now: WINDOW_NOW });
+  assert.equal(hybridRead.news_verification.source_failures.length, 2);
+  assert.equal(hybridRead.news_verification.read_attempts, 1);
+  assert.equal(hybridRead.news_verification.verified_count, 1);
+  assert.equal(hybridRead.results.length, 1);
+  assert.equal(calls, 1);
+
+  // A verified request with no reachable candidate reader fails closed as well.
+  const noReader = await fixtureSearch(body, { query: 'report', news_mode: 'verified' });
+  assert.equal(noReader.news_verification.read_attempts, 0);
+  assert.deepEqual(noReader.news_verification.source_failures, [{ source: 'read', code: 'verify_unavailable', retryable: false }]);
+  assert.deepEqual(noReader.results, []);
+});
+
+test('verified mode separates an attempted read failure from the unread budget and keeps only a safe error kind', async () => {
+  const body = candidateBody(4);
+  const attempted = [];
+  const verifyPage = async candidate => {
+    attempted.push(candidate.url);
+    if (attempted.length === 1) throw Object.assign(new Error(`BACKEND-TOKEN-SECRET for ${candidate.url}`), { kind: 'blocked_by_robots', code: 'robot_challenge' });
+    return { source: { url: candidate.url }, temporal_evidence: [] };
+  };
+
+  const result = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_max_reads: 2 }, { verifyPage, now: WINDOW_NOW });
+  const summary = result.news_verification;
+  assert.equal(summary.read_attempts, 2);
+  assert.equal(summary.read_failure_count, 1, 'an attempted read that failed is a read_failure');
+  assert.equal(summary.unknown_count, 1);
+  assert.equal(summary.unread_count, 2, 'the budget tail stays unread instead of being blamed on the page');
+  assert.equal(summary.status, 'no_verified_result');
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(summary.read_failures, [{ url: body.results[0].url, error_kind: 'blocked_by_robots', error_code: 'robot_challenge' }]);
+  assert.equal(JSON.stringify(summary).includes('BACKEND-TOKEN-SECRET'), false, 'an upstream message never reaches the response');
+
+  // A non-token-shaped kind is replaced rather than echoed (no path traversal or message leak).
+  const unsafe = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_max_reads: 1 }, {
+    verifyPage: async () => { throw Object.assign(new Error('secret body'), { kind: '../../etc/passwd' }); },
+    now: WINDOW_NOW,
+  });
+  assert.deepEqual(unsafe.news_verification.read_failures, [{ url: body.results[0].url, error_kind: 'read_error', error_code: null }]);
+  assert.equal(unsafe.news_verification.read_failure_count, 1);
+  assert.equal(JSON.stringify(unsafe).includes('secret body'), false);
+});
+
+test('news_render=auto fails closed instead of silently reading through the lightweight path', async () => {
+  const body = candidateBody(3);
+  let calls = 0;
+  const verifyPage = async candidate => { calls++; return publishedPage(candidate.url, FRESH); };
+
+  const lightweight = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_min_sources: 1, news_max_reads: 3, news_render: 'never' }, { verifyPage, now: WINDOW_NOW });
+  assert.equal(lightweight.news_verification.render, 'never');
+  assert.equal(lightweight.news_verification.read_attempts, 3);
+  assert.equal(lightweight.results.length, 3);
+  assert.equal(calls, 3);
+
+  calls = 0;
+  const auto = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_min_sources: 1, news_max_reads: 3, news_render: 'auto' }, { verifyPage, now: WINDOW_NOW });
+  assert.equal(calls, 0, 'auto is never answered by the lightweight reader it did not ask for');
+  assert.equal(auto.news_verification.render, 'auto');
+  assert.equal(auto.news_verification.read_attempts, 0);
+  assert.equal(auto.news_verification.unread_count, 3);
+  assert.equal(auto.news_verification.status, 'no_verified_result');
+  assert.deepEqual(auto.results, []);
+  assert.ok(
+    auto.news_verification.source_failures.some(item => item.source === 'render' && item.code === 'render_auto_unsupported' && item.retryable === false),
+    'the unsupported render posture is reported instead of being ignored',
+  );
+});
+
 function precisionAt5(results, labels) {
   const top = results.slice(0, 5);
   if (top.length === 0) return null;

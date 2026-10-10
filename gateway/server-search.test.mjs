@@ -158,10 +158,66 @@ test('normal web_search stays compatible: no news keys and unchanged engine orde
   assert.equal(typeof payload.trace_id, 'string');
 });
 
-test('web_search advertises the news_mode control in its tool schema', { timeout: 30000 }, async t => {
+test('web_search advertises the news_mode union and the verified-only controls in its tool schema', { timeout: 30000 }, async t => {
   const { client } = await searchFixture(t);
   const { tools } = await client.listTools();
   const schema = tools.find(tool => tool.name === 'web_search').inputSchema;
-  assert.equal(schema.properties.news_mode.type, 'boolean');
-  assert.equal(schema.properties.news_mode.optional ?? true, true);
+
+  // SPEC #78: `news_mode` is a backward-compatible union, not a bare boolean — the old boolean
+  // contract stays accepted while "ranked"/"verified" select the explicit modes.
+  const mode = schema.properties.news_mode;
+  const variants = mode.anyOf ?? mode.oneOf ?? [mode];
+  assert.ok(variants.some(item => item.type === 'boolean'), `the legacy boolean must stay accepted: ${JSON.stringify(mode)}`);
+  for (const literal of ['ranked', 'verified']) {
+    assert.ok(variants.some(item => (item.const ?? item.enum?.[0]) === literal), `${literal} must be accepted: ${JSON.stringify(mode)}`);
+  }
+  assert.equal(mode.optional ?? true, true);
+
+  // The verified-only controls are advertised and bounded at the tool boundary.
+  assert.deepEqual(schema.properties.news_source.enum, ['searxng', 'feeds', 'gdelt', 'hybrid']);
+  assert.deepEqual(schema.properties.news_window.enum, ['rolling_24h', 'calendar_today']);
+  assert.deepEqual(schema.properties.news_render.enum, ['never', 'auto']);
+  assert.equal(schema.properties.news_min_sources.maximum, 4);
+  assert.equal(schema.properties.news_max_reads.maximum, 8);
+});
+
+test('web_search verified mode fails closed at the MCP boundary without inventing results', { timeout: 30000 }, async t => {
+  const { search } = await searchFixture(t);
+
+  // `feeds` has no wired catalog: the recall must not be dressed up as feed candidates, and the
+  // fail-closed reason has to survive the output-schema validation.
+  const feeds = await search({ query: 'report', news_mode: 'verified', news_source: 'feeds', news_max_reads: 0 });
+  assert.notEqual(feeds.isError, true, JSON.stringify(feeds));
+  const feedsPayload = feeds.structuredContent;
+  assert.equal(feedsPayload.news_mode, true);
+  const feedsSummary = feedsPayload.news_verification;
+  assert.equal(feedsSummary.mode, 'verified');
+  assert.equal(feedsSummary.source, 'feeds');
+  assert.equal(feedsSummary.render, 'never');
+  assert.equal(feedsSummary.status, 'no_verified_result');
+  assert.equal(feedsSummary.candidate_count, 2, 'the full deduped recall set is reported');
+  assert.equal(feedsSummary.read_attempts, 0);
+  assert.equal(feedsSummary.unread_count, 2);
+  assert.equal(feedsSummary.verified_count, 0);
+  assert.deepEqual(feedsSummary.source_failures, [{ source: 'feeds', code: 'catalog_empty', retryable: false }]);
+  assert.deepEqual(feedsSummary.read_failures, []);
+  assert.deepEqual(feedsPayload.results, [], 'unverifiable candidates never reach the verified result set');
+  // The text channel carries the same diagnosis as structuredContent.
+  assert.deepEqual(JSON.parse(feeds.content[0].text).news_verification.source_failures, feedsSummary.source_failures);
+
+  // `news_render=auto` has no wired auto read path: it is refused explicitly instead of being
+  // silently answered by the lightweight reader it did not ask for.
+  const auto = await search({ query: 'report', news_mode: 'verified', news_render: 'auto', news_min_sources: 1 });
+  assert.notEqual(auto.isError, true, JSON.stringify(auto));
+  const autoSummary = auto.structuredContent.news_verification;
+  assert.equal(autoSummary.render, 'auto');
+  assert.equal(autoSummary.read_attempts, 0);
+  assert.equal(autoSummary.status, 'no_verified_result');
+  assert.deepEqual(auto.structuredContent.results, []);
+  assert.ok(autoSummary.source_failures.some(item => item.source === 'render' && item.code === 'render_auto_unsupported'));
+
+  // A normal or ranked search still never grows a verified block.
+  const ranked = await search({ query: 'report', news_mode: 'ranked' });
+  assert.notEqual(ranked.isError, true, JSON.stringify(ranked));
+  assert.equal(Object.hasOwn(ranked.structuredContent, 'news_verification'), false);
 });

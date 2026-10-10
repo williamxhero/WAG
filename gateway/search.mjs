@@ -1,5 +1,6 @@
 import { filterLowQualityResults, normalizeSearchResults, normalizeUrlForDedup, strictTimeRangeCompliance, timeRangeCompliance } from './evidence-metadata.mjs';
 import { applyEnginePool, createEngineHealth, enginePoolConfig, failureClasses } from './engine-health.mjs';
+import { evaluateResultEvidence, evaluateVerifiedStatus, normalizeNewsMode, normalizeVerifiedParams, resolveNewsWindow, aggregatePublisherEvidence } from './news-verified.mjs';
 
 const searchParameters = ['categories', 'engines', 'language'];
 
@@ -193,7 +194,61 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
   return response.json();
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now } = {}) {
+// ---------------------------------------------------------------------------------------------
+// Verified-news wiring (SPEC #78 stage C)
+// ---------------------------------------------------------------------------------------------
+
+// Fail-closed source diagnostics. A supplemental candidate source that is not wired yet (the feed
+// catalog and GDELT arrive in later stages) is never dropped silently and never overwritten by a
+// later failure: each configured source contributes its own entry, so `hybrid` reports both without
+// hiding either. `searxng` needs no entry — it is the recall path itself.
+function newsSourceFailures(source) {
+  const failures = [];
+  if (source === 'feeds' || source === 'hybrid') failures.push({ source: 'feeds', code: 'catalog_empty', retryable: false });
+  if (source === 'gdelt' || source === 'hybrid') failures.push({ source: 'gdelt', code: 'gdelt_unavailable', retryable: false });
+  return failures;
+}
+
+// Only a candidate source that actually produced the recalled set may be page-verified. `feeds` and
+// `gdelt` have no wired catalog yet, and reading the SearXNG recall as though it were a feed/GDELT
+// candidate would misreport recall provenance, so those two fail closed with zero read attempts.
+function newsReadSourceReady(source) {
+  return source === 'searxng' || source === 'hybrid';
+}
+
+const SAFE_ERROR_TOKEN = /^[a-z0-9_]{1,40}$/i;
+
+// A read failure must stay diagnosable without echoing an upstream message (page body, URL, token)
+// into the response, so only a short, token-shaped `kind`/`code` is kept.
+function safeErrorToken(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return SAFE_ERROR_TOKEN.test(text) ? text.toLowerCase() : null;
+}
+
+function classifyReadFailure(error) {
+  return { error_kind: safeErrorToken(error?.kind) ?? 'read_error', error_code: safeErrorToken(error?.code) ?? null };
+}
+
+// The evidence record for a candidate whose page read was attempted and failed. It is deliberately
+// NOT `unread`: the budget did reach the page, so reporting it as never-read would hide a real
+// failure. Everything non-recoverable is null — there is no publisher evidence to claim.
+function readFailureEvidence(candidate, checkedAt, failure) {
+  return {
+    status: 'read_failure',
+    source_kind: 'none',
+    source: null,
+    verified_eligible: false,
+    published_at: null,
+    published_on: null,
+    precision: null,
+    evidence_url: candidate?.url ?? null,
+    checked_at: checkedAt,
+    conflict_count: 0,
+    failure,
+  };
+}
+
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage } = {}) {
   const stages_ms = {};
   // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
   // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
@@ -267,10 +322,74 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   if (strictWindow) temporalFields.time_window_strict = true;
 
   // Opt-in news mode: an explicit `newsMode` option wins; otherwise a caller that already requested
-  // the SearXNG `news` category opts in. It only reorders the already-filtered, already-deduped set,
-  // so recall is unchanged and normal-mode output stays byte-for-byte compatible.
-  const newsEnabled = newsMode === undefined ? isNewsCategory(input.categories) : Boolean(newsMode);
+  // the SearXNG `news` category opts in. `ranked` only reorders the already-filtered, already-deduped
+  // set, so its recall is unchanged; `verified` additionally reads a bounded prefix of that set and
+  // returns only the publisher-proven candidates. Normal-mode output stays byte-for-byte compatible.
+  const requestedNewsMode = newsMode === undefined
+    ? (input.news_mode ?? (isNewsCategory(input.categories) ? 'ranked' : 'off'))
+    : newsMode;
+  const normalizedNewsMode = normalizeNewsMode(requestedNewsMode);
+  const verifiedParams = normalizedNewsMode === 'verified' ? normalizeVerifiedParams(input) : null;
+  const newsEnabled = normalizedNewsMode !== 'off';
   const ranked = newsEnabled ? rankNewsResults(results, input.query) : null;
+  let verifiedResults = ranked ?? results;
+  let newsVerification = null;
+  if (normalizedNewsMode === 'verified') {
+    const verifiedNow = typeof now === 'function' ? now() : now;
+    const window = resolveNewsWindow({ window: verifiedParams.news_window, now: verifiedNow });
+    const checkedAt = new Date(verifiedNow).toISOString();
+    // Everything recalled stays on the books: `news_max_reads` bounds how many candidate pages we
+    // read, never the candidate identity — or the candidate count — we report back.
+    const candidates = verifiedResults;
+    const sourceFailures = newsSourceFailures(verifiedParams.news_source);
+    // `news_render=auto` asks for the crawler (Crawl4AI) render path. Stage C has no wired auto read
+    // path, and answering from a lightweight fetch while echoing `auto` would misreport how the page
+    // was actually read, so the request fails closed: nothing is read and the reason is carried as a
+    // source failure instead of a silently downgraded render.
+    const renderUnsupported = verifiedParams.news_render === 'auto';
+    if (renderUnsupported) sourceFailures.push({ source: 'render', code: 'render_auto_unsupported', retryable: false });
+    const verifyAvailable = typeof verifyPage === 'function';
+    if (!verifyAvailable) sourceFailures.push({ source: 'read', code: 'verify_unavailable', retryable: false });
+    const readBudget = renderUnsupported || !verifyAvailable || !newsReadSourceReady(verifiedParams.news_source)
+      ? 0
+      : Math.min(verifiedParams.news_max_reads, candidates.length);
+    const evaluatedResults = [];
+    const readFailures = [];
+    for (const candidate of candidates.slice(0, readBudget)) {
+      let evidence;
+      try {
+        const pageEvidence = await verifyPage(candidate, { signal, render: verifiedParams.news_render });
+        evidence = evaluateResultEvidence(aggregatePublisherEvidence(pageEvidence, { url: candidate.url }), window, { checked_at: checkedAt });
+      } catch (error) {
+        // Unread and read_failure are different facts: this page WAS read and the read failed, so it
+        // is counted as a failure with a safe kind/code rather than as budget we never spent.
+        const failure = classifyReadFailure(error);
+        readFailures.push({ url: candidate.url ?? null, ...failure });
+        evidence = readFailureEvidence(candidate, checkedAt, failure);
+      }
+      evaluatedResults.push({ ...candidate, news_evidence: evidence });
+    }
+    // SPEC #78 §5.8: `results` carries only the verified, in-window, publisher-proven candidates.
+    // stale / unknown / read_failure / unread are reported as counts, never mixed into results.
+    verifiedResults = evaluatedResults.filter(item => item.news_evidence.status === 'verified');
+    newsVerification = {
+      mode: 'verified',
+      source: verifiedParams.news_source,
+      window: window.window,
+      window_timezone: window.window_timezone,
+      evaluated_at: window.evaluated_at,
+      time_range_is_discovery_hint: true,
+      render: verifiedParams.news_render,
+      ...evaluateVerifiedStatus(evaluatedResults, {
+        min_sources: verifiedParams.news_min_sources,
+        candidate_count: candidates.length,
+        read_attempts: readBudget,
+        unread_count: candidates.length - readBudget,
+      }),
+      read_failures: readFailures,
+      source_failures: sourceFailures,
+    };
+  }
 
   // Feed the selected response back into the bounded local health state: engines that answered clear
   // their cooldown, engines reported unresponsive get one (only for the locally-cooled classes).
@@ -297,7 +416,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const cooldownSnapshot = enginePoolField ? engineHealth.snapshot(now()) : null;
 
   return {
-    results: ranked ?? results,
+    results: verifiedResults,
     number_of_results: body.number_of_results ?? results.length,
     stages_ms,
     attempts,
@@ -310,6 +429,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
           news_mode: true,
           news_ranking: summarizeNewsRanking(results, ranked, input.query),
           dedup: summarizeSourceEvidence(body.results),
+          ...(newsVerification ? { news_verification: newsVerification } : {}),
         }
       : {}),
     ...(Object.prototype.hasOwnProperty.call(body, 'unresponsive_engines')

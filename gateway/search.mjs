@@ -199,21 +199,85 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
 // ---------------------------------------------------------------------------------------------
 
 // Fail-closed source diagnostics. A supplemental candidate source that is not wired yet (the feed
-// catalog and GDELT arrive in later stages) is never dropped silently and never overwritten by a
-// later failure: each configured source contributes its own entry, so `hybrid` reports both without
-// hiding either. `searxng` needs no entry — it is the recall path itself.
-function newsSourceFailures(source) {
+// catalog, or an unwired GDELT client) is never dropped silently and never overwritten by a later
+// failure: each configured source contributes its own entry, so `hybrid` reports both without hiding
+// either. `searxng` needs no entry — it is the recall path itself. A *wired* GDELT client reports its
+// own real outcome instead of a blanket `gdelt_unavailable`.
+function newsSourceFailures(source, { gdeltWired = false } = {}) {
   const failures = [];
   if (source === 'feeds' || source === 'hybrid') failures.push({ source: 'feeds', code: 'catalog_empty', retryable: false });
-  if (source === 'gdelt' || source === 'hybrid') failures.push({ source: 'gdelt', code: 'gdelt_unavailable', retryable: false });
+  if (!gdeltWired && (source === 'gdelt' || source === 'hybrid')) failures.push({ source: 'gdelt', code: 'gdelt_unavailable', retryable: false });
   return failures;
 }
 
-// Only a candidate source that actually produced the recalled set may be page-verified. `feeds` and
-// `gdelt` have no wired catalog yet, and reading the SearXNG recall as though it were a feed/GDELT
-// candidate would misreport recall provenance, so those two fail closed with zero read attempts.
-function newsReadSourceReady(source) {
-  return source === 'searxng' || source === 'hybrid';
+// Only a candidate source that actually produced candidates may be page-verified. `feeds` has no
+// wired catalog yet, so reading the SearXNG recall as though it were a feed candidate would misreport
+// recall provenance. `gdelt` reads its own discovered candidates only when a discovery client is
+// wired; `searxng`/`hybrid` always read (hybrid is the SearXNG recall plus any GDELT candidates).
+function newsReadSourceReady(source, { gdeltWired = false } = {}) {
+  if (source === 'feeds') return false;
+  if (source === 'gdelt') return gdeltWired;
+  return true;
+}
+
+// GDELT discovery (SPEC #78 stage D). A discovered article is a *candidate* in the same shape as a
+// normalized search result, so it flows through the existing page-verification loop unchanged. Its
+// GDELT `seen_at` is carried only as a discovery-only `gdelt.seendate` temporal source (which
+// news-verified.mjs classifies as non-eligible) and there is no publication claim: `published_at` /
+// `published_on` stay null, so GDELT time can never become `verified` evidence.
+function gdeltCandidateResult(candidate, retrievedAt) {
+  let host = '';
+  try { host = new URL(candidate.url).hostname.toLowerCase(); } catch { /* validated below */ }
+  return {
+    title: candidate.title ?? candidate.domain ?? null,
+    url: candidate.url,
+    content: '',
+    engine: null,
+    category: null,
+    published_at: null,
+    published_on: null,
+    precision: null,
+    retrieved_at: retrievedAt,
+    source: { url: candidate.url, host, search_engine: null },
+    temporal_evidence: [
+      ...(candidate.seen_at ? [{ kind: 'seen_at', value: candidate.seen_at, on: candidate.seen_on, precision: 'instant', source: 'gdelt.seendate' }] : []),
+      { kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' },
+    ],
+  };
+}
+
+// Runs the injected discovery client exactly once. It never throws: an external failure becomes a
+// single, separate `source_failure` (never a read failure, never a fabricated candidate).
+async function collectGdeltCandidates({ discoverGdelt, query, window, signal, retrievedAt }) {
+  let discovered;
+  try {
+    discovered = await discoverGdelt({ query, window, signal });
+  } catch {
+    return { candidates: [], source_failure: { source: 'gdelt', code: 'gdelt_unavailable', retryable: false } };
+  }
+  const failure = discovered?.source_failure;
+  const source_failure = failure
+    ? { source: 'gdelt', code: safeErrorToken(failure.code) ?? 'gdelt_unavailable', retryable: Boolean(failure.retryable) }
+    : null;
+  const candidates = (Array.isArray(discovered?.candidates) ? discovered.candidates : [])
+    .filter(candidate => typeof candidate?.url === 'string' && /^https?:\/\//i.test(candidate.url))
+    .map(candidate => gdeltCandidateResult(candidate, retrievedAt));
+  return { candidates, source_failure };
+}
+
+// Appends discovered GDELT candidates after the primary list, dropping any URL the primary list (or an
+// earlier GDELT entry) already covers under the shared dedup normalizer. The primary list keeps
+// priority, so the read budget is spent on the recalled set before the supplemental candidates.
+function mergeGdeltCandidates(primary, extra) {
+  const seen = new Set(primary.map(item => normalizeUrlForDedup(item.url)));
+  const merged = [...primary];
+  for (const item of extra) {
+    const key = normalizeUrlForDedup(item.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged;
 }
 
 const SAFE_ERROR_TOKEN = /^[a-z0-9_]{1,40}$/i;
@@ -248,7 +312,7 @@ function readFailureEvidence(candidate, checkedAt, failure) {
   };
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage, discoverGdelt } = {}) {
   const stages_ms = {};
   // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
   // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
@@ -338,10 +402,8 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     const verifiedNow = typeof now === 'function' ? now() : now;
     const window = resolveNewsWindow({ window: verifiedParams.news_window, now: verifiedNow });
     const checkedAt = new Date(verifiedNow).toISOString();
-    // Everything recalled stays on the books: `news_max_reads` bounds how many candidate pages we
-    // read, never the candidate identity — or the candidate count — we report back.
-    const candidates = verifiedResults;
-    const sourceFailures = newsSourceFailures(verifiedParams.news_source);
+    const gdeltWired = typeof discoverGdelt === 'function';
+    const sourceFailures = newsSourceFailures(verifiedParams.news_source, { gdeltWired });
     // `news_render=auto` asks for the crawler (Crawl4AI) render path. Stage C has no wired auto read
     // path, and answering from a lightweight fetch while echoing `auto` would misreport how the page
     // was actually read, so the request fails closed: nothing is read and the reason is carried as a
@@ -350,7 +412,26 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     if (renderUnsupported) sourceFailures.push({ source: 'render', code: 'render_auto_unsupported', retryable: false });
     const verifyAvailable = typeof verifyPage === 'function';
     if (!verifyAvailable) sourceFailures.push({ source: 'read', code: 'verify_unavailable', retryable: false });
-    const readBudget = renderUnsupported || !verifyAvailable || !newsReadSourceReady(verifiedParams.news_source)
+
+    // Candidate recall. `searxng` reads the ranked recall set; `gdelt`/`hybrid` additionally run a
+    // fixed-origin GDELT discovery that only proposes candidate URLs (never verified results). The
+    // discovered candidates are appended after the recall set so the read budget is spent on proven
+    // recall first; a GDELT outage is recorded as one separate `source_failure`. An unwired GDELT
+    // client keeps the stage-C fail-closed posture (`gdelt_unavailable`, zero reads).
+    const wantsGdelt = verifiedParams.news_source === 'gdelt' || verifiedParams.news_source === 'hybrid';
+    let candidates = verifiedResults;
+    if (wantsGdelt && gdeltWired) {
+      const discovered = await collectGdeltCandidates({ discoverGdelt, query: input.query, window, signal, retrievedAt: checkedAt });
+      if (discovered.source_failure) sourceFailures.push(discovered.source_failure);
+      candidates = verifiedParams.news_source === 'gdelt'
+        ? mergeGdeltCandidates([], discovered.candidates)
+        : mergeGdeltCandidates(verifiedResults, discovered.candidates);
+    } else if (wantsGdelt && verifiedParams.news_source === 'gdelt') {
+      // No discovery client: keep the recall set on the books as unread candidates (fail-closed),
+      // mirroring `feeds` — the SearXNG recall is never dressed up as GDELT candidates.
+      candidates = verifiedResults;
+    }
+    const readBudget = renderUnsupported || !verifyAvailable || !newsReadSourceReady(verifiedParams.news_source, { gdeltWired })
       ? 0
       : Math.min(verifiedParams.news_max_reads, candidates.length);
     const evaluatedResults = [];

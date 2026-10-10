@@ -19,6 +19,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import * as z from 'zod/v4';
 import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
+import { discoverGdeltCandidates } from './news-gdelt.mjs';
 import { enginePoolConfig, validateStrictPool } from './engine-health.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
 import { createReadiness, DEFAULT_PROBE_TIMEOUT_MS } from './readiness.mjs';
@@ -330,13 +331,13 @@ async function withHostSlot(host, job) {
   hostSlots.set(host, state);
   try { return await job(); } finally { state.active--; if (!state.active) hostSlots.delete(host); }
 }
-async function fetchPublic(raw) {
+async function fetchPublic(raw, signal) {
   let current = raw;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const { url, records } = await resolvePublicUrl(current);
     let response;
     try {
-      response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records));
+      response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records, signal));
     } catch (error) {
       // Keep the already checked URL that produced the failure so the read path
       // can hand a validated target to the renderer when it falls back.
@@ -709,7 +710,16 @@ function getServer() {
         const fetched = await fetchPublic(candidate.url);
         const decoded = decodePageBody(fetched.body, fetched.contentType);
         return extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
-      } });
+      }, discoverGdelt: ({ query, window, signal }) => discoverGdeltCandidates({
+        // SPEC #78 stage D: fixed-origin GDELT discovery, candidates only. The origin/path/params live
+        // in news-gdelt.mjs and no caller can override them; the request goes through the same
+        // SSRF-checked, address-pinned `fetchPublic` transport as every other public read.
+        query, window, signal,
+        transport: async (url, { signal: requestSignal }) => {
+          const fetched = await fetchPublic(url, requestSignal);
+          return { status: fetched.status, body: fetched.body };
+        },
+      }) });
       const duration_ms = Date.now() - started;
       // Search-module diagnostics that callers rely on for temporal honesty and news mode; forwarded
       // only when the module actually produced them so compatibility responses keep their previous

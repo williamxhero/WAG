@@ -396,3 +396,132 @@ test('paired real labelled samples: news ranking keeps recall and does not lower
   assert.ok(improved >= 1, 'at least one labelled sample must improve');
   assert.ok(afterSum > beforeSum, `mean Precision@5 must improve (${beforeSum} -> ${afterSum})`);
 });
+
+// ---------------------------------------------------------------------------------------------
+// SPEC #78 stage D: GDELT discovery supplies candidates only — a page still has to prove itself.
+// ---------------------------------------------------------------------------------------------
+
+const GDELT_SEEN = '2026-10-10T01:00:00.000Z';
+
+function gdeltCandidate(url, extra = {}) {
+  return { url, title: `GDELT ${url}`, domain: new URL(url).hostname.toLowerCase(), seen_at: extra.seen_at ?? GDELT_SEEN, seen_on: (extra.seen_at ?? GDELT_SEEN).slice(0, 10) };
+}
+
+// A discovery client stub. Records the invocation payload so the test can prove the resolved window
+// is passed through and the search ran exactly once.
+function gdeltClient(candidates = [], { failure = null } = {}) {
+  const calls = [];
+  const discoverGdelt = async payload => {
+    calls.push(payload);
+    return failure ? { candidates: [], source_failure: failure } : { candidates };
+  };
+  discoverGdelt.calls = calls;
+  return discoverGdelt;
+}
+
+test('gdelt-only reads the discovered candidates and never the SearXNG recall', async () => {
+  const body = candidateBody(3);
+  const discoverGdelt = gdeltClient([gdeltCandidate('https://gdelt.one.example/a'), gdeltCandidate('https://gdelt.two.example/b')]);
+  const reads = [];
+  // Neither discovered page declares a publisher date: nothing may become verified on GDELT time.
+  const verifyPage = async candidate => { reads.push(candidate.url); return { source: { url: candidate.url }, temporal_evidence: [] }; };
+
+  const result = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'gdelt', news_max_reads: 8 }, { verifyPage, now: WINDOW_NOW, discoverGdelt });
+  const summary = result.news_verification;
+
+  assert.equal(discoverGdelt.calls.length, 1);
+  assert.equal(discoverGdelt.calls[0].query, 'report');
+  assert.equal(discoverGdelt.calls[0].window.window, 'rolling_24h');
+  assert.deepEqual(summary.source_failures, [], 'a successful discovery reports no source failure');
+  // The recall set is the two GDELT candidates only — the three SearXNG results are not GDELT candidates.
+  assert.equal(summary.candidate_count, 2);
+  assert.equal(summary.read_attempts, 2);
+  assert.deepEqual(reads.sort(), ['https://gdelt.one.example/a', 'https://gdelt.two.example/b']);
+  assert.equal(summary.unknown_count, 2, 'a page without publisher evidence is unknown, not verified');
+  assert.equal(summary.status, 'no_verified_result');
+  assert.deepEqual(result.results, []);
+});
+
+test('a GDELT candidate verifies only through its page publisher date, never its seendate', async () => {
+  const body = candidateBody(2);
+  const url = 'https://gdelt.one.example/a';
+  const discoverGdelt = gdeltClient([gdeltCandidate(url)]);
+
+  // 1. The page exposes only a GDELT-labelled date: it is discovery-only and cannot verify.
+  const gdeltOnly = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'gdelt', news_min_sources: 1, news_max_reads: 1 }, {
+    now: WINDOW_NOW,
+    discoverGdelt,
+    verifyPage: async candidate => ({ source: { url: candidate.url }, temporal_evidence: [{ kind: 'published_at', value: FRESH, on: '2026-10-10', precision: 'instant', source: 'gdelt.seendate' }] }),
+  });
+  assert.equal(gdeltOnly.news_verification.status, 'no_verified_result');
+  assert.deepEqual(gdeltOnly.results, []);
+
+  // 2. A genuine page publisher instant on the same URL does verify.
+  const proven = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'gdelt', news_min_sources: 1, news_max_reads: 1 }, {
+    now: WINDOW_NOW,
+    discoverGdelt,
+    verifyPage: async candidate => publishedPage(candidate.url, FRESH),
+  });
+  assert.equal(proven.news_verification.status, 'verified');
+  assert.equal(proven.results.length, 1);
+  assert.equal(proven.results[0].url, url);
+  assert.equal(proven.results[0].news_evidence.status, 'verified');
+  assert.equal(proven.results[0].news_evidence.published_at, FRESH);
+});
+
+test('a GDELT source failure is one independent entry and hybrid still verifies the SearXNG recall', async () => {
+  const body = candidateBody(2);
+
+  // gdelt-only outage: the failure is recorded, nothing is invented, and zero pages are read.
+  let calls = 0;
+  const verifyPage = async candidate => { calls++; return publishedPage(candidate.url, FRESH); };
+  const outage = gdeltClient([], { failure: { source: 'gdelt', code: 'timeout', retryable: false } });
+  const gdelt = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'gdelt', news_min_sources: 1, news_max_reads: 4 }, { verifyPage, now: WINDOW_NOW, discoverGdelt: outage });
+  assert.deepEqual(gdelt.news_verification.source_failures, [{ source: 'gdelt', code: 'timeout', retryable: false }]);
+  assert.equal(gdelt.news_verification.read_attempts, 0);
+  assert.deepEqual(gdelt.results, []);
+  assert.equal(calls, 0, 'a failed discovery never reads a page');
+
+  // hybrid: the GDELT failure must not hide or block the SearXNG recall, and stays a single entry.
+  const hybrid = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'hybrid', news_min_sources: 1, news_max_reads: 2 }, { verifyPage, now: WINDOW_NOW, discoverGdelt: outage });
+  assert.deepEqual(hybrid.news_verification.source_failures, [
+    { source: 'feeds', code: 'catalog_empty', retryable: false },
+    { source: 'gdelt', code: 'timeout', retryable: false },
+  ]);
+  assert.equal(hybrid.news_verification.read_attempts, 2);
+  assert.equal(hybrid.news_verification.verified_count, 2);
+  assert.equal(hybrid.results.length, 2);
+  assert.equal(calls, 2);
+
+  // A throwing discovery client is contained as a single fail-closed entry as well.
+  const throwing = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'gdelt' }, {
+    verifyPage, now: WINDOW_NOW,
+    discoverGdelt: async () => { throw new Error('backend down'); },
+  });
+  assert.deepEqual(throwing.news_verification.source_failures, [{ source: 'gdelt', code: 'gdelt_unavailable', retryable: false }]);
+});
+
+test('hybrid appends GDELT candidates after the recall set and dedups URLs the recall already covers', async () => {
+  const body = candidateBody(2);
+  // One discovered URL is already in the recall (with a tracking param → same normalized URL); the
+  // other is genuinely new.
+  const discoverGdelt = gdeltClient([
+    gdeltCandidate(`${body.results[0].url}?utm_source=gdelt`),
+    gdeltCandidate('https://gdelt.extra.example/c'),
+  ]);
+  const reads = [];
+  const verifyPage = async candidate => { reads.push(candidate.url); return publishedPage(candidate.url, FRESH); };
+
+  const result = await fixtureSearch(body, { query: 'report', news_mode: 'verified', news_source: 'hybrid', news_min_sources: 1, news_max_reads: 8 }, { verifyPage, now: WINDOW_NOW, discoverGdelt });
+  const summary = result.news_verification;
+
+  // 2 recalled + 1 new = 3 candidates (the duplicate-with-tracking-param is collapsed).
+  assert.equal(summary.candidate_count, 3);
+  assert.equal(summary.read_attempts, 3);
+  assert.equal(summary.verified_count, 3);
+  assert.equal(summary.distinct_publishers, 3);
+  assert.equal(summary.status, 'verified');
+  assert.equal(reads[0], body.results[0].url, 'the recall set is read before the supplemental GDELT candidates');
+  assert.equal(reads.at(-1), 'https://gdelt.extra.example/c');
+  assert.equal(result.results.length, 3);
+});

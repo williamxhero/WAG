@@ -86,13 +86,15 @@ export function gdeltSeenInstant(value) {
   if (!match) return null;
   const [, year, month, day, hour, minute, second] = match;
   const ms = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  const date = new Date(ms);
+  if (!Number.isFinite(ms) || date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day) || date.getUTCHours() !== Number(hour) || date.getUTCMinutes() !== Number(minute) || date.getUTCSeconds() !== Number(second)) return null;
+  return date.toISOString();
 }
 
 // Parses the GDELT DOC JSON envelope into raw candidate records. Malformed JSON, a non-array
 // `articles` field and an over-budget payload are reported as failures rather than an empty success.
 // Non-HTTP article URLs are dropped (never echoed into a candidate that a reader might then fetch).
-export function parseGdeltResponse(body) {
+export function parseGdeltResponse(body, { maxRecords } = {}) {
   const raw = Buffer.isBuffer(body) ? body.toString('utf8') : typeof body === 'string' ? body : '';
   if (Buffer.byteLength(raw, 'utf8') > GDELT_LIMITS.maxBytes) return { ok: false, code: 'payload_limit', candidates: [] };
   if (raw.trim() === '') return { ok: false, code: 'invalid_response', candidates: [] };
@@ -102,12 +104,12 @@ export function parseGdeltResponse(body) {
   } catch {
     return { ok: false, code: 'invalid_response', candidates: [] };
   }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { ok: false, code: 'invalid_response', candidates: [] };
-  if ('articles' in payload && !Array.isArray(payload.articles)) return { ok: false, code: 'invalid_response', candidates: [] };
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray(payload.articles)) return { ok: false, code: 'invalid_response', candidates: [] };
 
   const seen = new Set();
   const candidates = [];
-  for (const article of Array.isArray(payload.articles) ? payload.articles : []) {
+  const limit = boundRecords(maxRecords);
+  for (const article of payload.articles.slice(0, limit)) {
     const url = httpUrl(article?.url);
     if (!url) continue;
     if (seen.has(url.href)) continue;
@@ -154,6 +156,7 @@ function classifyTransportError(error) {
     case 'ssrf_blocked': return 'ssrf_blocked';
     case 'dns_error': return 'dns_failed';
     case 'redirect_limit': return 'redirect_blocked';
+    case 'redirect_blocked': return 'redirect_blocked';
     case 'egress_timeout':
     case 'upstream_timeout': return 'timeout';
     case 'response_too_large': return 'payload_limit';
@@ -185,7 +188,7 @@ export async function discoverGdeltCandidates({ query, maxRecords, window, trans
   if (status !== null && (status < 200 || status >= 300)) {
     return { ok: false, source_failure: sourceFailure(status === 429 ? 'rate_limited' : 'http_error') };
   }
-  const parsed = parseGdeltResponse(response?.body);
+  const parsed = parseGdeltResponse(response?.body, { maxRecords });
   if (!parsed.ok) return { ok: false, source_failure: sourceFailure(parsed.code) };
   return { ok: true, candidates: preselectGdeltCandidates(parsed.candidates, window) };
 }

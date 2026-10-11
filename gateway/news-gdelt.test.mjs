@@ -83,6 +83,8 @@ test('GDELT seendate converts to a discovery instant only', () => {
   assert.equal(gdeltSeenInstant('20261010T013000Z'), '2026-10-10T01:30:00.000Z');
   assert.equal(gdeltSeenInstant('20261010T013000'), '2026-10-10T01:30:00.000Z');
   assert.equal(gdeltSeenInstant('not-a-date'), null);
+  assert.equal(gdeltSeenInstant('20260230T013000Z'), null);
+  assert.equal(gdeltSeenInstant('20261301T013000Z'), null);
   assert.equal(gdeltSeenInstant(''), null);
   // The source label is discovery-only: it can never be a verified evidence source.
   assert.equal(sourceKindFromRaw('gdelt.seendate'), 'gdelt');
@@ -116,8 +118,11 @@ test('the response parser keeps only HTTP article URLs, collapses duplicates and
   assert.equal(parseGdeltResponse('').code, 'invalid_response');
   assert.equal(parseGdeltResponse(JSON.stringify({ articles: 'nope' })).code, 'invalid_response');
   assert.equal(parseGdeltResponse(Buffer.from('x'.repeat(GDELT_LIMITS.maxBytes + 1))).code, 'payload_limit');
-  // Missing `articles` is an empty result, not a failure (GDELT returns that for no matches).
-  assert.deepEqual(parseGdeltResponse(JSON.stringify({})).candidates, []);
+  for (const malformed of [{}, { error: 'bad' }, [], { articles: {} }]) {
+    assert.equal(parseGdeltResponse(JSON.stringify(malformed)).code, 'invalid_response');
+  }
+  const bounded = parseGdeltResponse(JSON.stringify({ articles: Array.from({ length: 5 }, (_, i) => ({ url: `https://x.example/${i}` })) }), { maxRecords: 2 });
+  assert.equal(bounded.candidates.length, 2);
 });
 
 test('preselection drops candidates GDELT dated before the window and orders the rest newest-first', () => {
@@ -149,6 +154,7 @@ test('every external failure becomes one classified source_failure instead of a 
   const cases = [
     [mockTransport(Object.assign(new Error('dns'), { kind: 'dns_error' })), 'dns_failed'],
     [mockTransport(Object.assign(new Error('blocked'), { kind: 'ssrf_blocked' })), 'ssrf_blocked'],
+    [mockTransport(Object.assign(new Error('cross-origin redirect blocked'), { kind: 'redirect_blocked' })), 'redirect_blocked'],
     [mockTransport(Object.assign(new Error('slow'), { name: 'AbortError' })), 'timeout'],
     [mockTransport({ status: 503, body: 'busy' }), 'http_error'],
     [mockTransport({ status: 429, body: 'slow down' }), 'rate_limited'],

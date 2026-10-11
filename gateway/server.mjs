@@ -19,7 +19,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import * as z from 'zod/v4';
 import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
-import { discoverGdeltCandidates } from './news-gdelt.mjs';
+import { discoverGdeltCandidates, GDELT_ORIGIN } from './news-gdelt.mjs';
 import { enginePoolConfig, validateStrictPool } from './engine-health.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
 import { createReadiness, DEFAULT_PROBE_TIMEOUT_MS } from './readiness.mjs';
@@ -331,7 +331,7 @@ async function withHostSlot(host, job) {
   hostSlots.set(host, state);
   try { return await job(); } finally { state.active--; if (!state.active) hostSlots.delete(host); }
 }
-async function fetchPublic(raw, signal) {
+async function fetchPublic(raw, signal, redirectOrigin = null) {
   let current = raw;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const { url, records } = await resolvePublicUrl(current);
@@ -346,7 +346,11 @@ async function fetchPublic(raw, signal) {
     }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       if (!response.headers.location) throw rejectError(`upstream returned redirect ${response.status} without a location`, 'redirect_without_location', { httpStatus: response.status });
-      current = new URL(response.headers.location, url).href;
+      const redirected = new URL(response.headers.location, url);
+      if (redirectOrigin && redirected.origin !== redirectOrigin) {
+        throw rejectError('cross-origin redirect blocked', 'redirect_blocked', { host: redirected.hostname });
+      }
+      current = redirected.href;
       continue;
     }
     return { ...response, finalUrl: url.href, contentType: response.headers['content-type'] ?? '', bytes: response.body.length, contentHash: crypto.createHash('sha256').update(response.body).digest('hex') };
@@ -716,7 +720,7 @@ function getServer() {
         // SSRF-checked, address-pinned `fetchPublic` transport as every other public read.
         query, window, signal,
         transport: async (url, { signal: requestSignal }) => {
-          const fetched = await fetchPublic(url, requestSignal);
+          const fetched = await fetchPublic(url, requestSignal, GDELT_ORIGIN);
           return { status: fetched.status, body: fetched.body };
         },
       }) });

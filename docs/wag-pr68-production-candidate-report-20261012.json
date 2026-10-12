@@ -1,0 +1,1140 @@
+{
+  "probe": "wag-search-quality-probe",
+  "version": "1.0.0",
+  "gateway_host": "yosef-server:8930",
+  "started_at": "2026-10-12T11:38:58.237Z",
+  "finished_at": "2026-10-12T11:39:19.245Z",
+  "window": {
+    "start": null,
+    "end": null
+  },
+  "searches": [
+    {
+      "trace_id": "0aa337f7-48a7-4af0-8272-3ef926cace75",
+      "params": {
+        "query": "中国 经济 政策",
+        "language": "zh-CN"
+      },
+      "query": "中国 经济 政策",
+      "query_echo_ok": true,
+      "number_of_results": 15,
+      "time_range": null,
+      "time_range_applied": null,
+      "time_range_enforced": null,
+      "time_range_note": null,
+      "time_window_strict": null,
+      "filtered_out": 0,
+      "filtered_reasons": {},
+      "unresponsive_engines": [
+        [
+          "bing",
+          "超时"
+        ],
+        [
+          "quark",
+          "暂停服务: 验证码"
+        ]
+      ],
+      "results": [
+        {
+          "title": "【专家谈｜中国经济持续向好 底气何来？】 -国家发展和改革委员会",
+          "url": "https://www.ndrc.gov.cn/xwdt/spfg/zfzjt/202503/t20250307_1396465.html",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": "2025-03-07",
+          "precision": "day",
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.ndrc.gov.cn/xwdt/spfg/zfzjt/202503/t20250307_1396465.html",
+            "host": "www.ndrc.gov.cn",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "published_on",
+              "value": null,
+              "on": "2025-03-07",
+              "precision": "day",
+              "source": "url.pattern"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "余永定：对过去 20 多年宏观调控政策的几点思考_爱思想",
+          "url": "https://www.aisixiang.com/data/165244.html",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.aisixiang.com/data/165244.html",
+            "host": "www.aisixiang.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "8/31... - YouTube",
+          "url": "https://www.youtube.com/watch?v=q68NgmOadig",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.youtube.com/watch?v=q68NgmOadig",
+            "host": "www.youtube.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Henan social sciences",
+          "url": "https://marx.bnu.edu.cn/docs/2026-03/42d7457eca32442eb24cf983399bdfc1.pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": "2026-03",
+          "precision": "month",
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://marx.bnu.edu.cn/docs/2026-03/42d7457eca32442eb24cf983399bdfc1.pdf",
+            "host": "marx.bnu.edu.cn",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "published_on",
+              "value": null,
+              "on": "2026-03",
+              "precision": "month",
+              "source": "url.pattern"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "paper.people.com.cn/rmrb/pc/attachement/202601/21/ee9471d1-5845...",
+          "url": "https://paper.people.com.cn/rmrb/pc/attachement/202601/21/ee9471d1-5845-4970-a37e-24459a7809a1.pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://paper.people.com.cn/rmrb/pc/attachement/202601/21/ee9471d1-5845-4970-a37e-24459a7809a1.pdf",
+            "host": "paper.people.com.cn",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "DOI",
+          "url": "https://www.ceibs.edu/facultyCV/whomou/22..pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.ceibs.edu/facultyCV/whomou/22..pdf",
+            "host": "www.ceibs.edu",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "mg21.com/guide/?p=8524",
+          "url": "https://www.mg21.com/guide/?p=8524",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.mg21.com/guide/?p=8524",
+            "host": "www.mg21.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Vol.22 , No.6",
+          "url": "https://www.liuyanecon.com/wp-content/uploads/%E5%AD%A3%E5%88%8A2022-%E4%B8%AD%E5%9B%BDDSGE.pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.liuyanecon.com/wp-content/uploads/%E5%AD%A3%E5%88%8A2022-%E4%B8%AD%E5%9B%BDDSGE.pdf",
+            "host": "www.liuyanecon.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "不必担心中国去杠杆 | Morgan Stanley China",
+          "url": "https://www.morganstanleychina.com/ideas/dont-fear-chinas-policy-tightening",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.morganstanleychina.com/ideas/dont-fear-chinas-policy-tightening",
+            "host": "www.morganstanleychina.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "标题",
+          "url": "https://press.anu.edu.au/downloads/press/n2213/pdf/book.pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://press.anu.edu.au/downloads/press/n2213/pdf/book.pdf",
+            "host": "press.anu.edu.au",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Fortune China Construction Bank",
+          "url": "https://m.ccb.com/chn/attachDir/2025/04/2025040811064525106.pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": "2025-04",
+          "precision": "month",
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://m.ccb.com/chn/attachDir/2025/04/2025040811064525106.pdf",
+            "host": "m.ccb.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "published_on",
+              "value": null,
+              "on": "2025-04",
+              "precision": "month",
+              "source": "url.pattern"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "宏观经济政策的“牛鼻子”在哪里？ 复旦金融圆桌会专家深入解读",
+          "url": "https://www.guancha.cn/GuanJinRong/2026_01_14_803798.shtml",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.guancha.cn/GuanJinRong/2026_01_14_803798.shtml",
+            "host": "www.guancha.cn",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "中國現代經濟學的播種者",
+          "url": "https://www.princeton.edu/~gchow/Chow-Liu2007%20%20final%207%2031.pdf",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.princeton.edu/~gchow/Chow-Liu2007%20%20final%207%2031.pdf",
+            "host": "www.princeton.edu",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "王亚南著作全集（第3卷）：中国经济读本（外四种）",
+          "url": "https://www.cp.com.cn/book/20856868-6.html",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.cp.com.cn/book/20856868-6.html",
+            "host": "www.cp.com.cn",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "古代中国的经济政策 - 思维导图",
+          "url": "https://mm.edrawsoft.cn/template/39943",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:01.280Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://mm.edrawsoft.cn/template/39943",
+            "host": "mm.edrawsoft.cn",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:01.280Z",
+              "source": "gateway.clock"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "trace_id": "1f6aa410-4f7b-4944-84c6-9fd29553eaf7",
+      "params": {
+        "query": "SearXNG documentation",
+        "language": "en"
+      },
+      "query": "SearXNG documentation",
+      "query_echo_ok": true,
+      "number_of_results": 10,
+      "time_range": null,
+      "time_range_applied": null,
+      "time_range_enforced": null,
+      "time_range_note": null,
+      "time_window_strict": null,
+      "filtered_out": 0,
+      "filtered_reasons": {},
+      "unresponsive_engines": [
+        [
+          "bing",
+          "超时"
+        ],
+        [
+          "quark",
+          "暂停服务: 验证码"
+        ]
+      ],
+      "results": [
+        {
+          "title": "SearXNG Documentation (2026.10.9+f4822b3fc)",
+          "url": "https://docs.searxng.org/",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://docs.searxng.org/",
+            "host": "docs.searxng.org",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Welcome to SearXNG — SearXNG Documentation...",
+          "url": "https://dalf.github.io/searxng/",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://dalf.github.io/searxng/",
+            "host": "dalf.github.io",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "How to Add Free Web Search to Your Local... | Medium",
+          "url": "https://medium.com/codex/how-to-add-free-web-search-to-your-local-gpt-oss-20b-setup-01a8a74e3aea",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://medium.com/codex/how-to-add-free-web-search-to-your-local-gpt-oss-20b-setup-01a8a74e3aea",
+            "host": "medium.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "A keenable search engine built into SearXNG (shortcut !keen), enabled...",
+          "url": "https://docs.keenable.ai/integrations/searxng",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://docs.keenable.ai/integrations/searxng",
+            "host": "docs.keenable.ai",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Create Your Own SearXNG Search Engine: Complete Setup Guide",
+          "url": "https://kmxdozmx.genspark.space/",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://kmxdozmx.genspark.space/",
+            "host": "kmxdozmx.genspark.space",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Welcome to SearXNG — SearXNG Documentation...",
+          "url": "http://tech-college.skom.kz/?p=569047",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "http://tech-college.skom.kz/?p=569047",
+            "host": "tech-college.skom.kz",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "GonkaGate Chat Completions API",
+          "url": "https://gonkagate.com/en/docs/api/api-reference/chat/send-chat-completion-request",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://gonkagate.com/en/docs/api/api-reference/chat/send-chat-completion-request",
+            "host": "gonkagate.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "inteltechniques.com/data/008.txt",
+          "url": "https://inteltechniques.com/data/008.txt",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://inteltechniques.com/data/008.txt",
+            "host": "inteltechniques.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "MCP-SearXNG MCP Server | Claude Market",
+          "url": "https://www.claudemarket.ai/mcp/ihor-sokoliuk/mcp-searxng",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.claudemarket.ai/mcp/ihor-sokoliuk/mcp-searxng",
+            "host": "www.claudemarket.ai",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        {
+          "title": "Searxng MCP Server | MCP sse implementation of the",
+          "url": "https://www.trackmcp.com/tool/searxng-mcp-server",
+          "engine": "yandex",
+          "category": "general",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "retrieved_at": "2026-10-12T11:39:04.293Z",
+          "time_range_status": null,
+          "source": {
+            "url": "https://www.trackmcp.com/tool/searxng-mcp-server",
+            "host": "www.trackmcp.com",
+            "search_engine": "yandex"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:04.293Z",
+              "source": "gateway.clock"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "trace_id": "43106e95-ec25-4ae8-8124-4bdbafac06c0",
+      "params": {
+        "query": "全球 市场 最新 新闻",
+        "language": "zh-CN",
+        "time_range": "day",
+        "time_window_strict": true
+      },
+      "query": "全球 市场 最新 新闻",
+      "query_echo_ok": true,
+      "number_of_results": 0,
+      "time_range": "day",
+      "time_range_applied": true,
+      "time_range_enforced": false,
+      "time_range_note": "Requested strict time_range 'day'; no results were returned and the filter was not relaxed.",
+      "time_window_strict": true,
+      "filtered_out": 0,
+      "filtered_reasons": {},
+      "unresponsive_engines": [
+        [
+          "bing",
+          "暂停服务: 超时"
+        ],
+        [
+          "quark",
+          "暂停服务: 验证码"
+        ]
+      ],
+      "results": []
+    }
+  ],
+  "reads": [],
+  "candidate_report": {
+    "fixture": "../../../../../../../tmp/wag-pr68-candidates.json",
+    "budget": 6,
+    "planned": 6,
+    "unread_planned": 1,
+    "query": "全球 市场 最新 新闻",
+    "language": "zh-CN",
+    "time_range": "day",
+    "window": {
+      "start": null,
+      "end": null
+    },
+    "denominator": 7,
+    "relevant": 5,
+    "read_ok": 5,
+    "time_verified": 0,
+    "both_satisfied": 0,
+    "irrelevant": 1,
+    "stale": 0,
+    "unknown": 4,
+    "read_failure": 1,
+    "unread": 1,
+    "time_precision": {
+      "instant": 2,
+      "day": 0,
+      "month": 0,
+      "none": 3
+    },
+    "categories": [
+      "unread",
+      "read_failure",
+      "unknown",
+      "stale",
+      "both_satisfied",
+      "irrelevant"
+    ],
+    "entries": [
+      {
+        "url": "https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending",
+        "label": "relevant",
+        "relevant": true,
+        "category": "unknown",
+        "read_status": "ok",
+        "time_status": "unverified",
+        "published_at": "2026-10-09T00:20:50.000Z",
+        "published_on": "2026-10-09",
+        "precision": "instant",
+        "raw": {
+          "trace_id": "1de9cb5b-2e9c-42e8-a9af-aebcad5944ca",
+          "telemetry": {
+            "first_valid_result_ms": 1009,
+            "stages_ms": {
+              "fetch_ms": 835,
+              "extract_ms": 109
+            }
+          },
+          "url": "https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending",
+          "renderer": "lightweight",
+          "title": "Running out of royals: why calls are growing to let Japan’s princess Aiko take the throne | Japan | The Guardian",
+          "markdown": "> WAG publisher timestamp: 2026-10-09T00:20:50.000Z (precision: instant; metadata source: html.meta[property=\"article:published_time\"])\n\n![Japanese Emperor Naruhito, Princess Aiko and Empress Masako are seen on the screen after the World Baseball Classic game between Japan and Australia in March 2026.](https://i.guim.co.uk/img/media/52659e9e2ef2c7018af656f7de1633d42bc24ac0/0_0_8401_5601/master/8401.jpg?width=465&dpr=1&s=none&crop=none)\n\nJapanese Emperor Naruhito, Princess Aiko and Empress Masako are seen on the screen after the World Baseball Classic game between Japan and Australia in March 2026. Photograph: Yuichi Yamazaki/AFP/Getty Images\n\n[View image in fullscreen](#img-1)\n\nJapanese Emperor Naruhito, Princess Aiko and Empress Masako are seen on the screen after the World Baseball Classic game between Japan and Australia in March 2026. Photograph: Yuichi Yamazaki/AFP/Getty Images\n\n# Running out of royals: why calls are growing to let Japan’s princess Aiko take the throne\n\nMore people in Japan are asking why the nation’s favourite royal, 24-year-old princess Aiko, will never be empress, with a recent poll saying 72% favour a woman emperor\n\nHer face is splashed across magazine covers. Fans flock to online stores to snap up her outfits. At official engagements, huge crowds wait in the crushing heat to catch a glimpse of a woman revered for her ‘regal dignity, beauty and aura’.\n\nPrincess Aiko, 24, is the most popular member of Japan’s imperial family, but according to law she will never be empress and, as the country runs out of royals, more and more Japanese people are asking why.\n\n[\n\nJapan’s second in line to emperor’s throne comes of age amid succession debate\n\nRead more\n\n](https://www.theguardian.com/world/2025/sep/06/japans-second-in-line-to-emperor-throne-comes-of-age-amid-succession-debate)\n\nThe debate has gathered momentum in the years since Aiko, the only child of [Emperor Naruhito](https://www.theguardian.com/world/2019/apr/26/japan-emperor-naruhito-new-era-reiwa-beautiful-harmony) and Empress Masako, has transformed from a shy primary school pupil into a young woman at ease with public and media attention.\n\nUnder a law established almost 140 years ago, women are forbidden from ascending to Japan’s Chrysanthemum throne. But the regulation defies public support for changes that would allow a woman to become empress regnant and avert a looming [succession crisis](https://www.theguardian.com/world/2021/may/15/heir-of-desperation-as-japan-wrestles-with-looming-royal-succession-crisis).\n\nThe imperial family is facing the same [demographic winds](https://www.theguardian.com/world/2023/may/29/baby-boomtown-does-nagi-hold-the-secret-to-repopulating-japan) buffeting the rest of the country: three decades ago it had 30 members; now there are just 16, only five of them men.\n\n![Princess Aiko attends the spring garden party at the Akasaka Imperial Gardens in April this year.](https://i.guim.co.uk/img/media/e7f0aaffd3754c4545f4e0ca4ea49d3cb5f2d181/0_0_6000_4000/master/6000.jpg?width=445&dpr=1&s=none&crop=none)[View image in fullscreen](#img-2)\n\nPrincess Aiko attends the spring garden party at the Akasaka Imperial Gardens in April this year. Photograph: The Asahi Shimbun/Getty Images\n\nJapanese citizens support a change, irrespective of their political loyalties. In a poll conducted in April by the Mainichi Shimbun newspaper, 72% favoured the idea of a woman becoming emperor, while just 10% opposed it.\n\nPressure to change the male-only succession law, passed in 1947 but based on legislation introduced during the Meiji era in 1889, is intensifying, forcing the conservative government of [Sanae Takaichi](https://www.theguardian.com/world/2025/oct/04/sanae-takaichi-the-new-leader-of-japans-liberal-democratic-party-who-cites-thatcher-as-an-influence) to address the dearth of male heirs to the 1,500-year-old imperial throne.\n\nJust three men comprise the current line of succession – Emperor Naruhito’s younger brother, Crown Prince Akishino; his son, Prince Hisahito; and the emperor’s uncle, Prince Hitachi, who is 90.\n\nIf Prince Hisahito, a 20-year-old university student, and the first male born into the imperial family for four decades, does not have a son, the line of succession will come to an end within a generation.\n\n![Prince Hisahito is seen in ceremonial attire during his coming-of-age rites in the Imperial Palace on his 19th birthday in 2025.](https://i.guim.co.uk/img/media/c5c0e5843c341347fadf38302f3bc101da14fa42/0_0_3115_2101/master/3115.jpg?width=445&dpr=1&s=none&crop=none)[View image in fullscreen](#img-3)\n\nPrince Hisahito is seen in ceremonial attire during his coming-of-age rites in the Imperial Palace on his 19th birthday in 2025. Photograph: AP\n\nPrevious governments have tried to solve the [succession question](https://www.theguardian.com/world/2006/feb/09/japan.justinmccurry) by considering legislation that would finally bring gender equality to the rarefied corridors of the imperial palace in Tokyo. But pressure from conservative MPs – and [Hisahito’s birth](https://www.theguardian.com/world/2006/sep/06/japan.justinmccurry) in 2006 – brought the debate to an abrupt end.\n\nTakaichi triggered anger this summer when her party and its conservative allies pushed through amendments that will safeguard the male-only succession for generations.\n\nThe changes, which go into effect later this month, allow women to [retain their royal status](https://www.theguardian.com/world/2021/oct/26/japan-princess-mako-marries-loses-royal-status) after marrying non-royals, and resurrects male-line descendants belonging to 11 “collateral branches” of the family that left the imperial fold after the end of the second world war.\n\nIn theory, that means a distant male relative could be “adopted” into the heart of the family provided he is single and aged over 15. If he marries and his wife gives birth to a son, that child would then join the line of succession.\n\nThe fate of Japan’s imperial family has attracted international attention. In 2024, the UN women’s rights committee urged the Japanese government to allow a female emperor. Tokyo dismissed the intervention as “regrettable” and “inappropriate,” saying the imperial succession was a matter of “fundamental national identity”.\n\nThe UN and Japanese public opinion have crashed against the hard rock of conservative ideology espoused by Takaichi – Japan’s first female prime minister.\n\n![Naruhito, as crown prince, with his wife, Masako, and Princess Aiko at the Hayama Imperial Villa in 2003.](https://i.guim.co.uk/img/media/283a8c301423ee33e613555332e69e7aaa8c038c/0_0_3000_2536/master/3000.jpg?width=445&dpr=1&s=none&crop=none)[View image in fullscreen](#img-4)\n\nNaruhito, as crown prince, with his wife, Masako, and Princess Aiko at the Hayama Imperial Villa in 2003. Photograph: The Asahi Shimbun/Getty Images\n\nDuring the succession revision debate, she told lawmakers: “The unparalleled historic fact that the imperial line has been maintained through the male line for 126 generations is the foundation of the emperor’s authority and legitimacy.”\n\nTakaichi has also said that the revisions were intended only to ease the succession crisis, not to settle the debate over female emperors.\n\nBut Prof Makoto Okawa, an expert on imperial lineage and succession at Chuo University in Tokyo, said the recent amendment “clearly points towards maintaining the male-line succession”.\n\nAiko’s popularity could force a rethink, however, given the “growing sense of unease among members of the public about excluding someone from the possibility of succeeding to the throne solely because she is a woman”.\n\n“Many people in Japan have watched Princess Aiko grow up. The composure, dignity and grace she has displayed in recent diplomatic and other official engagements have contributed to the strong public support she enjoys. Many people see her as embodying and carrying forward Emperor Naruhito’s understanding of the role of the emperor as a symbol of the nation who remains close to the people.”\n\n![Princess Aiko talks with kindergarten children in September 2025.](https://i.guim.co.uk/img/media/6a748e772b97ce669bd56fadf3401f8ec304bc2f/0_0_5838_3892/master/5838.jpg?width=465&dpr=1&s=none&crop=none)[View image in fullscreen](#img-5)\n\nPrincess Aiko talks with kindergarten children in September 2025. Photograph: The Asahi Shimbun/Getty Images\n\nJin, an Aiko fan who manages an Instagram account devoted to the princess, said the government had ignored the overwhelming consensus behind a change to the male-only succession law.\n\nIn her eyes, Aiko is more than qualified to succeed her father.\n\n“She is the emperor’s only direct descendant, and her character and dignity are of the highest caliber. Aiko is someone who is clearly worthy of serving as a symbol of Japan.”\n\nAiko – or another future female member of the imperial family – would not be the first female to ascend the throne. Japan has had eight female monarchs, although their role was to sustain the imperial line until a male heir was born. Go-Sakuramachi, who ruled from 1762 to 1770, was the most recent.\n\nJapan’s royals, who are forbidden from commenting on politics, have employed typically nuanced language to communicate their unease with the status quo.\n\nAt a press conference in June, the emperor said of the succession debate in parliament: “I hope discussions on how to secure the number of imperial family members … gain the understanding of the people.”\n\nHis younger brother, Akishino, went further, telling reporters: “It is important for society to keep progressing … I believe the duty of the imperial family is to act in response to the requests of society … I do not think there are any differences between women and men.”\n\nExplore more on these topics\n\n*   [Japan](/world/japan)\n*   [Asia Pacific](/world/asia-pacific)\n*   [features](/tone/features)\n\n[Share\n\n](mailto:?subject=Running out of royals: why calls are growing to let Japan’s princess Aiko take the throne &body=https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending?CMP=share_btn_url)\n\n[Reuse this content](https://syndication.theguardian.com/?url=https%3A%2F%2Fwww.theguardian.com%2Fworld%2F2026%2Foct%2F09%2Fjapan-royal-throne-lineage-princess-aiko-forbidden-ascending&type=article&internalpagecode=world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending \"Reuse this content\")\n\n## Most viewed\n\n## Most viewed",
+          "http_status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 359889,
+          "content_hash": "88261d2e8e890ff492b7036f418470b119f8e0f8471d3b4b14a34ef46fc7786f",
+          "blocked_reason": null,
+          "charset": "utf-8",
+          "published_at": "2026-10-09T00:20:50.000Z",
+          "published_on": "2026-10-09",
+          "precision": "instant",
+          "modified_at": "2026-10-09T09:38:40.000Z",
+          "conflicts": [],
+          "retrieved_at": "2026-10-12T11:39:05.254Z",
+          "source": {
+            "url": "https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending",
+            "host": "www.theguardian.com",
+            "canonical_url": "https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending",
+            "site_name": "the Guardian",
+            "author": "https://www.theguardian.com/profile/justinmccurry"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "published_at",
+              "value": "2026-10-09T00:20:50.000Z",
+              "on": "2026-10-09",
+              "precision": "instant",
+              "source": "html.meta[property=\"article:published_time\"]"
+            },
+            {
+              "kind": "modified_at",
+              "value": "2026-10-09T09:38:40.000Z",
+              "on": "2026-10-09",
+              "precision": "instant",
+              "source": "html.meta[property=\"article:modified_time\"]"
+            },
+            {
+              "kind": "response_date",
+              "value": "2026-10-12T11:39:04.000Z",
+              "source": "http.header.date"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:05.254Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        "error": null
+      },
+      {
+        "url": "https://www.ajudaily.com/view/20241128080617057",
+        "label": "relevant",
+        "relevant": true,
+        "category": "unknown",
+        "read_status": "ok",
+        "time_status": "unverified",
+        "published_at": "2024-11-28T01:35:33.000Z",
+        "published_on": "2024-11-28",
+        "precision": "instant",
+        "raw": {
+          "trace_id": "23f4b9e9-f5d6-4eae-9a0d-414605aa8403",
+          "telemetry": {
+            "first_valid_result_ms": 6435,
+            "stages_ms": {
+              "fetch_ms": 859,
+              "extract_ms": 50,
+              "render_ms": 5491
+            }
+          },
+          "url": "https://www.ajudaily.com/view/20241128080617057",
+          "renderer": "crawl4ai",
+          "http_status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 81029,
+          "content_hash": "67a3ebbe248e2a724ac8de0a31506e365b925c196635f9b582280ebf8379ea3a",
+          "blocked_reason": null,
+          "charset": "utf-8",
+          "published_at": "2024-11-28T01:35:33.000Z",
+          "published_on": "2024-11-28",
+          "precision": "instant",
+          "modified_at": "2024-11-28T01:35:33.000Z",
+          "conflicts": [],
+          "retrieved_at": "2026-10-12T11:39:11.727Z",
+          "source": {
+            "url": "https://www.ajudaily.com/view/20241128080617057",
+            "host": "www.ajudaily.com",
+            "canonical_url": "https://china.kyungjeilbo.com/view/20241128080617057",
+            "site_name": "亚洲日报",
+            "author": "陈姗娜"
+          },
+          "temporal_evidence": [
+            {
+              "kind": "published_at",
+              "value": "2024-11-28T01:35:33.000Z",
+              "on": "2024-11-28",
+              "precision": "instant",
+              "source": "html.meta[property=\"article:published_time\"]"
+            },
+            {
+              "kind": "modified_at",
+              "value": "2024-11-28T01:35:33.000Z",
+              "on": "2024-11-28",
+              "precision": "instant",
+              "source": "html.meta[property=\"article:modified\"]"
+            },
+            {
+              "kind": "response_date",
+              "value": "2026-10-12T11:39:05.000Z",
+              "source": "http.header.date"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:11.727Z",
+              "source": "gateway.clock"
+            }
+          ],
+          "markdown": "> WAG publisher timestamp: 2024-11-28T01:35:33.000Z (precision: instant; metadata source: html.meta[property=\"article:published_time\"])\n\n  * [ _KOSPI_ 6384.24 241.69 -3.65% ](javascript:;)\n  * [ _KOSDAQ_ 849.4 42.87 -4.8% ](javascript:;)\n  * [ _USD_ 1,333.80 8.6 -0.64% ](javascript:;)\n  * [ _EUR_ 1,490.59 12.63 -0.85% ](javascript:;)\n  * [ _JPY_ 840.80 6.73 -0.8% ](javascript:;)\n  * [ _CNY_ 199.24 1.32 -0.66% ](javascript:;)\n\n\n  * [ _KOSPI_ 6384.24 241.69 -3.65% ](javascript:;)\n  * [ _KOSDAQ_ 849.4 42.87 -4.8% ](javascript:;)\n  * [ _USD_ 1,333.80 8.6 -0.64% ](javascript:;)\n  * [ _EUR_ 1,490.59 12.63 -0.85% ](javascript:;)\n  * [ _JPY_ 840.80 6.73 -0.8% ](javascript:;)\n  * [ _CNY_ 199.24 1.32 -0.66% ](javascript:;)\n\n\n[英文](https://www.kyungjeilbo.com/) [越南语](https://vietnam.kyungjeilbo.com)\n[](http://weibo.com/yazhoujingji) [ ](https://www.ajudaily.com/weixin) [](https://www.youtube.com/@tvtv3910)\n[登录](https://china.kyungjeilbo.com/member/login.php?purl=//www.ajudaily.com%2Fview%2F20241128080617057)\n_分享文章_\n[](https://weibo.com/yazhoujingji) [ ](http://www.chinareport.co.kr/weixin)\n复制网址\n# 中国汽车逆袭势不可挡 全球市场面临全面洗牌\n陈姗娜 记者 2024-11-28 10:35\n  * _分享文章_\n[weibo](https://weibo.com/yazhoujingji) [ QQ ](http://www.chinareport.co.kr/weixin)\n复制网址\nclose\n  *     * 减小字体大小A\n    * 基本的A\n    * 增加字体大小A\n    * 将字体大小增加到最大A\n关闭\n\n\n中国汽车产业正在以惊人的速度扩大全球市场占有率，吸引业界广泛关注。以电动汽车销量全球第一的比亚迪（BYD）为代表，中国汽车厂商凭借高性价比和技术实力，通过积极的市场营销，成功摆脱“廉价车”标签，展示出强大的增长潜力。这一趋势令德国、日本和韩国等传统汽车强国面临前所未有的压力。  \n  \n据汽车行业近日消息，去年中国汽车出口量达到491万辆，同比增长58%，成为全球整车出口量最多的国家。其中，新能源汽车（电动汽车、混合动力汽车和氢燃料汽车）出口120万辆，同比大增78%，表现尤为突出，成为出口增长的主要动力。  \n  \n比亚迪在去年第四季度单季销量达到52.6万辆，稳坐全球电动汽车市场头把交椅。专家指出，中国车企的性价比策略是成功的关键因素。比亚迪每辆车平均生产成本仅为1.74万美元，为业内最低，而现代、起亚和丰田的平均生产成本在1.97万至2.59万美元之间。此外，比亚迪通过CTB电池车身一体化技术成功实现更长的续航里程，进一步展现技术实力。  \n\n  \n除了技术和价格优势，中国车企还通过对欧洲和新兴市场的投资，推动销量快速增长。比亚迪计划截至2026年在匈牙利和土耳其分别建成年产20万辆和15万辆的工厂，并在东南亚泰国设立年产15万辆以上的生产基地。  \n  \n其他中国企业中，零跑汽车也已在波兰投产，奇瑞汽车则在西班牙巴塞罗那兴建工厂。业内人士分析称，中国车企在全球范围内建设工厂，结合高性价比策略产出的汽车极具竞争力，品牌国际影响力显著提高。  \n  \n随着中国汽车出口的快速增长，传统汽车强国的行业格局受到严峻挑战。去年日本汽车出口量为442万辆，同比增长16%，不敌中国。德国则在更早的2022年已被中国超越，去年出口量仅为311万辆。面对市场份额的持续下滑，德国老牌车企大众被迫考虑关闭三家工厂，并削减员工工资10%。梅赛德斯-奔驰和宝马的销量表现也不尽人意。  \n  \n韩国汽车行业同样受到中国车企的威胁。去年韩国汽车全球出口量为276万辆，仅为中国的一半。比亚迪计划明年正式进军韩国市场，预计会对韩国当地车企造成更大的竞争压力。  \n  \n现代汽车集团全球经营研究所预测，今年中国汽车出口量或突破620万辆。业内人士指出，过去外界普遍认为中国汽车质量不高，对市场威胁有限，但近年来的市场表现证明，中国车企的增长势头不容小觑，已经成为全球汽车行业无法忽视的一股力量。  \n\n![【图片来源 韩联社】](https://image.ajunews.com/content/image/2024/11/28/20241128102714901179.jpg)\n在深圳港口等待出口至荷兰和德国的比亚迪（BYD）汽车【图片来源 韩联社】\n  \n\n  * [#汽车](https://www.ajudaily.com/search?q=%E6%B1%BD%E8%BD%A6)\n  * [#比亚迪](https://www.ajudaily.com/search?q=%E6%AF%94%E4%BA%9A%E8%BF%AA)\n  * [#出口](https://www.ajudaily.com/search?q=%E5%87%BA%E5%8F%A3)\n\n\n_陈姗娜_ 记者 jinsena98@ajunews.com\n_陈姗娜_ 记者 jinsena98@ajunews.com\n[查看更多](https://www.ajudaily.com/discovery/reporter?bylineEmail=jinsena98@ajunews.com&bylineEmail2=jinsena98@ajunews.com)\n《 亚洲日报 》 所有作品受版权保护，未经授权，禁止转载。\n**相关新闻**\n  * [ 欧盟限制中国进口混合动力汽车每年35万辆，12月正式实施 中国副总理何立峰与欧盟贸易专员马罗西·谢夫乔维奇于10日在北京会面握手。 欧盟将于12月开始实施限制中国及其他地区进口混合动力汽车的保障措施，每年限制进口量为35万辆。 据12日的报道，欧盟计划于12月1日实施这一混合动力汽车进口限制措施。根据获得的计划，第一年将以35万辆为基准，随后四年内每年上限将增加6%。 此次上限协议适用于普通混合动力汽车（HEV）和插电式混合动力汽车（PHEV）。为遵循世界贸易组织（WTO）的非歧视原则，该上限不仅限于中国制造的汽车，还将适用于所有原产地的车辆，包括自由贸易协定（FTA）签署国的进口车辆。不过，确保分配给中国的上限配额不低于其他任何进口国。 此前，中国商务部长王文涛与欧盟贸易与经济安全专员马罗西·谢夫乔维奇于8日至9日在北京举行了第二次中欧经济贸易磋商，并达成了相关贸易谅解。 谢夫乔维奇表示：“我们达成了共同理解，将调控中国制造的混合动力汽车出口。”作为交换，中国将降低对欧盟汽车零部件和橄榄油等部分商品的关税，预计将节省至少2亿2500万欧元（约合3380亿韩元）的成本。 中国方面也对这一协议表示满意，认为这是保护本国产业的务实成果。中国商务部发言人表示：“欧盟对中国混合动力汽车的进口规模从2024年的10万7千辆增加到去年的30万2千辆，已达成以2025年数据为基础的上调协议。” 他还强调：“任何措施都不应仅针对中国商品，中国获得的配额将不低于欧盟其他任何进口原产地的配额。”※ 本报道经人工智能（AI）系统翻译与编辑。 2026-10-12 20:20:00 ](https://www.ajudaily.com/view/20261012202070949)\n  * [ 中国汽车在欧洲市场面临第二次危机 中国吉利汽车在法国巴黎的展厅资料照片 中国汽车产业在欧洲市场遭遇第二次危机。2024年，欧盟对中国电动车征收高额关税，最近又决定限制混合动力汽车的出口。然而，中国业界普遍认为，这一措施仍然可以克服。尽管出口量减少，但可以扩大当地生产，并借此减少恶性竞争。 中国汽车企业自2020年前后开始加速进军欧洲市场，凭借在国内市场积累的电动车技术和价格竞争力，吸引了欧洲消费者。然而，2024年10月，欧盟对中国纯电动车征收最高35.3%的额外反补贴税，导致第一次危机的出现。 中国企业寻求通过插电式混合动力车（PHEV）寻找突破口，因为该车型不在欧盟征收高额关税的范围内。实际上，中国插电式混合动力车在欧盟的进口量从2024年10月的3800辆增加到2026年7月的5万辆，增长了约13倍。2026年9月前的一年中，欧盟对中国插电式混合动力车的进口量也同比增长了86%。纯电动车的关税壁垒促进了混合动力车的快速增长。 欧盟再次采取了限制措施。10日，中国同意在未来四年内将混合动力汽车的出口量减少到原预测的50%以上。但这并不是简单地将当前出口量减半。根据《金融时报》的报道，2027年的出口上限将从35万辆开始，每年增加6%。如果按此趋势发展，到2030年，出口量将达到约42万辆。尽管具体实施方案仍需进一步协商，但这并不意味着中国企业会完全被挤出欧洲市场。 出口限制并不一定意味着损失。中国企业在国内市场上已经经历了激烈的价格竞争，并在海外市场上为了抢占市场份额而承受了出血竞争。出口量的限制可能会缓解过度的低价竞争，提高盈利能力。 更重要的是当地生产。比亚迪和奇瑞等中国企业正在推动在欧洲建设工厂和扩大当地生产。当地生产的汽车可以避免出口量限制，这使得企业有更大的动力将业务结构从以出口为中心转向以当地生产为中心。如果将生产基地和零部件供应链转移到欧洲，中国企业不仅可以提高市场准入，还能确保当地就业和消费者信任。 中国汽车产业在欧洲面临的第二次危机显然不容小觑。预计中国汽车产业将通过调整出口量和加强本地化来应对这一挑战。※ 本报道经人工智能（AI）系统翻译与编辑。 2026-10-12 09:28:10 ](https://www.ajudaily.com/view/20261012092870616)\n  * [ 中国与欧盟达成协议，限制混合动力汽车出口以阻止欧版301条款 中国副总理何立峰与欧盟贸易专员马罗西·谢夫乔维奇在北京会面握手。 中国在与欧盟的贸易谈判中，成功阻止了欧版“301条款”的引入，作为交换，限制了混合动力汽车的出口。双方决定继续基于世界贸易组织（WTO）规范进行协商，从而暂时缓解了全面贸易争端的风险。 中国与欧盟于9日在北京举行的贸易会议上达成协议，决定调整中国制造的混合动力及插电式混合动力汽车的出口。参与会议的欧盟贸易专员马罗西·谢夫乔维奇在10日的新闻发布会上表示，未来四年内，如果没有额外措施，中国汽车的出口量预计将比原先的预测减少一半以上。 减产的基准并不是2025年或2026年的实际出口量，而是基于现有趋势的未来四年预期出口量。因此，这并不意味着将当前的出口量直接减半。具体的实施方式和年度配额尚未公布。 英国《金融时报》报道，计划在2027年设定35万辆的出口上限，并在接下来的三年中每年增加6%。如果这一标准得到应用，预计2027年将达到35万辆，2028年37.1万辆，2029年39.3万辆，2030年41.6万辆。然而，这些数字并不是最终确定的官方配额。 与此同时，中国还决定降低对欧盟汽车零部件、橄榄油、鞋类等七类商品的关税。相关商品的当前出口额约为400亿欧元，欧盟预计关税降低后每年将节省至少2.25亿欧元的成本。此外，中国还将顺利处理稀土和永磁材料的出口许可程序。 作为这些措施的回报，中国成功将欧盟重新带回谈判桌。欧盟在当地强硬舆论的推动下，曾对中国采取强硬的贸易政策，尤其是法国和德国一直呼吁引入类似于美国301条款的强有力的贸易应对措施。通过限制汽车出口，中国阻止了欧盟单方面措施的扩大，并为基于WTO规范的市场准入和原材料供应问题的协商留出了空间。 然而，欧版301条款的威胁并未完全消失。本次协议仍需经过详细的实施程序和后续批准才能最终确定。※ 本报道经人工智能（AI）系统翻译与编辑。 2026-10-12 09:12:20 ](https://www.ajudaily.com/view/20261012091270522)\n  * [ 现代汽车在印度即将实现300万销量大关 现代汽车印度车型阵容 现代汽车在进入印度市场30年之际，累计销量即将突破1000万辆。自1998年开始在当地销售以来，凭借本地定制的运动型多功能车(SUV)阵容，现代汽车不断扩大其市场基础。 根据印度汽车工业协会(SIAM)的数据显示，截至今年第三季度，现代汽车在印度市场的累计销量已达到9884960辆。考虑到当前的销售趋势，预计年内将突破1000万辆。 现代汽车于1996年在印度成立当地子公司，1998年在钦奈工厂开始生产首款车型桑特罗。 桑特罗凭借宽敞的内部空间和实用性，成为“印度国民经济型车”，成功推动了现代汽车品牌在印度的扎根。自进入市场的第一年起，现代汽车便跻身市场份额第二位，随后推出了i10、i20、Verna等小型和紧凑型车，进一步扩大了销售基础。 为了适应不断增长的印度汽车市场和多样化的客户需求，现代汽车于2015年7月推出了首款本地战略SUV车型克雷塔。克雷塔充分考虑了当地大家庭文化，提供宽敞的内部空间，并针对恶劣的道路环境设计了较高的离地间隙，同时配备了室内空气净化器，完全符合印度客户的需求。 克雷塔在上市后连续三个月成为印度SUV市场的月销量冠军，首年销量超过4万辆。现代汽车在2019年推出了Venue，2021年推出了三排SUV Alczar，2023年推出了入门级SUV Exter，进一步丰富了SUV阵容。 多样化的SUV阵容推动了现代汽车在印度市场的销售增长。自2015年克雷塔上市以来，现代汽车在2016年首次实现年销量突破50万辆。2020年，Venue和克雷塔共同推动销量，创下了17.4%的年最高市场份额。2024年，现代汽车在印度的销量达到605433辆，创下了自进入市场以来的年销量最高纪录。 截至今年第三季度，现代汽车在印度的销量为471724辆，其中SUV销量为316026辆，占总销量的67%。现代汽车计划到2030年将SUV在印度市场的销量占比提升至80%。 为了配合销售的扩大，现代汽车也在加强生产基础。目前，现代汽车在印度的钦奈1、2工厂和普纳工厂正在运作。钦奈1、2工厂年产能力为824000辆，普纳工厂年产能力为170000辆，使现代汽车在印度的总生产能力达到100万辆。 现代汽车计划到2028年将普纳工厂的生产能力提升至250000辆，到2030年提升至320000辆，从而将印度的总生产能力提高到每年110万辆以上。此外，现代汽车还计划到2030年将零部件本地化率提高至90%以上，以增强成本竞争力，并将出口比例扩大至30%，将印度发展为全球出口中心。※ 本报道经人工智能（AI）系统翻译与编辑。 2026-10-11 10:40:00 ](https://www.ajudaily.com/view/20261011104070324)\n\n\n**热门新闻**\n  * [ 中国茶饮品牌加快韩国扩张 霸王茶姬5个月开出10家门店 ](https://www.ajudaily.com/view/20260930092554468)\n  * [ 中国人形机器人亮相韩国国政监查成功抢镜 ](https://www.ajudaily.com/view/20261006135107690)\n  * [ 韩国金融机构遭大规模黑客袭击 26岁中国广东男子疑为幕后黑手 ](https://www.ajudaily.com/view/20261008075253297)\n  * [ 乘\"芯\"而上！韩国有望成全球第四个年出口破1万亿美元国家 ](https://www.ajudaily.com/view/20261001091223386)\n  * [ 李在明支持率连续两周上升 国民力量党反超共同民主党 ](https://www.ajudaily.com/view/20260928080832753)\n\n\n  * [ 三星电子交出\"史诗级\"成绩单 第三季度狂赚107.4万亿韩元  ](https://www.ajudaily.com/view/20261008071101253)\n  * [ \"首尔病\"背后的旅游逻辑：城市日常成为重游吸引力 ](https://www.ajudaily.com/view/20261001081353080)\n  * [ 从7169元到超6385万元 《牛来》如何在AI时代逆袭 ](https://www.ajudaily.com/view/20260929082950498)\n  * [ 韩国成中国游客国庆出境游首选 商家争抢假日消费商机 ](https://www.ajudaily.com/view/20261002082203065)\n  * [ 中国仙侠题材韩国升温 网文网漫与电视剧多平台开花 ](https://www.ajudaily.com/view/20261010103855928)\n\n**图片新闻**\n  * [ ](https://www.ajudaily.com/view/20261012164356376)\n  * [ ](https://www.ajudaily.com/view/20261012154140078)\n  * [ ](https://www.ajudaily.com/view/20261011160320775)\n\n\n[](https://www.ajudaily.com/view/20241128080617057) [](https://www.ajudaily.com/view/20241128080617057)\n  * [人民日报](http://paper.people.com.cn)\n  * [新华社](http://www.xinhuanet.com)\n  * [文汇网](http://www.wenweipo.com)\n  * [中新社](http://www.chinanews.com)\n  * [人民网](http://korea.people.com.cn)\n\n\n[](https://china.kyungjeilbo.com)\n  * [公司简介](https://company.ajudaily.com/about)\n  * [个人信息处理方针](https://company.ajudaily.com/policy)\n  * [青少年保护政策](https://company.ajudaily.com/teenager)\n  * [著作权规定](https://company.ajudaily.com/copyright)\n  * [读者提供新闻线索](https://company.ajudaily.com/jebo)\n  * [新闻稿件投诉负责人](https://company.ajudaily.com/grievance)\n\n\n亚洲日报 _|_ 刊号 : 서울,아04336 _|_ 注册日期 : 2014年12月29日 _|_ 《亚洲日报》发行人及总编辑 : 郭永吉、梁圭铉 _|_ 地址 : 首尔市  \n钟路区钟路5街13号三共大厦11楼 _|_ 创刊日期 : 2007年11月15日 _|_ 青少年保护负责人 : 王海纳 电话 : 02-739-2171  \n《亚洲日报》将遵守互联网新闻委员会制定的伦理纲领。 _|_ 本网站所刊登的各种新闻、信息和各种专题专栏内容, 均受《著作权法》  \n保护, 未经协议授权, 禁止随意转载、复制和散布使用。 _|_ 邮件 : dongclub@ajunews.com  \n\nCopyright ⓒ AJUNEWS All rights reserved.\n"
+        },
+        "error": null
+      },
+      {
+        "url": "https://www.pingwest.com/a/255024",
+        "label": "relevant",
+        "relevant": true,
+        "category": "unknown",
+        "read_status": "ok",
+        "time_status": "unverified",
+        "published_at": null,
+        "published_on": null,
+        "precision": null,
+        "raw": {
+          "trace_id": "3849adb1-719b-4446-85f4-2ca40ff91003",
+          "telemetry": {
+            "first_valid_result_ms": 410,
+            "stages_ms": {
+              "fetch_ms": 377,
+              "extract_ms": 21
+            }
+          },
+          "url": "https://www.pingwest.com/a/255024",
+          "renderer": "lightweight",
+          "title": "BuzzFeed上市如坐过山车，海外新闻聚合类平台何去何从？-品玩",
+          "markdown": "\\*转载文章不代表本站观点。\n\n[本文](https://mp.weixin.qq.com/s/LpiG_z5gUJmcBJULl5Y9Aw)来自微信公众号“全媒派”（quanmeipai）作者：麦克鲁\n\n* * *\n\n2006年，秉承“分享比搜索更重要”这一理念的BuzzFeed，将自己从为谷歌等搜索引擎进行内容优化的业务中释放出来。在随后几年时间里，凭借最拿手的各类榜单和meme图，BuzzFeed让自己的内容风靡社交网络，成长为一个广受年轻人欢迎的新闻聚合类平台。  \n\n2021年12月6日，BuzzFeed与SPAC（Special Purpose Acquisition Company，特殊目的收购公司）合并，在纳斯达克借壳上市，也因此成为美股首家数字媒体公司。回顾往昔创业史，BuzzFeed这一路走来磕磕绊绊，上市之后能够万般安好吗？**本期全媒派（ID：quanmeipai）带来编译文章，介绍BuzzFeed到底是一家怎样的媒体公司，分析它所代表的海外新闻聚合类平台的前景又将如何。**\n\n## BuzzFeed ：不仅仅是“美版今日头条”\n\n成立于2005年的BuzzFeed，最初只是由乔纳·佩雷迪（Jonah Peretti）在纽约唐人街一间小办公室里孵化出来的互联网实验室。\n\n在创办BuzzFeed之前，佩雷迪是美国著名新闻网站《赫芬顿邮报》（The Huffington Post）的首席技术官、主要创办人之一。值得一提的是，这家网站先在2011年被美国在线（AOL）收购，而后兜兜转转，又被BuzzFeed收入囊中。\n\n![图片来源：《赫芬顿邮报》](https://cdn.pingwest.com/portal/2021/12/13/portal/2021/12/13/_8j8TEFb2C9xjdkCGDe3X4hx9c2206Wn?x-oss-process=style/article-body \"图片来源：《赫芬顿邮报》\")\n\n图片来源：《赫芬顿邮报》\n\n尽管佩雷迪参与创办的这两家网站都非常成功，却完全不是同种类型的媒体。\n\n《赫芬顿邮报》以时政新闻闻名，曾是美国最具影响力的新闻博客网站。但BuzzFeed与严肃新闻搭不上边，在这家网站，你很难看到深度报道或突发新闻报道。将“分享比搜索更重要”作为信条的BuzzFeed，更信奉病毒式传播在互联网上的重要性。\n\n于是，你更可能在BuzzFeed看到的资讯内容是“24对曾经热门但现已分手的明星夫妇”“2021年最新靠谱爱情测试”“我的女友被困在鬼屋之后”等猎奇搞怪、测试调查、另类清单类内容，可以这么说，只要是能够引起点击和转发欲望的，就是BuzzFeed想要的。\n\n这些内容来自各大平台，包括Twitter的热搜榜、YouTube的最热视频，甚至是《华尔街日报》等等数百个来源。通过BuzzFeed这个新闻聚合平台，用户能够一览当天最热门的网络资讯。\n\nBuzzFeed也会自己参与制作热门话题，比如“裙子是蓝黑还是白金”，借助“标题党”和夸张的封面设计，这些内容经常能横扫社交媒体，甚至漂洋过海进入到我们的视野。\n\n![图片来源：BuzzFeed](https://cdn.pingwest.com/portal/2021/12/13/portal/2021/12/13/N158TS9P79KFHbhzJ63i_maQfTn89FJa?x-oss-process=style/article-body \"图片来源：BuzzFeed\")\n\n图片来源：BuzzFeed\n\n虽然有着“美版今日头条”的称号，但是与今日头条注重算法筛选不同，BuzzFeed的内容一直都是高度人工编辑的，在内容生产上有着强烈的中心化特色\\[1\\]。BuzzFeed拥有数百人的编辑团队，他们每时每刻都在钻研什么样的内容最适合分享，最能引发用户分享冲动。\n\n由他们产出的内容不仅在BuzzFeed自家平台上发布，还会被上传到常见的社交媒体上，比如Twitter、Facebook、Snapchat、Instagram、YouTube和Pinterest，也包括VK和Telegram这样的非美国社交平台。\n\n**在内容生产与传播的过程中，BuzzFeed充分发挥了新技术的力量。**比如利用机器学习模型来引导多个平台的内容发布策略，还有专业数据分析团队利用Pound技术分析内容在各大社交媒体的传播路径与方式，从而帮助运营人员锁定传播热点，不断优化内容方向。\n\n**内容跨平台发布也并非一成不变，BuzzFeed会基于社交媒体的特性和受众属性，量身定制内容形态。**FastCompany.com曾经举了一个例子：BuzzFeed上的一个炖鸡菜谱，会被制作成46秒的Facebook视频，然后转变成15秒的Instagram短片，烹饪要点被贴在评论区，最后是一篇Pinterest帖子，包含两张图片和通向Facebook视频的链接。如果要分享到Snapchat，它还会被转化成纵向模式。虽然形式变了无数次，但菜谱还是那个菜谱\\[2\\]。\n\n数据直观体现出BuzzFeed创新内容策略的成功：如今每月独立访客数量超过2亿，有接近3/4来自各类社交网络。\n\n## “上市即破发”背后的十多年沉浮\n\n十几年的时间里，与创建伊始的小型内容实验平台相比，BuzzFeed如今已经成为一家拥有数千名员工、估值几十亿美元的大型数字媒体公司，并有自己的全球新闻团队、视频制作团队、数据运算中心和创意广告团队。12月6日，BuzzFeed终于借壳SPAC上市，成为美股市场数字媒体第一股。\n\nBuzzFeed上市不仅是公司自身的里程碑，对于海外其他数字媒体公司也有借鉴意义。例如BDG Media、Vox Media都在保持观望，如果BuzzFeed证明道路可行，或许也会进行效仿。\n\n这里需要做一个小科普。由于首次公开募股（IPO）的监管条例管控太过复杂，不少公司会通过SPAC借壳上市。SPAC是指已在证券交易所上市的“空壳公司”，通过它收购一家私营企业，后者就能绕过IPO复杂的管控规则实现上市。这是海外广泛采用的一种上市方式，也是数字媒体公司所采用的融资方式。\n\n不过，BuzzFeed上市之后情况却不乐观，开盘价为10.95美元，当天收跌11%。《华尔街日报》分析，破发的原因在于SPAC投资者提前撤资，使BuzzFeed借壳上市仅获得1620万美元现金，而且公司现有股东几个月内无法出售股票，只有一小部分股票能够公开交易，这令股价大幅波动\\[3\\]。\n\n但上市破发或许只是BuzzFeed近几年遭遇的“倒霉事情”之一。作为“媒体的颠覆者”，BuzzFeed的日子并不好过。从2017年开始，BuzzFeed的广告业务就开始受到冲击，加之商业化和全球化进展缓慢，此前已进行了业务收缩和多轮裁员。\n\n2017 年，BuzzFeed解雇大约100名员工，不久后又关闭其播客团队；2019年1月，公司为了“降低成本”，再次裁员15%，200多名员工离开，新闻部门是裁员重灾区；2020年11月，BuzzFeed从Verizon Media买下《赫芬顿邮报》，旋即裁掉70多名员工，其中大部分都是记者，《赫芬顿邮报》在加拿大的业务也被关闭\\[4\\]。\n\n除此之外，BuzzFeed前高管马修·亨里克被Facebook“挖墙脚“。BuzzFeed 的全球化也受到冲击，缩减了英国、澳大利亚等国家的业务规模。\n\n在新冠疫情的背景下，这些危机又被催化，不确定因素进一步增加。佩雷迪一度在战略备忘录提到，现在的关键问题已经不再是“比谁跑得更快”，而是“比谁活得更久”。**除了果断通过裁员、缩减海外业务规模等手段降低成本，BuzzFeed为了“活下来”，还开始大举推进商业化。**\n\n**首先是原生广告。**BuzzFeed强大的内容矩阵和众多忠实读者，让他们能够知晓什么产品好卖。换句话说，由于可以精准地知道读者想读什么，出于同样的逻辑，也就能精准地知道他们想买什么。BuzzFeed采取的是原生广告的形式，它们会以分享文章的形式出现，符合文章的调性，不显得突兀。\n\n这些广告结合佣金商务模式，为BuzzFeed带来大量收入。比如，当读者读到有关某个特定酒店的内容时，可能会预定这家酒店住宿，Buzzfeed就能够从这笔交易中获得佣金。佣金商务模式在公司总收入中占据越来越大的比重。\n\nBuzzFeed正在迅速提升原生广告的比例，甚至有网友发现，某一天BuzzFeed上排名前十的文章都是亚马逊的软文。另外，曾经网站上几乎没有Banner广告，但是现在除了原生广告的比例不断提高，Banner广告在网站也随处可见。\n\n**其次是推出电商品牌产品，推动线上和线下销售。**2017年12月，创始人佩雷迪宣布，BuzzFeed未来高速成长将不再只倚赖广告，电商、视频将是他们成长的新引擎。\n\n公司曾表示，预计未来收入的1/3来自商品销售，包括电商和线下产品，例如在美国最大零售巨头沃尔玛销售的，以BuzzFeed美食品牌Tasty命名的系列炊具、智能锅等。卖货业务被视为BuzzFeed减少对数字广告依赖，进而拓展多元化业务的一种方式。而依靠热点内容优势，BuzzFeed能够迅速打造出爆款的电商产品。\n\n![图片来源：BuzzFeed的网站购物界面](https://cdn.pingwest.com/portal/2021/12/13/portal/2021/12/13/b1nMnM6832jWYk41Ta2DrKTh6X46iM9x?x-oss-process=style/article-body \"图片来源：BuzzFeed的网站购物界面\")\n\n图片来源：BuzzFeed的网站购物界面\n\n**第三是进行收购。**基于海外媒体此前的预测，在上市之后，BuzzFeed将会进行更多收购活动，它可以使用公司股票作为资本，进行此前收购《赫芬顿邮报》的类似交易。收购基于订阅服务的数字媒体出版商Complex Networks 等已在BuzzFeed的计划表上。通过收购小媒体，并且控制成本以实现增长，能够让BuzzFeed在与谷歌、Facebook这些巨头中的竞争中更有优势。\n\n得益于削减成本，以及拓展电商和特许经营权的新业务，2020年，BuzzFeed公司收入达到3.21亿美元，同比增长1%，并从2019年亏损3700万美元转为盈利1100万美元。“活下来”的目标暂时达到了。\n\n## 海外新闻聚合类平台，何去何从？\n\n从创建到上市，BuzzFeed起起伏伏十几年的发展历史，也是数字媒体行业发展的缩影。\n\nBuzzFeed四面楚歌背后，是不景气的数字媒体行业。Vice、Otter Media和AOL-Yahoo等互联网传媒集团都进行了裁员。仅仅是2020年3月份，Vice就裁掉了155人，CondéNast裁掉了100人，Quartz裁掉了80人。\n\n疫情的冲击，加剧了媒体行业的衰退。主要原因就是各大厂商都在大幅缩减广告成本，最直观地影响了以广告为主营业务的数字媒体。Newsweek数据显示，2020年广告收入总体减少了18%。而根据《纽约时报》的估测，约有3.6万媒体人因为疫情失去了工作\\[5\\]。\n\n媒介消费形式也在发生变化。短视频深刻重构了内容消费市场与消费格局，短视频消费成为了媒介消费的主流，在社交网络上流行和刷屏的不再是图文，更多是短视频。\n\n短视频应用不仅抢走了对流行内容定义的权力，也吸引了广告商和用户的注意力。而以图文为主要介质形式的海外老牌新闻聚合平台，或多或少地显得有些拧巴。它们虽然也在积极地进行视频化的尝试，但是在Tiktok等巨头的衬托下，显得有些无力。\n\n商业化的想象力还不够，越来越多的新闻平台、巨头的应用出现并竞争着有限的市场份额，新闻聚合类平台在“内卷竞争”之外，不但要与传统新闻出版机构争夺读者，也要与谷歌、Facebook等科技公司争夺广告费。\n\n虽然BuzzFeed提出了数字内容发展的战略框架，即内容+商品+广告，但长期以来，**BuzzFeed基本还是未跳脱出“媒体内容+分发渠道”的价值这一大逻辑**\\[6\\]**。**变现模式单一，旧业务受冲击，但新业务尚未有起色。作为“数字媒体第一股”的BuzzFeed尚且如此，其他平台就更不用说了。\n\nBuzzFeed凭借十几年的积累和强大的韧性完成上市，但不管是这家公司未来，还是整个数字媒体行业的发展，仍然充满不确定性。未来到底走向如何，我们还需保持观察。\n\n【今日互动】  \n\n你对BuzzFeed有了解吗？你认为以BuzzFeed为代表的海外新闻聚合类平台应该如何适应短视频时代？欢迎在评论区和我们讨论~\n\n\\*参考链接：\n\n\\[1\\]人民网:http://media.people.com.cn/n1/2018/0413/c40606-29923210.html\n\n\\[2\\] 知乎:https://www.zhihu.com/question/20689578/answer/91192841\n\n\\[3\\] BuzzFeed上市相关信息参考自: thewrap:https://www.thewrap.com/buzzfeed-completes-deals-to-take-company-public/ \n\n36氪：https://36kr.com/p/1516677211691017\n\n\\[4\\] thewrap: https://www.thewrap.com/buzzfeed-huffpost-layoffs/  \n\n\\[5\\] 硅兔赛跑：https://mp.weixin.qq.com/s/lFUs77QrPgqE0fFzbG0bxQ\n\n\\[6\\] 东西文娱：https://mp.weixin.qq.com/s/SfOp2lX--l7Z\\_kLcDxX3kQ",
+          "http_status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 37863,
+          "content_hash": "a66694631e9702eae6f4f0e0f15d413e2fe4aace9249221cba132f70e3e67d20",
+          "blocked_reason": null,
+          "charset": "utf-8",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "modified_at": null,
+          "conflicts": [],
+          "retrieved_at": "2026-10-12T11:39:12.164Z",
+          "source": {
+            "url": "https://www.pingwest.com/a/255024",
+            "host": "www.pingwest.com",
+            "site_name": "品玩",
+            "author": null
+          },
+          "temporal_evidence": [
+            {
+              "kind": "response_date",
+              "value": "2026-10-12T11:39:12.000Z",
+              "source": "http.header.date"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:12.164Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        "error": null
+      },
+      {
+        "url": "https://docs.searxng.org/",
+        "label": "relevant",
+        "relevant": true,
+        "category": "unknown",
+        "read_status": "ok",
+        "time_status": "unverified",
+        "published_at": null,
+        "published_on": null,
+        "precision": null,
+        "raw": {
+          "trace_id": "ef1ef912-9b0e-4bc4-94c9-8896c5f14440",
+          "telemetry": {
+            "first_valid_result_ms": 1569,
+            "stages_ms": {
+              "fetch_ms": 1512,
+              "extract_ms": 33
+            }
+          },
+          "url": "https://docs.searxng.org/",
+          "renderer": "lightweight",
+          "title": "SearXNG Documentation (2026.10.11+ad46ebd7d)",
+          "markdown": "# Welcome to SearXNG[¶](#welcome-to-searxng \"Link to this heading\")\n\n> _Search without being tracked._\n\nSearXNG is a free internet metasearch engine which aggregates results from up to 261 [search services](user/configured_engines.html#configured-engines). Users are neither tracked nor profiled. Additionally, SearXNG can be used over Tor for online anonymity.\n\nGet started with SearXNG by using one of the instances listed at [searx.space](https://searx.space). If you don’t trust anyone, you can set up your own, see [Installation](admin/installation.html#installation).\n\n*   [User information](user/index.html)\n    *   [Search syntax](user/search-syntax.html)\n    *   [Configured Engines](user/configured_engines.html)\n    *   [About SearXNG](user/about.html)\n*   [Why use a private instance?](own-instance.html)\n    *   [How does SearXNG protect privacy?](own-instance.html#how-does-searxng-protect-privacy)\n    *   [Conclusion](own-instance.html#conclusion)\n*   [Administrator documentation](admin/index.html)\n    *   [Settings](admin/settings/index.html)\n    *   [Installation](admin/installation.html)\n    *   [Installation container](admin/installation-docker.html)\n    *   [Installation Script](admin/installation-scripts.html)\n    *   [Step by step installation](admin/installation-searxng.html)\n    *   [Granian](admin/installation-granian.html)\n    *   [uWSGI](admin/installation-uwsgi.html)\n    *   [NGINX](admin/installation-nginx.html)\n    *   [Apache](admin/installation-apache.html)\n    *   [SearXNG maintenance](admin/update-searxng.html)\n    *   [Answer CAPTCHA from server’s IP](admin/answer-captcha.html)\n    *   [Favicons](admin/searx.favicons.html)\n    *   [Limiter](admin/searx.limiter.html)\n    *   [Administration API](admin/api.html)\n    *   [Architecture](admin/architecture.html)\n    *   [List of plugins](admin/plugins.html)\n    *   [Buildhosts](admin/buildhosts.html)\n*   [Developer documentation](dev/index.html)\n    *   [Development Quickstart](dev/quickstart.html)\n    *   [Git Commits & Change Management](dev/commits.html)\n    *   [How to contribute](dev/contribution_guide.html)\n    *   [Extended Types](dev/extended_types.html)\n    *   [Engine Implementations](dev/engines/index.html)\n    *   [Result Types](dev/result_types/index.html)\n    *   [Simple Theme Templates](dev/templates.html)\n    *   [Search API](dev/search_api.html)\n    *   [Plugins](dev/plugins/index.html)\n    *   [Answerers](dev/answerers/index.html)\n    *   [Translation](dev/translation.html)\n    *   [Makefile & `./manage`](dev/makefile.html)\n    *   [reST primer](dev/reST.html)\n    *   [Tooling box `searxng_extra`](dev/searxng_extra/index.html)\n*   [DevOps tooling box](utils/index.html)\n    *   [`utils/searxng.sh`](utils/searxng.sh.html)\n    *   [Common command environments](utils/index.html#common-command-environments)\n*   [Source-Code](src/index.html)\n    *   [Custom message extractor (i18n)](src/searx.babel_extract.html)\n    *   [Bot Detection](src/searx.botdetection.html)\n    *   [Caches](src/searx.cache.html)\n    *   [SearXNG Exceptions](src/searx.exceptions.html)\n    *   [Favicons (source)](src/searx.favicons.html)\n    *   [Online `/info`](src/searx.infopage.html)\n    *   [Locales](src/searx.locales.html)\n    *   [Search](src/searx.search.html)\n    *   [Search processors](src/searx.search.processors.html)\n    *   [Settings Loader](src/searx.settings.html)\n    *   [SQLite DB](src/searx.sqlitedb.html)\n    *   [Utility functions for the engines](src/searx.utils.html)\n    *   [Valkey DB](src/searx.valkeydb.html)\n    *   [Valkey Library](src/searx.valkeylib.html)\n    *   [Weather](src/searx.weather.html)\n\n## Acknowledgements[¶](#acknowledgements \"Link to this heading\")\n\nThe following organizations have provided SearXNG access to their paid plans at no cost:\n\n \n\n[![Docker](_images/docker.svg)](https://docker.com)\n\n[![Tuta](_images/tuta.svg)](https://tuta.com)\n\n[![BrowserStack](_images/browserstack.svg)](https://browserstack.com)",
+          "http_status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 49620,
+          "content_hash": "80dc6f8185f95feed850b6eaf508e8374d50bc67080fd3c76185dc8f58a85db4",
+          "blocked_reason": null,
+          "charset": "utf-8",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "modified_at": "2026-10-11T15:56:13.000Z",
+          "conflicts": [],
+          "retrieved_at": "2026-10-12T11:39:13.728Z",
+          "source": {
+            "url": "https://docs.searxng.org/",
+            "host": "docs.searxng.org",
+            "site_name": null,
+            "author": null
+          },
+          "temporal_evidence": [
+            {
+              "kind": "modified_at",
+              "value": "2026-10-11T15:56:13.000Z",
+              "source": "http.header.last-modified"
+            },
+            {
+              "kind": "response_date",
+              "value": "2026-10-12T11:39:13.000Z",
+              "source": "http.header.date"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:13.728Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        "error": null
+      },
+      {
+        "url": "https://pcgpower.com/",
+        "label": "negative",
+        "relevant": false,
+        "category": "irrelevant",
+        "read_status": "ok",
+        "time_status": "unverified",
+        "published_at": null,
+        "published_on": null,
+        "precision": null,
+        "raw": {
+          "trace_id": "830b55e1-0c13-43a5-95a6-3df9bffbc318",
+          "telemetry": {
+            "first_valid_result_ms": 458,
+            "stages_ms": {
+              "fetch_ms": 403,
+              "extract_ms": 35
+            }
+          },
+          "url": "https://pcgpower.com/",
+          "renderer": "lightweight",
+          "title": "碧澄能源-为客户提供更加经济、智慧、可靠的绿色能源",
+          "markdown": "[![](/themes/basic/skin/images/logo-white.svg) ![](/themes/basic/skin/images/logo-color.svg)](/)\n\n[EN](/en)\n\n*   [首页](/)\n*   [关于碧澄](/site/about-us)\n    \n    *   [碧澄概况](/site/about-us/#overflow)\n    *   [集团生态](/site/about-us/#ecosystem)\n    *   [发展历程](/site/about-us/#history)\n*   [碧澄优势](/site/ecology)\n    \n    *   [资本生态](/site/ecology)\n    *   [服务体系](/site/service)\n    *   [数智物联](/site/digitization)\n    *   [科技创新](/site/innovate)\n*   [标杆案例](/site/case)\n*   [新闻中心](/site/news)\n*   [联系我们](/site/contact_us)\n    \n    *   [联系我们](/site/contact_us)\n    *   [加入我们](https://pcgpower.zhiye.com/)\n    *   [合规举报](/site/compliance-reporting)\n\n行业领先的新型电力系统投资管理和运营服务商之一，  \n全球领先的工商业分布式清洁能源电站投资运营商之一\n\n[\n\n探索碧澄\n\n](/site/about-us)\n\n![](/themes/basic/skin/images/index-banner-1.jpg)\n\n定义全球市场  \n最受欢迎的资产类型\n\n[\n\n探索碧澄\n\n](/site/about-us)\n\n![](/themes/basic/skin/images/index-banner-2.jpg)\n\n碧汇涓滴绿能  \n澄启千顷光程\n\n[\n\n探索碧澄\n\n](/site/about-us)\n\n![](/themes/basic/skin/images/index-banner-3.jpg)\n\nAbout Us\n\n关于碧澄\n\n致力于为企业、园区、城市\n\n提供经济、智慧、可靠的绿色能源\n\n[\n\n探索碧澄\n\n](/site/about-us)\n\n![](/themes/basic/skin/images/mission-icon-1.svg)\n\n使命\n\n为客户提供\n\n更加经济、智慧、可靠的绿色能源\n\n![](/themes/basic/skin/images/mission-icon-2.svg)\n\n愿景\n\n定义全球市场\n\n最受欢迎的资产类型\n\n![](/themes/basic/skin/images/mission-icon-3.svg)\n\n价值观\n\n诚信职业，开放融合，以奋斗者为本\n\n![](/themes/basic/skin/images/about-bc-screen-list-1.jpg)\n\n![](/themes/basic/skin/images/mission-icon-1.svg)\n\n使命\n\n为客户提供\n\n更加经济、智慧、可靠的绿色能源\n\n![](/themes/basic/skin/images/mission-icon-1.svg)\n\n愿景\n\n定义全球市场\n\n最受欢迎的资产类型\n\n![](/themes/basic/skin/images/mission-icon-1.svg)\n\n价值观\n\n诚信职业，开放融合，以奋斗者为本\n\n![](/themes/basic/skin/images/about-bc-screen-bg.png)\n\nPCG Ecosystem\n\n集团生态\n\n*   0 GW+\n    \n    累计开发量\n    \n*   0 +\n    \n    服务客户\n    \n*   0 +\n    \n    服务行业\n    \n*   0 +\n    \n    海外战略市场\n    \n*   0 +\n    \n    国内服务省份\n    \n*   0\n    \n    国内聚焦区域（京津冀、长三角、珠三角）\n    \n\n![](/themes/basic/skin/images/ecology-earth-bg.png)\n\n碧曦  \n数碳\n\n数字化能碳管理平台\n\n碧澄  \n碳科院\n\n碳因子库团体标准建设单位\n\n碧屿  \n科技\n\n新型电力系统智慧物联解决方案提供商\n\n碧擎  \n智慧\n\n虚拟电厂聚合运营商\n\n碧桐  \n绿电\n\n工商业绿电交易服务商\n\n碧电  \n工程\n\n新能源工程建设服务商\n\n碧全  \n智维\n\n新能源智慧运维服务商\n\n![](/themes/basic/skin/images/color-logo.svg)\n\n新型电力系统投资管理和运营服务商\n\n![](/themes/basic/skin/images/earth-content-mobile.jpg)\n\nAdvantages\n\n碧澄优势\n\n四大优势协同发展\n\n[\n\n![](/themes/basic/skin/images/advantage-icon-1.svg)\n\n资本生态\n\n链接匹配资本\n\n实现资产双周期全阶段管理\n\n](/site/ecology)\n\n[\n\n![](/themes/basic/skin/images/advantage-icon-2.svg)\n\n科技创新\n\n多模态大模型\n\n构建智慧能源决策中枢\n\n](/site/innovate)\n\n![](/themes/basic/skin/images/logo-white-transparent.svg)\n\n[\n\n![](/themes/basic/skin/images/advantage-icon-3.svg)\n\n服务体系\n\n为客户定制化打造\n\n绿色智慧能源解决方案\n\n](/site/service)\n\n[\n\n![](/themes/basic/skin/images/advantage-icon-4.svg)\n\n数智物联\n\n全域物联数据融合智能平台\n\n打造多源协同“效能引擎”\n\n](/site/digitization)\n\n![](/themes/basic/skin/images/advantage-screen-bg.png)\n\nSolutions\n\n解决方案\n\n以工商业客户需求为导向，\n\n提供工商业新型电力系统投资、运营及增值服务\n\n数智化运营管理平台\n\n![](/themes/basic/skin/images/business-guide-2.png)\n\n![](/themes/basic/skin/images/business-guide-1-1.png)\n\n![](/themes/basic/skin/images/business-guide-3.png)\n\n![](/themes/basic/skin/images/business-logo-1.png)\n\n![](/themes/basic/skin/images/business-logo-2.png)\n\n![](/themes/basic/skin/images/business-area-1-1.png)\n\n![](/themes/basic/skin/images/business-area-2.png)\n\n![](/themes/basic/skin/images/business-area-2-b-1.png)\n\n![](/themes/basic/skin/images/business-area-3-1.png)\n\nSolutions\n\n解决方案\n\n![](/themes/basic/skin/images/business-mobile.jpg)\n\nProject Cases\n\n标杆案例\n\n![](/themes/basic/skin/images/case-pic-8.jpg)\n\n西门子  \n1.86MW/5.58MWh用户侧储能项目\n\n*   ![](/themes/basic/skin/images/icon-address-gray.svg)\n    \n    江苏·南京\n    \n\n![](/themes/basic/skin/images/case-replenish-7.jpg)\n\n仙鹤股份  \n22.36MW/44.72MWh用户侧储能项目\n\n*   ![](/themes/basic/skin/images/icon-address-gray.svg)\n    \n    浙江·衢州\n    \n\n![](/themes/basic/skin/images/case-replenish-8.jpg)\n\n泰瑞装备  \n11.5MW分布式光伏项目\n\n*   ![](/themes/basic/skin/images/icon-address-gray.svg)\n    \n    浙江·嘉兴\n    \n*   ![](/themes/basic/skin/images/icon-power-gray.svg)\n    \n    1115.3万度/年\n    \n*   ![](/themes/basic/skin/images/icon-green-gray.svg)\n    \n    11110吨/年\n    \n*   ![](/themes/basic/skin/images/icon-tree-gray.svg)\n    \n    61万棵/年\n    \n\n![](/themes/basic/skin/images/case-replenish-9.jpg)\n\n力劲科技  \n6MW分布式光伏项目\n\n*   ![](/themes/basic/skin/images/icon-address-gray.svg)\n    \n    江苏 ·昆山\n    \n*   ![](/themes/basic/skin/images/icon-power-gray.svg)\n    \n    559.9万度/年\n    \n*   ![](/themes/basic/skin/images/icon-green-gray.svg)\n    \n    5582吨/年\n    \n*   ![](/themes/basic/skin/images/icon-tree-gray.svg)\n    \n    31万棵/年\n    \n\n![](/uploads/&e7&8f&a0&e6&b5&b7&e6&99&ae&e4&bc&8a&e7&89&b95.62MW.jpg)\n\n普伊特 5.62MW分布式光伏项目\n\n*   ![](/themes/basic/skin/images/icon-address-gray.svg)\n    \n    广东·珠海\n    \n*   ![](/themes/basic/skin/images/icon-power-gray.svg)\n    \n    560万度/年\n    \n*   ![](/themes/basic/skin/images/icon-green-gray.svg)\n    \n    6442吨/年\n    \n*   ![](/themes/basic/skin/images/icon-tree-gray.svg)\n    \n    35万棵/年",
+          "http_status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 131044,
+          "content_hash": "49c31741385ecf1762c1d1024febd7cf1533c71de66cf75694921d31558dae7a",
+          "blocked_reason": null,
+          "charset": "utf-8",
+          "published_at": null,
+          "published_on": null,
+          "precision": null,
+          "modified_at": null,
+          "conflicts": [],
+          "retrieved_at": "2026-10-12T11:39:14.193Z",
+          "source": {
+            "url": "https://pcgpower.com/",
+            "host": "pcgpower.com",
+            "site_name": null,
+            "author": null
+          },
+          "temporal_evidence": [
+            {
+              "kind": "response_date",
+              "value": "2026-10-12T11:39:14.000Z",
+              "source": "http.header.date"
+            },
+            {
+              "kind": "retrieved_at",
+              "value": "2026-10-12T11:39:14.193Z",
+              "source": "gateway.clock"
+            }
+          ]
+        },
+        "error": null
+      },
+      {
+        "url": "https://www.ft.com/",
+        "label": "relevant",
+        "relevant": true,
+        "category": "read_failure",
+        "read_status": "failed",
+        "time_status": "unverified",
+        "published_at": null,
+        "published_on": null,
+        "precision": null,
+        "raw": {
+          "trace_id": "18d7a92c-7984-4fce-9b49-961c1898463d",
+          "error": {
+            "kind": "tls_error",
+            "message": "Client network socket disconnected before secure TLS connection was established"
+          }
+        },
+        "error": "Client network socket disconnected before secure TLS connection was established"
+      },
+      {
+        "url": "http://map.baidu.com/",
+        "label": "negative",
+        "relevant": false,
+        "category": "unread",
+        "read_status": "unread",
+        "time_status": "unverified",
+        "published_at": null,
+        "published_on": null,
+        "precision": null,
+        "raw": null,
+        "error": "not read (bounded PROBE_MAX_READS budget); page date not judged"
+      }
+    ],
+    "failures": [
+      {
+        "url": "https://www.theguardian.com/world/2026/oct/09/japan-royal-throne-lineage-princess-aiko-forbidden-ascending",
+        "category": "unknown",
+        "error": null
+      },
+      {
+        "url": "https://www.ajudaily.com/view/20241128080617057",
+        "category": "unknown",
+        "error": null
+      },
+      {
+        "url": "https://www.pingwest.com/a/255024",
+        "category": "unknown",
+        "error": null
+      },
+      {
+        "url": "https://docs.searxng.org/",
+        "category": "unknown",
+        "error": null
+      },
+      {
+        "url": "https://www.ft.com/",
+        "category": "read_failure",
+        "error": "Client network socket disconnected before secure TLS connection was established"
+      },
+      {
+        "url": "http://map.baidu.com/",
+        "category": "unread",
+        "error": "not read (bounded PROBE_MAX_READS budget); page date not judged"
+      }
+    ],
+    "gate": {
+      "passed": false,
+      "reasons": [
+        "1 read failure(s) exceed the allowed 0",
+        "0 both-satisfied candidate(s) are below the required 1"
+      ],
+      "thresholds": {
+        "maxReadFailure": 0,
+        "maxUnknown": null,
+        "maxUnread": null,
+        "minBothSatisfied": 1
+      }
+    }
+  },
+  "summary": {
+    "searches": 3,
+    "results_total": 25,
+    "results_with_publisher_instant": 0,
+    "results_with_published_on": 3,
+    "results_time_range_within": 0,
+    "results_time_range_outside": 0,
+    "results_time_range_unverified": 0,
+    "query_echo_mismatches": 0,
+    "reads": 0
+  }
+}

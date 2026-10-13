@@ -1,0 +1,8 @@
+# TEMPLATE ONLY. Generate/validate against resolved isolated settings with
+# searxng-route-probe.py; never pass this directly to overlay apply/prepare.
+# Missing/disabled engines and explicit operator proxy choices are not changed.
+engines:
+  - name: quark
+    proxies: {}
+  - name: chinaso news
+    proxies: {}

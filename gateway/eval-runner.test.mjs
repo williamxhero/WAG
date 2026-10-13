@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { listenHttp } from './fixtures/safe-listen.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 // The injected execution deadline is 5s, followed by at most 1s cleanup and
@@ -13,7 +14,27 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 // killing the evaluator is a test failure, never the normal termination path.
 const externalBoundMs = 9000;
 
-async function fixture(t, handler) {
+test('evaluator fixture cleans its temporary root when listen fails', async () => {
+  const hooks = []; let server;
+  const before = (await fs.readdir(os.tmpdir())).filter(name => name.startsWith('wag-eval-lifecycle-')).sort();
+  const cause = Object.assign(new Error('fixture invalid address'), { code: 'EADDRNOTAVAIL' });
+  try {
+    await assert.rejects(fixture({ after: hook => hooks.push(hook) }, undefined, { listen: value => { server = value; throw cause; } }), error => error === cause);
+  } finally {
+    for (const hook of hooks) await hook();
+  }
+  assert.equal(server.listening, false);
+  assert.deepEqual((await fs.readdir(os.tmpdir())).filter(name => name.startsWith('wag-eval-lifecycle-')).sort(), before);
+});
+
+test('evaluator fixture retains its callable handler with optional listen options', async t => {
+  let calls = 0;
+  const f = await fixture(t, (_request, response) => { calls++; response.end('callable handler'); return true; }, { host: '127.0.0.1' });
+  assert.equal(await (await fetch(f.url)).text(), 'callable handler');
+  assert.equal(calls, 1);
+});
+
+async function fixture(t, handler, listenOptions = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wag-eval-lifecycle-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const requests = [];
@@ -39,9 +60,9 @@ async function fixture(t, handler) {
     response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
   });
   server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => { for (const socket of sockets) socket.destroy(); server.close(); });
-  const url = `http://127.0.0.1:${server.address().port}/mcp`;
+  t.after(async () => { for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); });
+  const { url: base } = await listenHttp(server, listenOptions);
+  const url = `${base}/mcp`;
   return { root, url, requests, sockets, server };
 }
 

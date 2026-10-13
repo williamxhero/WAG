@@ -1,5 +1,5 @@
 import { evaluateSpec82Evidence } from './spec82-evidence.mjs';
-import { resolveNewsWindow } from './news-verified.mjs';
+import { resolveNewsWindow, evaluateVerifiedStatus } from './news-verified.mjs';
 import { normalizeUrlForDedup, filterLowQualityResults } from './evidence-metadata.mjs';
 import { createBudgetedProviderSearch, createPersistentBudgetLedger } from './provider-budget.mjs';
 import { createProviderHttpTransport } from './provider-http-transport.mjs';
@@ -25,6 +25,13 @@ function privateDirectory(directory) {
   const info = lstatSync(directory);
   if (!info.isDirectory() || info.isSymbolicLink() || (process.platform !== 'win32' &&
       ((info.mode & 0o077) !== 0 || info.uid !== process.getuid()))) throw new Error('unsafe provider directory');
+}
+
+// Explicit operator-only initialization: private pre-existing parent, exclusive create, no provider construction.
+export function initializeSearchProviderBudget({ databasePath = PROVIDER_BUDGET_PATH, now = Date.now } = {}) {
+  privateDirectory(path.dirname(databasePath));
+  const budget = createPersistentBudgetLedger({ databasePath, initialize: true, now });
+  try { return budget.snapshot(); } finally { budget.close(); }
 }
 
 const CREDENTIAL_KEYS = ['APPBUILDER_API_KEY', 'IQS_API_KEY', 'TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY'];
@@ -74,7 +81,16 @@ export function loadProviderCredentials(filename) {
 // Paths and request are trusted test dependencies, never environment/CLI controls.
 export function createSearchProviderRuntime({ env = process.env, databasePath = PROVIDER_BUDGET_PATH, secretPath = PROVIDER_SECRET_PATH, now = Date.now, request } = {}) {
   const credentialsEnv = { ...env };
-  const needFile = NAMES.filter(name => env[`WAG_SEARCH_${name.toUpperCase()}_ENABLED`] === '1' &&
+  const controlErrors = [];
+  const validFlag = key => env[key] === undefined || ['0', '1'].includes(env[key]);
+  const maxCandidates = env.WAG_SEARCH_PAGE_MAX_CANDIDATES === undefined ? 20 : Number(env.WAG_SEARCH_PAGE_MAX_CANDIDATES);
+  const pageTimeoutMs = env.WAG_SEARCH_PAGE_TIMEOUT_MS === undefined ? 10000 : Number(env.WAG_SEARCH_PAGE_TIMEOUT_MS);
+  const limitsValid = [env.WAG_SEARCH_PAGE_MAX_CANDIDATES, env.WAG_SEARCH_PAGE_TIMEOUT_MS].every(value => value === undefined || /^[1-9][0-9]*$/.test(value)) &&
+    Number.isInteger(maxCandidates) && maxCandidates >= 10 && maxCandidates <= 20 && Number.isInteger(pageTimeoutMs) && pageTimeoutMs >= 1 && pageTimeoutMs <= 10000;
+  if (!limitsValid) controlErrors.push('page_limits_invalid');
+  if (!validFlag('WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED')) controlErrors.push('tariff_confirmation_invalid');
+  if (env.WAG_SEARCH_EVIDENCE_POLICY !== undefined && !['spec78_legacy', 'spec82_page_only'].includes(env.WAG_SEARCH_EVIDENCE_POLICY)) controlErrors.push('evidence_policy_invalid');
+  const needFile = NAMES.filter(name => !controlErrors.length && validFlag(`WAG_SEARCH_${name.toUpperCase()}_ENABLED`) && env[`WAG_SEARCH_${name.toUpperCase()}_ENABLED`] === '1' &&
     CREDENTIAL_FIELDS[name].some(key => !Object.hasOwn(env, key)));
   let fileFailed = false;
   if (needFile.length) {
@@ -86,6 +102,7 @@ export function createSearchProviderRuntime({ env = process.env, databasePath = 
   const configured = [];
   const costs = {};
   for (const name of NAMES) {
+    if (!validFlag(`WAG_SEARCH_${name.toUpperCase()}_ENABLED`) || controlErrors.length) { unavailable[name] = 'provider_configuration_error'; continue; }
     if (env[`WAG_SEARCH_${name.toUpperCase()}_ENABLED`] !== '1') { unavailable[name] = 'provider_unconfigured'; continue; }
     if (fileFailed && needFile.includes(name)) { unavailable[name] = 'provider_configuration_error'; continue; }
     const credentials = name === 'tencent' ? { secretId: credentialsEnv.TENCENTCLOUD_SECRET_ID, secretKey: credentialsEnv.TENCENTCLOUD_SECRET_KEY }
@@ -112,9 +129,11 @@ export function createSearchProviderRuntime({ env = process.env, databasePath = 
     catch { for (const provider of configured) unavailable[provider.name] = 'budget_storage_error'; }
   }
   const router = createProviderRouting({ providers: budget ? configured : [], budget, now,
-    unavailable, estimateCostCents: name => costs[name] });
+    unavailable, estimateCostCents: name => costs[name], maxCandidates: limitsValid ? maxCandidates : 20,
+    pageTimeoutMs: limitsValid ? pageTimeoutMs : 10000 });
   return Object.freeze({ evidencePolicy, active: NAMES.some(name => env[`WAG_SEARCH_${name.toUpperCase()}_ENABLED`] === '1'),
-    search: input => router.search(input), dispatch: input => router.dispatch(input), close: () => budget?.close() });
+    search: input => router.search(input), dispatch: input => router.dispatch(input),
+    snapshot: () => { try { return budget?.snapshot() ?? null; } catch { return null; } }, close: () => budget?.close() });
 }
 
 export function createProviderRouting({ now = Date.now, providers = [], budget, estimateCostCents, unavailable = {},
@@ -144,7 +163,7 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
     const entry = { controller, waiters: new Set(), started: false, operation: null };
     const dispatcher = dispatchers.get(provider);
     entry.operation = serial.then(async () => {
-      if (entry.waiters.size === 0) return emptyResult(provider, 'timeout');
+      if (entry.waiters.size === 0 || controller.signal.aborted) return emptyResult(provider, 'timeout');
       entry.started = true;
       try {
         const result = await dispatcher({ ...input, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) });
@@ -190,12 +209,13 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
       if (inFlight.size >= 64) return emptyResult(provider, 'provider_capacity_exhausted');
       entry = createFlight(key, provider, input);
     }
+    if (entry.controller.signal.aborted) return emptyResult(provider, 'timeout');
     return waitForFlight(entry, callerSignal, provider);
   }
   return Object.freeze({
     dispatch: dispatchOne,
-    async search({ input, results, signal: callerSignal, verifyPage, strict = false }) {
-      const signal = callerSignal ? AbortSignal.any([callerSignal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000);
+    async search({ input, results, signal: callerSignal, verifyPage, strict = false, evidencePolicy = 'spec82_page_only', sourceFailures = [] }) {
+      const signal = callerSignal ?? AbortSignal.timeout(30000);
       const checkedAt = new Date(now()).toISOString();
       const window = resolveNewsWindow({ window: input.news_window ?? 'rolling_24h', now: now() });
       const days = { week: 7, month: 31, year: 366 }[input.time_range];
@@ -221,7 +241,8 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
           if (existing) {
             if (!existing.providers.includes(provider)) existing.providers.push(provider);
           } else if (candidates.size < limit) {
-            candidates.set(key, { ...item, provider, providers: [provider] });
+            const provenance = item.provider ?? provider;
+            candidates.set(key, { ...item, provider: provenance, providers: [provenance] });
           }
         }
       }
@@ -251,13 +272,15 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
             const [key, candidate] = pending[index++];
             let page = {};
             let failed = false;
+            let attempted = false;
             if (strict && typeof verifyPage === 'function' && !pageSignal.aborted && pageRemainingMs > 0) {
               const cacheKey = JSON.stringify([key, input.news_render ?? 'never']);
               const cached = pageCache.get(cacheKey);
-              if (cached && cached.at <= now() && now() - cached.at < 7 * 86400000) page = cached.page;
+              if (cached && cached.at <= now() && now() - cached.at < 7 * 86400000) { page = cached.page; attempted = true; }
               else if (reads < pageLimit) {
                 pageCache.delete(cacheKey);
                 reads++;
+                attempted = true;
                 try {
                   page = await abortable(() => verifyPage(candidate, { signal: pageSignal, render: input.news_render ?? 'never' }), pageSignal);
                   if (!pageBinding(page, candidate)) page = {};
@@ -273,11 +296,22 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
               }
             }
             const evidence = evaluateSpec82Evidence(page, window, { auxiliary: candidate.temporal_evidence, checked_at: checkedAt });
+            if (evidencePolicy === 'spec78_legacy') {
+              evaluated.set(key, { ...candidate, policy: evidencePolicy, date_level: evidence.evidence_level,
+                state: candidate.news_evidence?.status ?? evidence.status });
+              continue;
+            }
             evaluated.set(key, { ...candidate, content: candidate.content.replace(/^\[WAG publisher [^\n]*\]\n/, ''),
               ...(page.source?.url ? { final_url: page.final_url ?? page.source.url, source: { ...candidate.source, ...page.source } } : {}),
               date_level: evidence.evidence_level, state: failed ? 'read_failure' : evidence.status,
               policy: 'spec82_page_only', spec82_evidence: evidence, published_at: evidence.published_at,
               published_on: evidence.published_on, precision: evidence.precision,
+              ...(input.news_mode === 'verified' ? { news_evidence: {
+                status: failed ? 'read_failure' : !attempted ? 'unread' : evidence.status === 'out_of_window' ? 'stale' : evidence.status === 'claimed' ? 'unknown' : evidence.status,
+                source_kind: ['E1', 'E2'].includes(evidence.evidence_level) ? 'page_publisher' : 'none', source: evidence.source,
+                verified_eligible: ['E1', 'E2'].includes(evidence.evidence_level), published_at: evidence.published_at,
+                published_on: evidence.published_on, precision: evidence.precision, evidence_url: evidence.evidence_url,
+                checked_at: checkedAt, conflict_count: evidence.conflict_count } } : {}),
               ...(input.time_range ? { time_range_status: evidence.status === 'verified' ? 'within' : evidence.status === 'out_of_window' ? 'outside' : 'unverified' } : {}) });
           }
         }
@@ -301,6 +335,8 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
               previous.published_on = null;
               previous.precision = null;
               previous.spec82_evidence = { ...previous.spec82_evidence, status: 'unknown', reason: 'conflicting_evidence' };
+              if (previous.news_evidence) previous.news_evidence = { ...previous.news_evidence, status: 'unknown', verified_eligible: false,
+                published_at: null, published_on: null, precision: null };
             }
           }
         }
@@ -335,7 +371,15 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
       const all = fusedResults();
       let providerBudget = null;
       try { providerBudget = budget?.snapshot() ?? null; } catch { /* Unknown is not zero. */ }
-      return { provider_budget: providerBudget, results: strict ? all.filter(item => item.state === 'verified') : all, evidence_policy: 'spec82_page_only', provider_attempts: attempts,
+      return { provider_budget: providerBudget, results: strict ? all.filter(item => item.state === 'verified') : all, evidence_policy: evidencePolicy, provider_attempts: attempts,
+        ...(evidencePolicy === 'spec82_page_only' && input.time_range ? { time_range_enforced: verifiedCount() > 0 && (strict || all.every(item => item.state === 'verified')),
+          time_range_note: strict ? 'Only publisher PAGE-proven results within the requested window are returned.' : 'Discovery dates are claims; no publisher PAGE verification was requested.' } : {}),
+        ...(evidencePolicy === 'spec82_page_only' && input.news_mode === 'verified' ? { news_verification: {
+          mode: 'verified', source: input.news_source ?? 'searxng', window: window.window, window_timezone: window.window_timezone,
+          evaluated_at: checkedAt, time_range_is_discovery_hint: true, render: input.news_render ?? 'never',
+          ...evaluateVerifiedStatus(all, { min_sources: input.news_min_sources ?? 2, candidate_count: all.length, read_attempts: reads,
+            unread_count: all.filter(item => item.news_evidence.status === 'unread').length }),
+          read_failures: readFailures, source_failures: sourceFailures } } : {}),
         page_verification: { candidate_count: candidates.size, read_attempts: reads, verified_count: verifiedCount(), read_failures: readFailures, binding_failures: bindingFailures } };
     },
   });

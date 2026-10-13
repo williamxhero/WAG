@@ -42,6 +42,9 @@ MANIFESTS = ("runtime/gateway/package.json", "runtime/gateway/package-lock.json"
              "runtime/playwright-mcp/package.json", "runtime/playwright-mcp/package-lock.json",
              "config/crawl4ai-requirements.lock")
 REQUIRED = ("runtime/gateway/server.mjs", "runtime/gateway/search.mjs",
+            "runtime/gateway/provider-routing.mjs", "runtime/gateway/provider-budget.mjs",
+            "runtime/gateway/provider-adapters.mjs", "runtime/gateway/provider-http-transport.mjs",
+            "runtime/gateway/provider-contract.mjs", "runtime/gateway/spec82-evidence.mjs", "scripts/provider-canary.mjs",
             "runtime/gateway/eval-runner.mjs", "runtime/gateway/eval-case.mjs", "runtime/gateway/eval-core.mjs",
             "scripts/eval-release.sh",
             "runtime/gateway/artifact-store.mjs", "runtime/gateway/readiness.mjs",
@@ -313,21 +316,41 @@ def safe_configuration(root, candidate, env):
                  "CRAWL4AI_URL": "http://127.0.0.1:11235",
                  "EGRESS_PROXY": "http://127.0.0.1:7895",
                  "PLAYWRIGHT_MCP_URL": "http://localhost:8931/mcp"}
+    provider_controls = {"WAG_SEARCH_EVIDENCE_POLICY": "spec78_legacy", "WAG_SEARCH_BAIDU_ENABLED": "0",
+                         "WAG_SEARCH_ALIYUN_ENABLED": "0", "WAG_SEARCH_TENCENT_ENABLED": "0",
+                         "WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED": "0", "WAG_SEARCH_PAGE_MAX_CANDIDATES": "20",
+                         "WAG_SEARCH_PAGE_TIMEOUT_MS": "10000"}
     for line in (root / "secrets/gateway.env").read_text().splitlines():
         line = line.strip()
         if line.startswith("export "):
             line = line[7:].lstrip()
         key, separator, raw = line.partition("=")
         key = key.strip()
-        if not separator or key not in endpoints:
+        if not separator or key not in endpoints and key not in provider_controls:
             continue
         try:
             values = shlex.split(raw, comments=True, posix=True)
         except ValueError:
-            raise ReleaseError("invalid gateway endpoint configuration") from None
+            raise ReleaseError("invalid gateway configuration") from None
         if len(values) != 1:
-            raise ReleaseError("invalid gateway endpoint configuration")
-        endpoints[key] = values[0]
+            raise ReleaseError("invalid gateway configuration")
+        if key in provider_controls:
+            provider_controls[key] = values[0]
+        else:
+            endpoints[key] = values[0]
+    for key, value in provider_controls.items():
+        if key == "WAG_SEARCH_EVIDENCE_POLICY":
+            valid = value in {"spec78_legacy", "spec82_page_only"}
+        elif key in {"WAG_SEARCH_PAGE_MAX_CANDIDATES", "WAG_SEARCH_PAGE_TIMEOUT_MS"}:
+            low, high = (10, 20) if key == "WAG_SEARCH_PAGE_MAX_CANDIDATES" else (1, 10000)
+            valid = bool(re.fullmatch(r"[1-9][0-9]{0,5}", value)) and low <= int(value) <= high
+        else:
+            valid = value in {"0", "1"}
+        if not valid:
+            raise ReleaseError("invalid provider configuration")
+    result["search_provider_controls"] = provider_controls
+    result["search_provider_paths"] = {"ledger": "/data/web-access-gateway/data/provider-budget/budget.sqlite",
+                                       "credentials": "/data/web-access-gateway/secrets/search-providers.env"}
     projection = {}
     for key, raw in endpoints.items():
         try:

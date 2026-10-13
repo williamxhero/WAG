@@ -60,7 +60,7 @@ function parseHead(buffer) {
   return { rest: buffer.subarray(end + 4), requestLine: lines[0], headers };
 }
 
-async function fixture(t, { dns } = {}) {
+async function fixture(t, { dns, evidencePolicy } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wag-read-fallback-'));
   const artifactDir = path.join(root, 'artifacts');
   await fs.mkdir(artifactDir);
@@ -102,7 +102,9 @@ async function fixture(t, { dns } = {}) {
 
   let crawlResponse = { status: 200, body: JSON.stringify({ results: [{ markdown: 'Rendered markdown body.', status_code: 200 }] }) };
   const crawlRequests = [];
+  let searchRecall = [];
   const crawler = http.createServer((req, res) => {
+    if (req.url.startsWith('/search')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ results: searchRecall })); return; }
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
@@ -146,9 +148,11 @@ async function fixture(t, { dns } = {}) {
       GATEWAY_TOKEN: token, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1',
       GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(gatewayPort),
       CRAWL4AI_URL: `http://127.0.0.1:${crawlerPort}`, CRAWL4AI_TOKEN: token,
+      SEARXNG_URL: `http://127.0.0.1:${crawlerPort}`,
       EGRESS_PROXY: `http://127.0.0.1:${proxyPort}`, ARTIFACT_DIR: artifactDir,
       EVAL_REPORT_DIR: path.join(root, 'reports'),
       WAG_FIXTURE_DNS: JSON.stringify(dns ?? {}),
+      ...(evidencePolicy ? { WAG_SEARCH_EVIDENCE_POLICY: evidencePolicy } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -174,6 +178,11 @@ async function fixture(t, { dns } = {}) {
     crawlRequests,
     setOrigin(value) { originResponse = value; },
     setCrawl(value) { crawlResponse = value; },
+    setRecall(value) { searchRecall = value; },
+    async search(input) {
+      const result = await client.callTool({ name: 'web_search', arguments: input }, undefined, { timeout: 8000 });
+      return { result, payload: result.structuredContent ?? JSON.parse(result.content[0].text) };
+    },
     setProxyConnect(value) { proxyConnect = value; },
     async read(url, render = 'auto', output = 'markdown') {
       const result = await client.callTool({ name: 'web_read', arguments: { url, render, output } }, undefined, { timeout: 8000 });
@@ -183,6 +192,71 @@ async function fixture(t, { dns } = {}) {
 }
 
 const longArticle = length => `<html><head><title>Identity page</title></head><body><article>${'evidence '.repeat(length)}</article></body></html>`;
+
+test('opt-in page policy reaches lightweight MCP read evidence and matching text output', { timeout: 20000 }, async t => {
+  const gateway = await fixture(t, { evidencePolicy: 'spec82_page_only' });
+  const instant = new Date(Date.now() - 60000).toISOString();
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: `<meta property="article:published_time" content="${instant}"><article>Publisher report</article>` });
+  const { result, payload } = await gateway.read('http://publisher.example.test/article', 'never');
+  assert.notEqual(result.isError, true);
+  assert.equal(payload.policy, 'spec82_page_only');
+  assert.equal(payload.state, 'verified');
+  assert.equal(payload.date_level, 'E1');
+  assert.equal(payload.spec82_evidence.evidence_url, payload.url);
+  assert.deepEqual(JSON.parse(result.content[0].text), payload);
+});
+
+test('page policy uses successful rendered HTML and validated final identity for forced, auto and artifact reads', { timeout: 30000 }, async t => {
+  const gateway = await fixture(t, { evidencePolicy: 'spec82_page_only' });
+  const instant = new Date(Date.now() - 60000).toISOString();
+  for (const [render, output, originStatus] of [['always', 'markdown', 200], ['auto', 'markdown', 200], ['auto', 'markdown', 403], ['always', 'screenshot', 200], ['always', 'pdf', 200]]) {
+    gateway.setOrigin({ status: originStatus, headers: { 'content-type': 'text/html' }, body: '<article>Undated lightweight shell</article>' });
+    gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [{ status_code: 200, url: 'http://publisher.example.test/final', html: `<meta property="article:published_time" content="${instant}"><article>Rendered page</article>`, markdown: 'Rendered page', screenshot: Buffer.from('image').toString('base64'), pdf: Buffer.from('document').toString('base64') }] }) });
+    const { result, payload } = await gateway.read('http://publisher.example.test/article', render, output);
+    assert.notEqual(result.isError, true, JSON.stringify(payload));
+    assert.equal(payload.renderer, 'crawl4ai');
+    assert.equal(payload.policy, 'spec82_page_only');
+    assert.equal(payload.state, 'verified');
+    assert.equal(payload.published_at, instant);
+    assert.equal(payload.url, 'http://publisher.example.test/final');
+    assert.equal(payload.source.url, payload.url);
+    assert.equal(payload.spec82_evidence.evidence_url, payload.url);
+    assert.deepEqual(JSON.parse(result.content[0].text), payload);
+    if (output !== 'markdown') assert.ok(payload.artifact);
+  }
+});
+
+test('page-only verified MCP search actually renders auto candidates without relaxing publisher identity', { timeout: 20000 }, async t => {
+  const gateway = await fixture(t, { evidencePolicy: 'spec82_page_only' });
+  const url = 'http://publisher.example.test/article';
+  const instant = new Date(Date.now() - 60000).toISOString();
+  gateway.setRecall([{ title: 'Publisher report', url, content: 'Recall claim' }]);
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: '<article>Undated shell</article>' });
+  gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [{ status_code: 200, url, html: `<meta property="article:published_time" content="${instant}"><article>Publisher report</article>`, markdown: 'Publisher report' }] }) });
+  const { result, payload } = await gateway.search({ query: 'report', news_mode: 'verified', news_render: 'auto', news_min_sources: 1 });
+  assert.notEqual(result.isError, true, JSON.stringify(payload));
+  assert.equal(payload.results.length, 1);
+  assert.equal(payload.news_verification.render, 'auto');
+  assert.equal(payload.news_verification.status, 'verified');
+  assert.equal(gateway.crawlRequests.length, 1);
+  assert.equal(payload.results[0].source.url, payload.results[0].spec82_evidence.evidence_url);
+  assert.deepEqual(JSON.parse(result.content[0].text), payload);
+});
+
+test('page-only renderer missing HTML/status cannot prove a date and private final redirects are rejected', { timeout: 20000 }, async t => {
+  const gateway = await fixture(t, { evidencePolicy: 'spec82_page_only' });
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: '<article>Shell</article>' });
+  for (const rendered of [{ status_code: 200, markdown: 'Published today, a retrieval-only claim' }, { html: '<meta property="article:published_time" content="2026-10-13T10:00:00Z">', markdown: 'No observed status' }]) {
+    gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [rendered] }) });
+    const { payload } = await gateway.read('http://publisher.example.test/article', 'always');
+    assert.equal(payload.state, 'unknown');
+    assert.equal(payload.published_at, null);
+    assert.equal(payload.date_level, 'E5');
+  }
+  gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [{ status_code: 200, redirected_url: 'http://127.0.0.1/private', html: '<article>Private</article>', markdown: 'Private' }] }) });
+  const { result } = await gateway.read('http://publisher.example.test/article', 'always');
+  assert.equal(result.isError, true);
+});
 
 test('lightweight reads send a browser request identity instead of a gateway user agent', { timeout: 20000 }, async t => {
   const gateway = await fixture(t);

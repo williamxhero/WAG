@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { extractPageEvidence } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
-import { createProviderRouting, createSearchProviderRuntime } from './provider-routing.mjs';
+import { createProviderRouting, createSearchProviderRuntime, loadProviderCredentials } from './provider-routing.mjs';
 import { createPersistentBudgetLedger } from './provider-budget.mjs';
 import { createProviderAdapter } from './provider-adapters.mjs';
 import { createProviderHttpTransport } from './provider-http-transport.mjs';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
-import { mkdtemp, rm, writeFile, chmod, symlink } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, chmod, mkdir, link, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -21,6 +21,17 @@ test('provider runtime uses explicit environment controls and ignores obsolete W
   assert.equal(runtime.active, true);
   assert.equal(runtime.evidencePolicy, 'spec78_legacy');
   runtime.close();
+});
+
+test('invalid typed provider controls fail closed with a configuration diagnostic before ledger access', async () => {
+  for (const controls of [{ WAG_SEARCH_PAGE_MAX_CANDIDATES: '21' }, { WAG_SEARCH_PAGE_TIMEOUT_MS: '10001' }, { WAG_SEARCH_BAIDU_ENABLED: 'yes' }, { WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: 'true' }, { WAG_SEARCH_EVIDENCE_POLICY: 'invalid' }]) {
+    const runtime = createSearchProviderRuntime({ env: { WAG_SEARCH_BAIDU_ENABLED: '1', APPBUILDER_API_KEY: 'dummy-key', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', ...controls },
+      databasePath: path.join(tmpdir(), 'definitely-missing-controls.sqlite'), secretPath: path.join(tmpdir(), 'never-read-controls.env') });
+    try {
+      assert.equal((await runtime.dispatch({ provider: 'baidu', query: 'report' })).attempts[0].status, 'provider_configuration_error');
+      assert.equal(runtime.snapshot(), null);
+    } finally { runtime.close(); }
+  }
 });
 
 test('runtime loads only missing allowlisted credentials from a private nonexecuting dummy file', async t => {
@@ -48,6 +59,80 @@ test('runtime loads only missing allowlisted credentials from a private nonexecu
     assert.equal((await runtime.dispatch({ provider: 'tencent', query: 'synthetic' })).attempts[0].status, 'provider_unconfigured');
     assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1);
   } finally { runtime.close(); }
+});
+
+test('private dummy credential loader bounds and rejects malformed, expanded, oversized and multiply-linked files', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'wag-secrets-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const parent = path.join(root, 'secrets');
+  await mkdir(parent, { mode: 0o750 });
+  const filename = path.join(parent, 'dummy.env');
+  await writeFile(filename, 'APPBUILDER_API_KEY=dummy\n', { mode: 0o600 });
+  assert.equal(loadProviderCredentials(filename).APPBUILDER_API_KEY, 'dummy', 'Linux 0750 parent and 0600 file are supported');
+  for (const text of ['APPBUILDER_API_KEY=first\nAPPBUILDER_API_KEY=second\n', 'APPBUILDER_API_KEY=$(command)\n', 'export APPBUILDER_API_KEY=dummy\n', 'APPBUILDER_API_KEY="missing\n', 'APPBUILDER_API_KEY=' + 'x'.repeat(17000)]) {
+    await writeFile(filename, text);
+    assert.throws(() => loadProviderCredentials(filename));
+  }
+  await writeFile(filename, 'APPBUILDER_API_KEY=dummy\n');
+  const alias = path.join(parent, 'alias.env');
+  await link(filename, alias);
+  assert.throws(() => loadProviderCredentials(filename));
+  await rm(alias);
+  if (process.platform !== 'win32') {
+    for (const mode of [0o777, 0o770, 0o702]) {
+      await chmod(parent, mode);
+      assert.throws(() => loadProviderCredentials(filename));
+    }
+    await chmod(parent, 0o750);
+    await chmod(filename, 0o640);
+    assert.throws(() => loadProviderCredentials(filename));
+    await chmod(filename, 0o600);
+    await symlink(filename, alias);
+    assert.throws(() => loadProviderCredentials(alias));
+  } else t.diagnostic('Unix mode/owner/symlink branches require the final Linux CI run; parser and hardlink rejection ran locally.');
+});
+
+test('explicit environment credentials take precedence and disabled providers never require a secret file', async t => {
+  const { databasePath } = await ledgerFixture(t);
+  const secretPath = path.join(path.dirname(databasePath), 'missing-secrets.env');
+  for (const env of [{}, { WAG_SEARCH_BAIDU_ENABLED: '1', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', APPBUILDER_API_KEY: 'dummy-explicit' }]) {
+    const runtime = createSearchProviderRuntime({ env, databasePath, secretPath, now: () => NOW });
+    try { assert.equal(runtime.active ? runtime.snapshot()?.globalMonthlyCents : null, runtime.active ? 0 : null); }
+    finally { runtime.close(); }
+  }
+});
+
+test('enabled providers serve empty legacy recall without switching the global evidence policy or reading pages', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const router = createProviderRouting({ now: () => NOW, providers: [providerFixture('baidu', budget, calls, [recall[0].url])], budget, estimateCostCents: () => 0 });
+  const result = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ results: [] }) }), now: () => NOW, providerRouting: { active: true, search: input => router.search(input) },
+    verifyPage: () => { throw new Error('ordinary legacy search must not read pages'); } });
+  assert.equal(result.results.length, 1);
+  assert.equal(result.evidence_policy, 'spec78_legacy');
+  assert.equal(result.results[0].policy, 'spec78_legacy');
+  assert.equal(result.results[0].state, 'claimed');
+  assert.equal(result.page_verification.read_attempts, 0);
+  assert.equal(calls.length, 1);
+});
+
+test('page-only verified news honors source selection and reports honest verification and result counts', async () => {
+  let reads = 0;
+  const read = candidate => { reads++; return publisherPage(candidate); };
+  const options = { baseUrl: 'http://searxng.test', fetchImpl: fetchRecall, now: () => NOW, evidencePolicy: 'spec82_page_only', verifyPage: read };
+  const feeds = await searchSearxng({ ...options, input: { query: 'report', news_mode: 'verified', news_source: 'feeds' } });
+  assert.deepEqual(feeds.results, [], 'SearXNG recall is not a configured feed source');
+  assert.equal(reads, 0);
+  assert.equal(feeds.news_verification.source_failures[0].code, 'catalog_empty');
+  const page = await searchSearxng({ ...options, input: { query: 'report', news_mode: 'verified' } });
+  assert.equal(page.results.length, 1);
+  assert.equal(page.number_of_results, 1);
+  assert.equal(page.news_verification.verified_count, 1);
+  assert.equal(page.news_verification.distinct_publishers, 1);
+  assert.equal(page.news_verification.status, 'partial');
+  assert.equal(page.news_verification.render, 'never');
+  assert.equal(page.results[0].news_evidence.status, 'verified');
 });
 
 test('SPEC82 strict search rejects search/API dates without publisher PAGE proof', async () => {
@@ -81,7 +166,7 @@ function providerFixture(name, budget, calls, urls, { delayMs = 0, onSend } = {}
       request.end = payload => {
         calls.push({ name, body: JSON.parse(payload), usage: budget.snapshot() });
         const done = onSend?.();
-        const items = urls.map(url => ({ title: 'Publisher report', url, link: url, content: 'Report', snippet: 'Report', publishedTime: '2026-10-13T10:00:00Z' }));
+        const items = urls.map(url => ({ title: 'Publisher report', url, link: url, content: 'Report', snippet: 'Report', date: '2026-10-13T10:00:00Z', publishedTime: '2026-10-13T10:00:00Z' }));
         const response = Readable.from([JSON.stringify(name === 'baidu' ? { references: items } : { pageItems: items })]);
         response.statusCode = 200;
         response.headers = {};
@@ -207,6 +292,21 @@ test('page work uses concurrency two and cancellation stops queued reads and unu
   assert.equal(budget.snapshot().providers.baidu, undefined);
 });
 
+test('one absolute search deadline includes free recall and clips the remaining publisher work', async () => {
+  const started = Date.now();
+  let aborted = 0;
+  const result = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    evidencePolicy: 'spec82_page_only', timeWindowStrict: true, now: () => NOW, searchTimeoutMs: 100,
+    fetchImpl: async () => { await new Promise(resolve => setTimeout(resolve, 60)); return { ok: true, json: async () => ({ results: recall }) }; },
+    verifyPage: (candidate, { signal }) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(publisherPage(candidate)), 200);
+      signal.addEventListener('abort', () => { aborted++; clearTimeout(timer); reject(new Error('fixture abort')); }, { once: true });
+    }) });
+  assert.equal(aborted, 1);
+  assert.deepEqual(result.results, []);
+  assert.ok(Date.now() - started < 220, 'publisher work cannot receive a fresh deadline after free recall');
+});
+
 test('concurrent searches serialize provider sends and single-flight identical canonical dispatches', async t => {
   const { budget } = await ledgerFixture(t);
   const calls = [];
@@ -220,6 +320,86 @@ test('concurrent searches serialize provider sends and single-flight identical c
   assert.equal(maximum, 1, 'all provider sends in the router instance are serial');
   assert.equal(calls.length, 2, 'identical canonical requests share their pending dispatch');
   assert.equal(budget.snapshot().providers.baidu.dailyCalls, 2);
+});
+
+async function controlledRuntime(t) {
+  const { budget, databasePath } = await ledgerFixture(t);
+  const calls = [];
+  let sent;
+  const runtime = createSearchProviderRuntime({ env: { WAG_SEARCH_BAIDU_ENABLED: '1', APPBUILDER_API_KEY: 'dummy-key', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1' }, databasePath, now: () => NOW,
+    request: (url, options, callback) => {
+      const req = new EventEmitter();
+      req.destroyed = false;
+      req.destroy = () => { req.destroyed = true; };
+      req.end = payload => {
+        const call = { query: JSON.parse(payload).messages[0].content, req, release() {
+          const res = Readable.from(['{"references":[]}']);
+          res.statusCode = 200;
+          res.headers = {};
+          callback(res);
+        } };
+        calls.push(call);
+        sent?.();
+      };
+      return req;
+    } });
+  return { runtime, budget, calls, whenSent: () => calls.length ? Promise.resolve() : new Promise(resolve => { sent = resolve; }) };
+}
+
+test('one single-flight waiter abort does not cancel another waiter or a late joiner', async t => {
+  const { runtime, budget, calls, whenSent } = await controlledRuntime(t);
+  try {
+    const firstSignal = new AbortController();
+    const first = runtime.dispatch({ provider: 'baidu', query: 'same', signal: firstSignal.signal });
+    const second = runtime.dispatch({ provider: 'baidu', query: 'same' });
+    await whenSent();
+    firstSignal.abort();
+    assert.equal((await first).attempts[0].status, 'timeout');
+    const late = runtime.dispatch({ provider: 'baidu', query: ' same ' });
+    assert.equal(calls[0].req.destroyed, false);
+    calls[0].release();
+    assert.equal((await second).attempts[0].status, 'empty');
+    assert.equal((await late).attempts[0].status, 'empty');
+    assert.equal(calls.length, 1);
+    assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1);
+  } finally { runtime.close(); }
+});
+
+test('all canceled queued waiters cannot be resurrected into a charged no-send operation', async t => {
+  const { runtime, budget, calls, whenSent } = await controlledRuntime(t);
+  try {
+    const holding = runtime.dispatch({ provider: 'baidu', query: 'holding' });
+    await whenSent();
+    const cancel = new AbortController();
+    const queued = runtime.dispatch({ provider: 'baidu', query: 'queued', signal: cancel.signal });
+    cancel.abort();
+    assert.equal((await queued).attempts[0].status, 'timeout');
+    const late = runtime.dispatch({ provider: 'baidu', query: 'queued' });
+    calls[0].release();
+    await holding;
+    assert.equal((await late).attempts[0].status, 'timeout');
+    assert.equal(calls.length, 1);
+    assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1, 'cancel before reservation consumes zero allowance');
+  } finally { runtime.close(); }
+});
+
+test('all single-flight waiters abort after send destroys the request without refund', async t => {
+  const { runtime, budget, calls, whenSent } = await controlledRuntime(t);
+  try {
+    const a = new AbortController();
+    const b = new AbortController();
+    const first = runtime.dispatch({ provider: 'baidu', query: 'active', signal: a.signal });
+    const second = runtime.dispatch({ provider: 'baidu', query: 'active', signal: b.signal });
+    await whenSent();
+    a.abort();
+    assert.equal(calls[0].req.destroyed, false);
+    b.abort();
+    assert.equal((await first).attempts[0].status, 'timeout');
+    assert.equal((await second).attempts[0].status, 'timeout');
+    assert.equal(calls[0].req.destroyed, true);
+    assert.equal(calls.length, 1);
+    assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1, 'sent calls are never refunded');
+  } finally { runtime.close(); }
 });
 
 test('bounded page cache re-evaluates current windows and wider strict week uses seven days', async () => {

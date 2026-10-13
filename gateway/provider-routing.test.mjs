@@ -16,6 +16,35 @@ const NOW = Date.parse('2026-10-13T12:00:00Z');
 const recall = [{ title: 'Publisher report', url: 'https://publisher.example/articles/report', content: 'A substantive publisher report.', publishedDate: '2026-10-13T10:00:00Z', engine: 'fixture' }];
 const fetchRecall = async () => ({ ok: true, json: async () => ({ results: recall }) });
 
+test('Tencent runtime preserves only projected diagnostics and leaves E4 results unverified', async t => {
+  const { budget, databasePath } = await ledgerFixture(t);
+  const runtime = createSearchProviderRuntime({ env: { WAG_SEARCH_TENCENT_ENABLED: '1', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1',
+    TENCENTCLOUD_SECRET_ID: 'dummy-id', TENCENTCLOUD_SECRET_KEY: 'dummy-key' }, databasePath, now: () => NOW,
+    request: (url, options, callback) => {
+      const req = new EventEmitter();
+      req.destroy = () => {};
+      req.end = () => {
+        assert.equal(budget.snapshot().providers.tencent.monthlyCents, 3);
+        const res = Readable.from([JSON.stringify({ Response: { Version: 'lite', Pages: [JSON.stringify({ title: 'Synthetic', url: 'https://example.test/a', date: '2026-10-13' })] } })]);
+        res.statusCode = 200;
+        res.headers = {};
+        queueMicrotask(() => callback(res));
+      };
+      return req;
+    } });
+  try {
+    const result = await runtime.dispatch({ provider: 'tencent', query: 'synthetic' });
+    assert.equal(result.attempts[0].status, 'success');
+    assert.deepEqual(result.attempts[0].diagnostic, { stage: 'complete', auth_success: true, page_count: 1, parsed_page_count: 1, result_count: 1 });
+    assert.equal(result.posterior_version, 'lite');
+    assert.equal(result.results[0].date_status, 'claimed');
+    assert.equal(budget.snapshot().providers.tencent.monthlyCents, 3);
+    const hit = await runtime.dispatch({ provider: 'tencent', query: 'synthetic' });
+    assert.equal(hit.attempts[0].status, 'cache_hit');
+    assert.equal(Object.hasOwn(hit.attempts[0], 'diagnostic'), false);
+  } finally { runtime.close(); }
+});
+
 test('provider runtime uses explicit environment controls and ignores obsolete WSA credentials', async () => {
   const runtime = createSearchProviderRuntime({ env: { WAG_SEARCH_BAIDU_ENABLED: '1', APPBUILDER_API_KEY: 'dummy-key', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', TENCENTCLOUD_WSA_APIKEY: 'obsolete' }, databasePath: path.join(tmpdir(), 'missing-provider-budget.sqlite') });
   assert.equal(runtime.active, true);

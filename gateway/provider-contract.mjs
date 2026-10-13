@@ -9,6 +9,60 @@ export const DEFAULT_PROVIDER_LIMITS = Object.freeze({
 
 export const DEFAULT_GLOBAL_MONTHLY_CENTS = 1000;
 
+const DIAGNOSTIC_STAGES = new Set(['transport', 'response_json', 'response_envelope', 'version_validation', 'pages_array',
+  'page_json', 'record_validation', 'complete']);
+const DIAGNOSTIC_TYPES = new Set(['undefined', 'null', 'boolean', 'number', 'string', 'array', 'object']);
+const DIAGNOSTIC_KINDS = new Set(['aborted', 'authentication', 'invalid_response', 'invalid_transport_configuration',
+  'invalid_transport_request', 'provider_version_mismatch', 'rate_limited', 'redirect_blocked', 'request_too_large',
+  'response_too_large', 'timeout', 'transport_error', 'unsupported_encoding', 'unconfirmed_tariff', 'upstream_error']);
+const DIAGNOSTIC_STAGE_FIELDS = Object.freeze({
+  transport: ['auth_success', 'kind'],
+  response_json: ['auth_success', 'kind', 'response_type'],
+  response_envelope: ['auth_success', 'envelope_type', 'kind'],
+  version_validation: ['auth_success', 'envelope_type', 'kind', 'version_type'],
+  pages_array: ['auth_success', 'kind', 'page_count', 'page_type', 'pages_type'],
+  page_json: ['auth_success', 'kind', 'page_count', 'page_type', 'parsed_page_count'],
+  record_validation: ['auth_success', 'kind', 'page_count', 'parsed_page_count', 'record_type', 'result_count'],
+  complete: ['auth_success', 'page_count', 'parsed_page_count', 'result_count'],
+});
+const DIAGNOSTIC_TYPE_FIELDS = ['response_type', 'envelope_type', 'version_type', 'pages_type', 'page_type', 'record_type'];
+const DIAGNOSTIC_COUNT_FIELDS = ['page_count', 'parsed_page_count', 'result_count'];
+
+export function projectProviderDiagnostic(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !DIAGNOSTIC_STAGES.has(value.stage)) return null;
+  const allowed = new Set(['stage', ...DIAGNOSTIC_STAGE_FIELDS[value.stage]]);
+  if (Object.keys(value).some(key => !allowed.has(key))) return null;
+  const projected = { stage: value.stage };
+  if (Object.hasOwn(value, 'auth_success')) {
+    if (value.auth_success !== null && typeof value.auth_success !== 'boolean') return null;
+    if (value.stage === 'complete' ? value.auth_success !== true : value.auth_success === true) return null;
+    if (value.auth_success === false && value.kind !== 'authentication') return null;
+    projected.auth_success = value.auth_success;
+  } else if (value.stage === 'complete') return null;
+  if (Object.hasOwn(value, 'kind')) {
+    if (!DIAGNOSTIC_KINDS.has(value.kind)) return null;
+    projected.kind = value.kind;
+  }
+  for (const key of DIAGNOSTIC_TYPE_FIELDS) {
+    if (Object.hasOwn(value, key)) {
+      if (!DIAGNOSTIC_TYPES.has(value[key])) return null;
+      projected[key] = value[key];
+    }
+  }
+  for (const key of DIAGNOSTIC_COUNT_FIELDS) {
+    if (Object.hasOwn(value, key)) {
+      const maximum = key === 'result_count' ? 50 : 1_048_576;
+      if (!Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > maximum) return null;
+      projected[key] = value[key];
+    }
+  }
+  if (Object.hasOwn(value, 'page_count') && Object.hasOwn(value, 'parsed_page_count') && value.parsed_page_count > value.page_count) return null;
+  if (Object.hasOwn(value, 'result_count') && Object.hasOwn(value, 'parsed_page_count') && value.result_count > value.parsed_page_count) return null;
+  if (value.stage === 'complete' && (!Object.hasOwn(value, 'page_count') || !Object.hasOwn(value, 'parsed_page_count') ||
+      !Object.hasOwn(value, 'result_count') || value.page_count !== value.parsed_page_count || value.result_count > value.parsed_page_count)) return null;
+  return Object.freeze(projected);
+}
+
 export function normalizeProviderResult(item, provider) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) {
     throw new TypeError('provider result must be an object');

@@ -2,6 +2,7 @@ import { evaluateSpec82Evidence } from './spec82-evidence.mjs';
 import { resolveNewsWindow, evaluateVerifiedStatus } from './news-verified.mjs';
 import { normalizeUrlForDedup, filterLowQualityResults } from './evidence-metadata.mjs';
 import { createBudgetedProviderSearch, createPersistentBudgetLedger } from './provider-budget.mjs';
+import { projectProviderDiagnostic } from './provider-contract.mjs';
 import { createProviderHttpTransport } from './provider-http-transport.mjs';
 import { createProviderAdapter } from './provider-adapters.mjs';
 import { lstatSync, realpathSync, openSync, fstatSync, readSync, closeSync, constants } from 'node:fs';
@@ -171,7 +172,13 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
       try {
         const result = await dispatcher({ ...input, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) });
         const version = adapters.get(provider).posteriorVersion;
-        return { ...result, posterior_version: result.attempts.some(item => item.status === 'success') &&
+        const attempts = result.attempts.map(attempt => {
+          const { diagnostic: incoming, ...fields } = attempt;
+          const diagnostic = provider === 'tencent' ? projectProviderDiagnostic(incoming) : null;
+          return { ...fields, ...(diagnostic ? { diagnostic } : {}) };
+        });
+        return { ...result, attempts,
+          posterior_version: result.attempts.some(item => item.status === 'success') &&
           ['lite', 'standard', 'flagship'].includes(version) ? version : null, provider_budget: snapshot() };
       } catch (error) { return emptyResult(provider, error.kind === 'budget_clock_regression' ? error.kind : 'budget_storage_error'); }
     }).finally(() => inFlight.delete(key));

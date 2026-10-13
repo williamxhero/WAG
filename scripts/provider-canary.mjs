@@ -17,6 +17,16 @@ export async function loadRuntimeModule() {
   throw new Error('runtime_unavailable');
 }
 
+async function loadDiagnosticProjector() {
+  for (const relative of ['../gateway/provider-contract.mjs', '../runtime/gateway/provider-contract.mjs']) {
+    const url = new URL(relative, import.meta.url);
+    try { await access(url); } catch { continue; }
+    const module = await import(url.href);
+    if (typeof module.projectProviderDiagnostic === 'function') return module.projectProviderDiagnostic;
+  }
+  throw new Error('diagnostics_unavailable');
+}
+
 function parse(args) {
   const values = {};
   for (let i = 0; i < args.length; i++) {
@@ -74,8 +84,12 @@ export async function runProviderCanary(args, { runtimeFactory, initializeBudget
     const spend = before && budget && before.month === budget.month ? budget.globalMonthlyCents - before.globalMonthlyCents : null;
     const items = response.results ?? [];
     const claimed = items.filter(item => typeof item.claimed_date === 'string' && item.claimed_date.trim()).length;
+    const attempt = response.attempts?.[0];
+    const projectDiagnostic = input.provider === 'tencent' ? await loadDiagnosticProjector() : null;
+    const diagnostic = projectDiagnostic ? projectDiagnostic(attempt?.diagnostic) : null;
     return { provider: input.provider, status, resultcount: items.length, e4counts: { claimed, unknown: items.length - claimed },
       posterior_version: ['lite', 'standard', 'flagship'].includes(response.posterior_version) ? response.posterior_version : null,
+      ...(diagnostic ? { diagnostic } : {}),
       spend_cents: Number.isSafeInteger(spend) && spend >= 0 ? spend : null, budget };
   } catch { return { provider: input.provider, status: 'budget_storage_error', resultcount: 0, e4counts: { claimed: 0, unknown: 0 }, posterior_version: null, spend_cents: null, budget: null }; }
   finally {

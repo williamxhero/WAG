@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { closeSync, lstatSync, openSync } from 'node:fs';
 import path from 'node:path';
-import { cacheEntryIsFresh, normalizeProviderResult, DEFAULT_PROVIDER_LIMITS, DEFAULT_GLOBAL_MONTHLY_CENTS } from './provider-contract.mjs';
+import { cacheEntryIsFresh, normalizeProviderResult, projectProviderDiagnostic, DEFAULT_PROVIDER_LIMITS, DEFAULT_GLOBAL_MONTHLY_CENTS } from './provider-contract.mjs';
 
 const COST_CENTS = Object.freeze({ baidu: 0, aliyun: 1, tencent: 2 });
 function budgetError(kind = 'budget_storage_error') {
@@ -165,17 +165,22 @@ export function createBudgetedProviderSearch({ providers, budget, now = Date.now
         continue;
       }
       let results;
+      let diagnostic = null;
       try {
         const items = await provider.search(input);
         if (!Array.isArray(items)) throw budgetError('invalid_response');
+        diagnostic = provider.name === 'tencent' ? projectProviderDiagnostic(items.diagnostic) : null;
         results = Object.freeze(items.map(item => normalizeProviderResult(item, provider.name)));
       } catch (error) {
-        attempts.push({ provider: provider.name, status: PROVIDER_FAILURES.has(error.kind) ? error.kind : 'invalid_response' });
+        diagnostic = provider.name === 'tencent' ? projectProviderDiagnostic(error?.diagnostic) : null;
+        attempts.push({ provider: provider.name, status: PROVIDER_FAILURES.has(error.kind) ? error.kind : 'invalid_response',
+          ...(diagnostic ? { diagnostic } : {}) });
         continue;
       }
       if (cache.size >= maxCacheEntries) cache.delete(cache.keys().next().value);
       cache.set(key, { createdAt: timestamp, ttlMs, results });
-      attempts.push({ provider: provider.name, status: results.length ? 'success' : 'empty' });
+      attempts.push({ provider: provider.name, status: results.length ? 'success' : 'empty',
+        ...(diagnostic ? { diagnostic } : {}) });
       if (results.length) return { results: [...results], attempts };
     }
     return { results: [], attempts };

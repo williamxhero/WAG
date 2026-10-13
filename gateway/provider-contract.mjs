@@ -167,6 +167,10 @@ export async function runOrderedFallback({ providers, query, budget, estimateCos
     if (!provider || typeof provider.name !== 'string' || typeof provider.search !== 'function') {
       throw new TypeError('each provider requires a name and search function');
     }
+    if (provider.enabled === false) {
+      attempts.push({ provider: provider.name, status: 'provider_unconfigured' });
+      continue;
+    }
     const name = provider.name.trim();
     const estimate = estimateCostCents?.(name);
     if (requiresPaidEstimate(name) && (estimate == null || estimate === 0)) {

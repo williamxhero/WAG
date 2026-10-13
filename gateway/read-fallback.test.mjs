@@ -206,6 +206,46 @@ test('opt-in page policy reaches lightweight MCP read evidence and matching text
   assert.deepEqual(JSON.parse(result.content[0].text), payload);
 });
 
+test('page-only MCP proof binds embedded publication entities and canonical to the actual final page', { timeout: 30000 }, async t => {
+  const gateway = await fixture(t, { evidencePolicy: 'spec82_page_only' });
+  const instant = new Date(Date.now() - 60000).toISOString();
+  const other = 'http://publisher.example.test/other';
+  const variants = [{ url: other }, { '@id': `${other}#article` }, { mainEntityOfPage: other }, { mainEntityOfPage: { '@id': other } }];
+  for (let index = 0; index < variants.length; index++) {
+    const url = `http://publisher.example.test/current-${index}`;
+    const entity = { '@type': 'NewsArticle', ...variants[index], datePublished: instant };
+    gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' },
+      body: `<script type="application/ld+json">${JSON.stringify(entity)}</script><article>Undated current report</article>` });
+    const { payload } = await gateway.read(url, 'never');
+    assert.equal(payload.state, 'unknown');
+    assert.equal(payload.published_at, null);
+    gateway.setRecall([{ title: 'Current report', url, content: 'Discovery claim' }]);
+    const search = await gateway.search({ query: 'report', news_mode: 'verified', news_min_sources: 1 });
+    assert.deepEqual(search.payload.results, []);
+    assert.equal(search.payload.news_verification.verified_count, 0);
+  }
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: `<link rel="canonical" href="${other}"><meta property="article:published_time" content="${instant}">` });
+  assert.equal((await gateway.read('http://publisher.example.test/canonical-mismatch', 'never')).payload.state, 'unknown');
+  const finalUrl = 'http://publisher.example.test/final-matching';
+  const matching = { '@type': 'NewsArticle', url: finalUrl, '@id': `${finalUrl}#article`, mainEntityOfPage: { '@id': finalUrl }, datePublished: instant };
+  const html = `<link rel="canonical" href="${finalUrl}"><script type="application/ld+json">${JSON.stringify(matching)}</script><article>Own report</article>`;
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: html });
+  assert.equal((await gateway.read(finalUrl, 'never')).payload.state, 'verified');
+  gateway.setRecall([{ title: 'Own report', url: finalUrl, content: 'Discovery claim' }]);
+  assert.equal((await gateway.search({ query: 'report', news_mode: 'verified', news_min_sources: 1 })).payload.results.length, 1);
+  gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [{ status_code: 200, redirected_url: finalUrl, html, markdown: 'Own report' }] }) });
+  const redirected = await gateway.read('http://publisher.example.test/old-alias', 'always');
+  assert.equal(redirected.payload.state, 'verified');
+  assert.equal(redirected.payload.url, finalUrl);
+  const renderedUrl = 'http://publisher.example.test/rendered-current';
+  const unrelated = `<script type="application/ld+json">${JSON.stringify({ '@type': 'NewsArticle', url: other, datePublished: instant })}</script><article>Undated current report</article>`;
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: '<article>Undated shell</article>' });
+  gateway.setCrawl({ status: 200, body: JSON.stringify({ results: [{ status_code: 200, url: renderedUrl, html: unrelated, markdown: 'Current report' }] }) });
+  assert.equal((await gateway.read(renderedUrl, 'always')).payload.state, 'unknown');
+  gateway.setRecall([{ title: 'Current report', url: renderedUrl, content: 'Discovery claim' }]);
+  assert.deepEqual((await gateway.search({ query: 'report', news_mode: 'verified', news_render: 'auto', news_min_sources: 1 })).payload.results, []);
+});
+
 test('page policy uses successful rendered HTML and validated final identity for forced, auto and artifact reads', { timeout: 30000 }, async t => {
   const gateway = await fixture(t, { evidencePolicy: 'spec82_page_only' });
   const instant = new Date(Date.now() - 60000).toISOString();

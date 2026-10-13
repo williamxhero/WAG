@@ -262,6 +262,17 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
             bindingFailures.push({ url: requested, code: 'page_identity_mismatch' });
             return null;
           }
+          const canonical = page.source?.canonical_url;
+          const jsonLdPublication = [...(page.publication_candidates ?? []), ...(page.temporal_evidence ?? []), ...(page.conflicts ?? [])]
+            .some(item => item.kind === 'published_at' && /^html\.jsonld\[\d+\]\./.test(item.source ?? ''));
+          // Extractor diagnostics retain date sources, not embedded entity ownership.
+          // Only the trusted raw-HTML reader can attest JSON-LD publication identity.
+          if (page.publication_identity_validated === false ||
+              (jsonLdPublication && page.publication_identity_validated !== true) ||
+              (canonical && normalizeUrlForDedup(canonical) !== normalizeUrlForDedup(finalUrl))) {
+            bindingFailures.push({ url: requested, code: 'publication_identity_mismatch' });
+            return null;
+          }
           return { page, finalUrl };
         }
         const started = Date.now();

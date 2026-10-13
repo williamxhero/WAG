@@ -17,7 +17,7 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as z from 'zod/v4';
-import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { extractPageEvidence, prependPublishedEvidence, normalizeUrlForDedup } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
 import { createSearchProviderRuntime } from './provider-routing.mjs';
 import { evaluateSpec82Evidence } from './spec82-evidence.mjs';
@@ -467,14 +467,49 @@ function renderedMetadata(rendered) {
 function applyPagePolicy(page) {
   if (evidencePolicy !== 'spec82_page_only') return page;
   const now = Date.now();
-  const verdict = evaluateSpec82Evidence(page, resolveNewsWindow({ now }), { checked_at: new Date(now).toISOString() });
+  const identityMismatch = page.publication_identity_validated === false;
+  const evaluated = evaluateSpec82Evidence(identityMismatch ? {} : page, resolveNewsWindow({ now }), { checked_at: new Date(now).toISOString() });
+  const verdict = identityMismatch ? { ...evaluated, reason: 'publication_identity_mismatch', evidence_url: page.source?.url ?? null } : evaluated;
   const conflict = verdict.reason === 'conflicting_evidence';
   return { ...page, published_at: conflict ? null : verdict.published_at, published_on: conflict ? null : verdict.published_on,
     precision: conflict ? null : verdict.precision, policy: evidencePolicy, state: verdict.status,
     date_level: verdict.evidence_level, spec82_evidence: verdict };
 }
 function publisherEvidence(html, finalUrl, headers = {}) {
-  return applyPagePolicy(extractPageEvidence(html, finalUrl, headers, new Date().toISOString(), { chinesePublicationDates: evidencePolicy === 'spec82_page_only' }));
+  const page = extractPageEvidence(html, finalUrl, headers, new Date().toISOString(), { chinesePublicationDates: evidencePolicy === 'spec82_page_only' });
+  if (evidencePolicy !== 'spec82_page_only') return page;
+  // The shared extractor keeps dates, not the declaring Article's identity. Bind
+  // explicit entity/canonical identities here, while the actual final HTML exists.
+  const dom = new JSDOM(html, { url: finalUrl });
+  const samePage = value => {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    try { return normalizeUrlForDedup(new URL(value, finalUrl).href) === normalizeUrlForDedup(finalUrl); }
+    catch { return false; }
+  };
+  const identityMatches = value => {
+    if (typeof value === 'string') return samePage(value);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const identities = ['@id', 'url'].filter(key => Object.hasOwn(value, key));
+    return identities.length > 0 && identities.every(key => samePage(value[key]));
+  };
+  let valid = [...dom.window.document.querySelectorAll('link[rel~="canonical"]')].every(node => samePage(node.getAttribute('href')));
+  const pending = [];
+  for (const script of dom.window.document.querySelectorAll('script[type="application/ld+json"]')) {
+    try { pending.push(JSON.parse(script.textContent)); } catch { /* Invalid JSON-LD supplies no extracted proof. */ }
+  }
+  let visited = 0;
+  while (valid && pending.length) {
+    const entity = pending.pop();
+    if (++visited > 1000) { valid = false; break; }
+    if (Array.isArray(entity)) { pending.push(...entity); continue; }
+    if (!entity || typeof entity !== 'object') continue;
+    if (entity['@graph']) pending.push(entity['@graph']);
+    if (Object.hasOwn(entity, 'datePublished')) {
+      valid = ['url', '@id', 'mainEntityOfPage'].every(key => !Object.hasOwn(entity, key) || identityMatches(entity[key]));
+    }
+  }
+  dom.window.close();
+  return applyPagePolicy({ ...page, publication_identity_validated: valid });
 }
 function evidenceFromRendered(rendered, finalUrl) {
   const html = rendered?.result?.html;

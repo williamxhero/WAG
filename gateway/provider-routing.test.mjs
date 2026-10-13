@@ -198,6 +198,32 @@ test('strict page proof is bound to the requested URL unless the trusted reader 
   assert.equal(redirected.results[0].spec82_evidence.evidence_url, 'https://publisher.example/final-report');
 });
 
+test('unbound embedded article dates and mismatched canonical identities cannot verify or suppress fallback', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const router = createProviderRouting({ now: () => NOW, budget, estimateCostCents: name => name === 'baidu' ? 0 : 1,
+    providers: [providerFixture('baidu', budget, calls, ['https://publisher.example/baidu-own']),
+      providerFixture('aliyun', budget, calls, ['https://publisher.example/ali-own'])] });
+  const variants = [{ url: 'https://publisher.example/other' }, { '@id': 'https://publisher.example/other#article' },
+    { mainEntityOfPage: { '@id': 'https://publisher.example/other' } }];
+  const candidates = variants.map((identity, index) => ({ ...recall[0], url: `https://publisher.example/current-${index}` }));
+  const result = await router.search({ input: { query: 'identity report', time_range: 'day' }, results: candidates, strict: true,
+    verifyPage: candidate => {
+      const index = candidates.findIndex(item => item.url === candidate.url);
+      if (index < 0) return publisherPage(candidate);
+      const entity = { '@type': 'NewsArticle', ...variants[index], datePublished: '2026-10-13T10:00:00Z' };
+      return extractPageEvidence(`<script type="application/ld+json">${JSON.stringify(entity)}</script><article>Undated current report</article>`,
+        candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true });
+    } });
+  assert.deepEqual(result.results.map(item => item.url).sort(), ['https://publisher.example/ali-own', 'https://publisher.example/baidu-own']);
+  assert.deepEqual(calls.map(item => item.name), ['baidu', 'aliyun']);
+  assert.equal(result.page_verification.verified_count, 2);
+  const canonical = await createProviderRouting({ now: () => NOW }).search({ input: { query: 'canonical report', time_range: 'day' }, results: recall, strict: true,
+    verifyPage: candidate => extractPageEvidence('<link rel="canonical" href="https://publisher.example/other"><meta property="article:published_time" content="2026-10-13T10:00:00Z">',
+      candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true }) });
+  assert.deepEqual(canonical.results, []);
+});
+
 test('three validated redirect aliases count one final article and ordinary fallback continues', async t => {
   const { budget } = await ledgerFixture(t);
   const calls = [];

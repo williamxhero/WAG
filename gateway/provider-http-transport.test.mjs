@@ -228,6 +228,95 @@ test('configuration and request feature/endpoint validation fail closed before s
   assert.equal(mock.calls.length, 0);
 });
 
+test('Tencent documented-max requires confirmed integer three-cent bound and freezes the estimate', () => {
+  const mock = mockRequest();
+  const tariff = { confirmed: true, version: 'documented-max', costCents: 3 };
+  const transport = createProviderHttpTransport({ ...options('tencent'), tariff, request: mock.request });
+  assert.equal(transport.estimatedCostCents, 3);
+  tariff.costCents = 2;
+  tariff.version = 'lite';
+  assert.equal(transport.estimatedCostCents, 3);
+  assert.equal(Object.isFrozen(transport), true);
+  assert.throws(() => { transport.estimatedCostCents = 2; }, TypeError);
+  assert.equal(createProviderHttpTransport({ ...options('tencent'), tariff: { confirmed: true, version: 'documented-max', costCents: 4 } }).estimatedCostCents, 4);
+  assert.equal(createProviderHttpTransport(options('tencent')).estimatedCostCents, 2);
+  for (const extra of [{ costCents: 2 }, { costCents: 0 }, { costCents: 3.1 }, { costCents: Infinity }, { costCents: Number.MAX_SAFE_INTEGER + 1 }, { confirmed: false }, { confirmed: 'true' }, { version: 'unknown' }, { version: 'standard' }, { extra: true }]) {
+    assert.throws(() => createProviderHttpTransport({ ...options('tencent'), request: mock.request,
+      tariff: { confirmed: true, version: 'documented-max', costCents: 3, ...extra } }), { kind: 'unconfirmed_tariff' });
+  }
+  for (const name of ['baidu', 'aliyun']) assert.throws(() => createProviderHttpTransport({ ...options(name), request: mock.request,
+    tariff: { confirmed: true, version: 'documented-max', costCents: 3 } }), { kind: 'unconfirmed_tariff' });
+  assert.equal(mock.calls.length, 0);
+});
+
+test('documented-max returns only a bounded posterior Tencent version without selecting it on the wire', async () => {
+  for (const version of ['lite', 'standard', 'flagship']) {
+    const body = JSON.stringify({ Response: { Version: version, Pages: [] } });
+    const mock = mockRequest({ chunks: [body] });
+    const tariff = { confirmed: true, version: 'documented-max', costCents: 3 };
+    const transport = createProviderHttpTransport({ ...options('tencent'), tariff, request: mock.request });
+    tariff.version = 'lite'; // Caller mutation cannot change the captured diagnostic policy.
+    assert.deepEqual(await transport(input('tencent')), { status: 200, body, tencentVersion: version });
+    assert.equal(transport.estimatedCostCents, 3);
+    assert.deepEqual(JSON.parse(mock.calls[0].payload), bodies.tencent);
+    assert.equal(mock.calls[0].config.headers.Authorization, golden);
+    assert.equal(mock.calls.length, 1);
+  }
+});
+
+test('documented-max preserves Tencent API error classification without diagnosing a nonexistent result version', async () => {
+  for (const [code, kind] of [['AuthFailure.SecretIdNotFound', 'authentication'], ['RequestLimitExceeded', 'rate_limited'], ['InternalError', 'upstream_error']]) {
+    const body = JSON.stringify({ Response: { Error: { Code: code, Message: 'private dummy-secret-key' } } });
+    const mock = mockRequest({ chunks: [body] });
+    const transport = createProviderHttpTransport({ ...options('tencent'), request: mock.request,
+      tariff: { confirmed: true, version: 'documented-max', costCents: 3 } });
+    assert.deepEqual(await transport(input('tencent')), { status: 200, body });
+    await assert.rejects(createProviderAdapter({ name: 'tencent', enabled: true, transport }).search('政策'), error =>
+      error.kind === kind && error.cause === undefined && !String(error.stack).includes('private'));
+    assert.equal(mock.calls.length, 2, 'each explicit invocation sends once; no retry');
+  }
+});
+
+test('documented-max rejects unknown or malformed result versions and retains every Tencent request guard', async () => {
+  for (const version of ['unknown-private-tier', '', 'Lite', null, 3, [], { lite: true }, 'x'.repeat(4096), undefined]) {
+    const mock = mockRequest({ chunks: [JSON.stringify({ Response: { Version: version, Pages: [] } })] });
+    const signal = new AbortController().signal;
+    await assert.rejects(createProviderHttpTransport({ ...options('tencent'), request: mock.request,
+      tariff: { confirmed: true, version: 'documented-max', costCents: 3 } })(input('tencent', { signal })), error => {
+      assert.equal(error.kind, 'provider_version_mismatch');
+      assert.equal(error.cause, undefined);
+      assert.doesNotMatch(String(error.stack), /unknown-private-tier|dummy-secret|\{"lite"/);
+      return true;
+    });
+    assert.equal(mock.calls.length, 1);
+    assert.equal(mock.calls[0].req.destroyed, true);
+    assert.equal(mock.calls[0].res.destroyed, true);
+    assert.equal(getEventListeners(signal, 'abort').length, 0);
+  }
+  for (const body of ['not-json-private', '{', JSON.stringify({ Response: { Error: {} } }), JSON.stringify({ Response: { Error: { Code: null } } })]) {
+    const mock = mockRequest({ chunks: [body] });
+    await assert.rejects(createProviderHttpTransport({ ...options('tencent'), request: mock.request,
+      tariff: { confirmed: true, version: 'documented-max', costCents: 3 } })(input('tencent')), { kind: 'invalid_response' });
+    assert.equal(mock.calls.length, 1);
+  }
+  const mock = mockRequest();
+  const transport = createProviderHttpTransport({ ...options('tencent'), request: mock.request,
+    tariff: { confirmed: true, version: 'documented-max', costCents: 3 } });
+  for (const extra of [{ Cnt: 10 }, { Mode: 'standard' }, { Version: 'lite' }, { Freshness: 'd2' }, { Site: 'https://example.cn' }, { Query: ' ' }]) {
+    await assert.rejects(transport(input('tencent', { body: { ...bodies.tencent, ...extra } })), { kind: 'invalid_transport_request' });
+  }
+  const body = structuredClone(bodies.tencent);
+  Object.defineProperty(body, 'toJSON', { value: () => ({ ...bodies.tencent, Cnt: 10 }) });
+  await assert.rejects(transport(input('tencent', { body })), { kind: 'invalid_transport_request' });
+  assert.equal(mock.calls.length, 0, 'tariff approval never enables additional billed features');
+  for (const status of [401, 403, 429, 503]) {
+    const denied = mockRequest({ status, chunks: ['private'] });
+    assert.deepEqual(await createProviderHttpTransport({ ...options('tencent'), request: denied.request,
+      tariff: { confirmed: true, version: 'documented-max', costCents: 3 } })(input('tencent')), { status, body: '' });
+    assert.equal(denied.calls.length, 1);
+  }
+});
+
 test('validates the serialized body before signing or sending paid feature changes', async () => {
   const mock = mockRequest();
   const transport = createProviderHttpTransport({ ...options('aliyun'), request: mock.request });
@@ -327,6 +416,122 @@ test('real TLS adapters use the transport estimate in durable dispatch, cache sk
     const reopened = createPersistentBudgetLedger({ databasePath, now });
     try { assert.equal(reopened.snapshot().globalMonthlyCents, estimate * 2); } finally { reopened.close(); }
   }
+});
+
+test('real TLS documented-max reserves first three cents, diagnoses versions and retains spend across adapter rejection', { timeout: 15000 }, async t => {
+  const now = () => Date.parse('2026-10-13T04:00:00Z');
+  const directory = await mkdtemp(path.join(scratchRoot, 'wag-http-budget-'));
+  const databasePath = path.join(directory, 'budget.sqlite');
+  const budget = createPersistentBudgetLedger({ databasePath, initialize: true, now });
+  const observer = createPersistentBudgetLedger({ databasePath, now });
+  t.after(async () => { observer.close(); budget.close(); await rm(directory, { recursive: true, force: true }); });
+  let version = 'lite';
+  const item = { title: '合成政策', url: 'https://example.cn/a', date: '2026-10-13' };
+  const fixture = await tlsFixture(t, await certificate(t, 'wsa.tencentcloudapi.com'), (req, res) =>
+    res.end(JSON.stringify({ Response: { Version: version, Pages: [JSON.stringify(item)] } })));
+  const observations = [];
+  const replies = [];
+  const failures = [];
+  const send = fixture.request();
+  const transport = createProviderHttpTransport({ ...options('tencent'),
+    tariff: { confirmed: true, version: 'documented-max', costCents: 3 },
+    request: (...args) => { observations.push(observer.snapshot()); return send(...args); } });
+  const adapter = createProviderAdapter({ name: 'tencent', enabled: true, site: 'mp.weixin.qq.com', transport: async value => {
+    try { const reply = await transport(value); replies.push(reply); return reply; }
+    catch (error) { failures.push(error); throw error; }
+  } });
+  const search = createBudgetedProviderSearch({ providers: [adapter], budget, now,
+    estimateCostCents: name => { assert.equal(name, 'tencent'); return transport.estimatedCostCents; } });
+  const first = await search({ query: '政策', mode: 'strict', timeWindow: 'day' });
+  assert.equal(first.attempts[0].status, 'success');
+  assert.equal(first.results[0].date_status, 'claimed');
+  assert.equal(observations[0].providers.tencent.dailyCalls, 1);
+  assert.equal(observations[0].providers.tencent.monthlyCents, 3, 'first committed reservation is three, not default two');
+  assert.equal(observations[0].globalMonthlyCents, 3, 'separate ledger observes commit BEFORE HTTPS request creation');
+  assert.equal(replies[0].tencentVersion, 'lite');
+  assert.equal((await search({ query: ' 政策 ', mode: 'strict', timeWindow: 'day' })).attempts[0].status, 'cache_hit');
+  assert.equal(fixture.calls.length, 1);
+  assert.equal(budget.snapshot().globalMonthlyCents, 3);
+  for (const known of ['standard', 'flagship']) {
+    version = known;
+    const result = await search({ query: `诊断${known}` });
+    assert.equal(result.attempts[0].status, 'provider_version_mismatch', 'UNCHANGED adapter still rejects known nonlite results');
+    assert.deepEqual(result.results, []);
+    assert.equal(replies.at(-1).tencentVersion, known, 'transport accepts the documented version, not integrated result support');
+    assert.equal(budget.snapshot().globalMonthlyCents, fixture.calls.length * 3);
+  }
+  version = 'unknown-private-tier';
+  assert.equal((await search({ query: '未知版本' })).attempts[0].status, 'transport_error');
+  assert.equal(failures.at(-1).kind, 'provider_version_mismatch');
+  assert.doesNotMatch(String(failures.at(-1).stack), /unknown-private-tier|dummy-secret/);
+  assert.equal(fixture.calls.length, 4, 'no retry on posterior failure');
+  assert.equal(budget.snapshot().globalMonthlyCents, 12, 'unknown version consumed reservation; never refund');
+  assert.equal((await search({ query: '未知版本' })).attempts[0].status, 'transport_error');
+  assert.equal(fixture.calls.length, 5, 'failures are not cached');
+  version = 'lite';
+  for (let index = 5; index < 12; index++) assert.equal((await search({ query: `填满日限额${index}` })).attempts[0].status, 'success');
+  assert.equal((await search({ query: '日限额已满' })).attempts[0].status, 'budget_exhausted');
+  assert.equal(fixture.calls.length, 12, '12/day cap rejects before networking');
+  assert.equal(observations.length, 12);
+  for (const [index, snapshot] of observations.entries()) assert.equal(snapshot.globalMonthlyCents, (index + 1) * 3);
+  assert.equal(budget.snapshot().providers.tencent.monthlyCents, 36);
+  assert.equal((await search({ query: '政策', mode: 'strict', timeWindow: 'day' })).attempts[0].status, 'cache_hit', 'cache precedes exhausted budget');
+  assert.equal(fixture.calls.length, 12);
+  for (const [index, call] of fixture.calls.entries()) {
+    const body = JSON.parse(call.body);
+    assert.deepEqual(Object.keys(body).sort(), index === 0 ? ['Freshness', 'Query', 'Site'] : ['Query', 'Site']);
+    assert.equal(body.Site, 'mp.weixin.qq.com');
+    if (index === 0) assert.equal(body.Freshness, 'd1');
+    assert.match(call.headers.authorization, /^TC3-HMAC-SHA256 /);
+    assert.equal(call.headers['x-tc-action'], 'SearchPro');
+  }
+  await fixture.drained();
+  budget.close();
+  const reopened = createPersistentBudgetLedger({ databasePath, now });
+  try { assert.equal(reopened.snapshot().globalMonthlyCents, 36); } finally { reopened.close(); }
+});
+
+test('real TLS documented-max higher bound preserves paid-empty cache, no-refund and 500/1000-cent caps', { timeout: 15000 }, async t => {
+  const now = () => Date.parse('2026-10-13T04:00:00Z');
+  const directory = await mkdtemp(path.join(scratchRoot, 'wag-http-budget-'));
+  const databasePath = path.join(directory, 'budget.sqlite');
+  const budget = createPersistentBudgetLedger({ databasePath, initialize: true, now });
+  const observer = createPersistentBudgetLedger({ databasePath, now });
+  t.after(async () => { observer.close(); budget.close(); await rm(directory, { recursive: true, force: true }); });
+  assert.equal(budget.reserve('aliyun', 500).allowed, true);
+  let fail = false;
+  const fixture = await tlsFixture(t, await certificate(t, 'wsa.tencentcloudapi.com'), (req, res) => {
+    if (fail) return res.writeHead(503).end('private dummy-secret-key');
+    res.end(JSON.stringify({ Response: { Version: 'lite', Pages: [] } }));
+  });
+  const observations = [];
+  const send = fixture.request();
+  const transport = createProviderHttpTransport({ ...options('tencent'),
+    tariff: { confirmed: true, version: 'documented-max', costCents: 250 },
+    request: (...args) => { observations.push(observer.snapshot()); return send(...args); } });
+  const search = createBudgetedProviderSearch({ providers: [createProviderAdapter({ name: 'tencent', enabled: true, transport })], budget, now,
+    estimateCostCents: () => transport.estimatedCostCents });
+  assert.equal((await search({ query: '空结果' })).attempts[0].status, 'empty');
+  assert.equal(observations[0].providers.tencent.monthlyCents, 250);
+  assert.equal(observations[0].globalMonthlyCents, 750, 'higher confirmed estimate committed before TLS send');
+  assert.equal((await search({ query: '空结果' })).attempts[0].status, 'cache_hit');
+  assert.equal(fixture.calls.length, 1);
+  fail = true;
+  assert.equal((await search({ query: '失败查询' })).attempts[0].status, 'upstream_error');
+  assert.equal(observations[1].providers.tencent.monthlyCents, 500);
+  assert.equal(observations[1].globalMonthlyCents, 1000);
+  assert.equal(budget.snapshot().globalMonthlyCents, 1000, 'failed send cannot refund either cap');
+  assert.equal((await search({ query: '预算已满' })).attempts[0].status, 'budget_exhausted');
+  assert.equal((await search({ query: '空结果' })).attempts[0].status, 'cache_hit');
+  assert.equal(fixture.calls.length, 2, '500-provider/1000-global caps and cached empty never send');
+  await fixture.drained();
+  budget.close();
+  const reopened = createPersistentBudgetLedger({ databasePath, now });
+  try {
+    assert.equal(reopened.snapshot().providers.tencent.monthlyCents, 500);
+    assert.equal(reopened.snapshot().globalMonthlyCents, 1000);
+    assert.equal(reopened.reserve('tencent', transport.estimatedCostCents).allowed, false);
+  } finally { reopened.close(); }
 });
 
 test('abort during request creation closes the returned request without sending a body', async () => {

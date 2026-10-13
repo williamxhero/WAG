@@ -67,8 +67,10 @@ export function createProviderHttpTransport(config = {}) {
       !Number.isInteger(maxRequestBytes) || maxRequestBytes < 1 || maxRequestBytes > 65536 ||
       typeof request !== 'function' || typeof now !== 'function') throw failure('invalid_transport_configuration');
   const paid = name !== 'baidu';
+  const documentedMax = name === 'tencent' && tariff?.version === 'documented-max';
+  const minimumCost = name === 'aliyun' ? 1 : documentedMax ? 3 : 2;
   if (!fields(tariff, paid ? ['confirmed', 'version', 'costCents'] : ['confirmed', 'freeQuotaOnly']) || tariff.confirmed !== true ||
-      (paid ? tariff.version !== (name === 'aliyun' ? 'CNLiteBasic' : 'lite') || !Number.isSafeInteger(tariff.costCents) || tariff.costCents < (name === 'aliyun' ? 1 : 2) : tariff.freeQuotaOnly !== true)) {
+      (paid ? tariff.version !== (name === 'aliyun' ? 'CNLiteBasic' : documentedMax ? 'documented-max' : 'lite') || !Number.isSafeInteger(tariff.costCents) || tariff.costCents < minimumCost : tariff.freeQuotaOnly !== true)) {
     throw failure('unconfirmed_tariff');
   }
   const cost = paid ? tariff.costCents : 0;
@@ -151,7 +153,17 @@ export function createProviderHttpTransport(config = {}) {
             if (done) return;
             try {
               const body = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, bytes));
-              finish(null, { status, body });
+              if (documentedMax) {
+                const response = JSON.parse(body)?.Response;
+                // API error envelopes have no result version; preserve adapter classification.
+                if (response && Object.hasOwn(response, 'Error')) {
+                  if (typeof response.Error?.Code !== 'string' || !response.Error.Code) return finish('invalid_response');
+                  return finish(null, { status, body });
+                }
+                const tencentVersion = response?.Version;
+                if (!['lite', 'standard', 'flagship'].includes(tencentVersion)) return finish('provider_version_mismatch');
+                finish(null, { status, body, tencentVersion });
+              } else finish(null, { status, body });
             } catch { finish('invalid_response'); }
           });
           res.on('close', () => { if (!done) finish('transport_error'); });

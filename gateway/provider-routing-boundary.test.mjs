@@ -5,7 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -17,6 +17,7 @@ async function listen(server) {
 }
 
 async function fixture(t, env = {}, injection = null) {
+  injection ??= await diagnosticInjection(t);
   const recalled = [{ title: 'Local fixture report', url: 'http://127.0.0.1:7777/articles/report', content: 'A synthetic fixture report, not production supply.', publishedDate: new Date().toISOString(), engine: 'offline' }];
   const queries = [];
   const upstream = http.createServer((req, res) => {
@@ -53,8 +54,9 @@ async function fixture(t, env = {}, injection = null) {
   return { client, queries, search: args => client.callTool({ name: 'web_search', arguments: args }) };
 }
 
-async function diagnosticInjection(t, { poison = false } = {}) {
+async function diagnosticInjection(t, { poison = false, respond = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'wag-mcp-diagnostic-'));
+  await mkdir(path.join(root, 'secrets'));
   const bootstrap = path.join(root, 'register-loader.mjs');
   const loader = path.join(root, 'loader.mjs');
   const runtimeWrapper = path.join(root, 'runtime-wrapper.mjs');
@@ -73,17 +75,18 @@ async function diagnosticInjection(t, { poison = false } = {}) {
     }
     return nextResolve(specifier, context);
   }\n`);
-  await writeFile(runtimeWrapper, `import { createSearchProviderRuntime as createRuntime } from ${JSON.stringify(pathToFileURL(routingPath).href)};
+  await writeFile(runtimeWrapper, `import { appendFileSync } from 'node:fs';
+import { createSearchProviderRuntime as createRuntime } from ${JSON.stringify(pathToFileURL(routingPath).href)};
 import { createPersistentBudgetLedger } from ${JSON.stringify(pathToFileURL(path.join(moduleDir, 'provider-budget.mjs')).href)};
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 export function createSearchProviderRuntime() {
   const databasePath = process.env.WAG_TEST_DATABASE;
-  createPersistentBudgetLedger({ databasePath, initialize: true }).close();
-  return createRuntime({ env: { WAG_SEARCH_EVIDENCE_POLICY: 'spec82_page_only', WAG_SEARCH_TENCENT_ENABLED: '1',
-    WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', TENCENTCLOUD_SECRET_ID: 'dummy-id', TENCENTCLOUD_SECRET_KEY: 'dummy-key' },
-    databasePath,
+  if (process.env.WAG_TEST_INITIALIZE_DATABASE === '1') createPersistentBudgetLedger({ databasePath, initialize: true }).close();
+  return createRuntime({ env: process.env, databasePath, secretPath: process.env.WAG_TEST_SECRET_PATH,
     request: (url, options, callback) => {
+      appendFileSync(process.env.WAG_TEST_REQUEST_MARKER, 'request-called\\n');
+      if (process.env.WAG_TEST_REQUEST_MODE !== 'respond') throw new Error('synthetic request denied');
       const req = new EventEmitter();
       req.destroy = () => {};
       req.end = () => {
@@ -111,16 +114,22 @@ export function createProviderAdapter(options) {
       return copy;
     } });
 }\n`);
-  return { bootstrap, cleanup: () => rm(root, { recursive: true, force: true }), env: { WAG_TEST_LOADER_URL: pathToFileURL(loader).href,
-    WAG_TEST_RUNTIME_WRAPPER_URL: pathToFileURL(runtimeWrapper).href,
-    WAG_TEST_ADAPTER_WRAPPER_URL: pathToFileURL(adapterWrapper).href,
-    WAG_TEST_SERVER_URL: pathToFileURL(serverPath).href,
-    WAG_TEST_ROUTING_URL: pathToFileURL(routingPath).href,
-    WAG_TEST_POISON: poison ? '1' : '0', WAG_TEST_DATABASE: path.join(root, 'provider-budget.sqlite') } };
+  return { bootstrap, cleanup: () => rm(root, { recursive: true, force: true }),
+    databasePath: path.join(root, 'provider-budget.sqlite'), requestMarker: path.join(root, 'request-marker.log'),
+    env: { WAG_TEST_LOADER_URL: pathToFileURL(loader).href,
+      WAG_TEST_RUNTIME_WRAPPER_URL: pathToFileURL(runtimeWrapper).href,
+      WAG_TEST_ADAPTER_WRAPPER_URL: pathToFileURL(adapterWrapper).href,
+      WAG_TEST_SERVER_URL: pathToFileURL(serverPath).href,
+      WAG_TEST_ROUTING_URL: pathToFileURL(routingPath).href,
+      WAG_TEST_POISON: poison ? '1' : '0', WAG_TEST_REQUEST_MODE: respond ? 'respond' : 'deny',
+      WAG_TEST_INITIALIZE_DATABASE: respond ? '1' : '0', WAG_TEST_DATABASE: path.join(root, 'provider-budget.sqlite'),
+      WAG_TEST_SECRET_PATH: path.join(root, 'secrets', 'providers.env'), WAG_TEST_REQUEST_MARKER: path.join(root, 'request-marker.log'),
+      ...(respond ? { WAG_SEARCH_TENCENT_ENABLED: '1', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1',
+        TENCENTCLOUD_SECRET_ID: 'dummy-id', TENCENTCLOUD_SECRET_KEY: 'dummy-key' } : {}) } };
 }
 
 test('MCP emits only complete Tencent diagnostics and never promotes provider dates beyond E4', { timeout: 20000 }, async t => {
-  const injection = await diagnosticInjection(t);
+  const injection = await diagnosticInjection(t, { respond: true });
   const { search } = await fixture(t, { WAG_SEARCH_EVIDENCE_POLICY: 'spec82_page_only' }, injection);
   const result = await search({ query: '微信文章 report', time_range: 'day', time_window_strict: true });
   assert.notEqual(result.isError, true, JSON.stringify(result));
@@ -135,7 +144,7 @@ test('MCP emits only complete Tencent diagnostics and never promotes provider da
 });
 
 test('MCP drops a poisoned Tencent diagnostic before structured and text serialization', { timeout: 20000 }, async t => {
-  const injection = await diagnosticInjection(t, { poison: true });
+  const injection = await diagnosticInjection(t, { poison: true, respond: true });
   const { search } = await fixture(t, { WAG_SEARCH_EVIDENCE_POLICY: 'spec82_page_only' }, injection);
   const result = await search({ query: '微信文章 report', time_range: 'day', time_window_strict: true });
   assert.notEqual(result.isError, true, JSON.stringify(result));
@@ -163,9 +172,10 @@ test('existing MCP web_search applies explicit page-only policy, rejects E4 and 
   assert.deepEqual((await client.listTools()).tools.map(tool => tool.name).sort(), ['web_browser', 'web_read', 'web_search']);
 });
 
-test('explicitly enabled provider with missing durable ledger fails closed while free search works', { timeout: 20000 }, async t => {
+test('explicitly enabled provider with missing scratch ledger fails closed without sends while free search works', { timeout: 20000 }, async t => {
+  const injection = await diagnosticInjection(t);
   const { search } = await fixture(t, { WAG_SEARCH_EVIDENCE_POLICY: 'spec82_page_only', WAG_SEARCH_BAIDU_ENABLED: '1',
-    WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', APPBUILDER_API_KEY: 'dummy-key' });
+    WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', APPBUILDER_API_KEY: 'dummy-key' }, injection);
   const strict = await search({ query: 'report', time_range: 'day', time_window_strict: true });
   assert.notEqual(strict.isError, true, JSON.stringify(strict));
   assert.deepEqual(strict.structuredContent.results, []);
@@ -173,6 +183,8 @@ test('explicitly enabled provider with missing durable ledger fails closed while
   assert.equal(strict.structuredContent.provider_budget, null, 'unknown budget is not fabricated zero');
   const free = await search({ query: 'report' });
   assert.equal(free.structuredContent.results.length, 1);
+  await assert.rejects(stat(injection.databasePath), error => error.code === 'ENOENT');
+  await assert.rejects(stat(injection.requestMarker), error => error.code === 'ENOENT');
 });
 
 test('page-only general recall does not wait for pages or trigger ordinary providers', { timeout: 20000 }, async t => {

@@ -15,20 +15,27 @@ function inputQuery(input = {}) {
 }
 
 export function createProviderAdapter({ name, transport, enabled = false, site = null,
-  maxResponseBytes = 256 * 1024, maxResults = 10, timeoutMs = 5000 } = {}) {
+  maxResponseBytes = 256 * 1024, maxResults = 10, timeoutMs = 5000, tencentCostPolicy } = {}) {
   if (!['baidu', 'aliyun', 'tencent'].includes(name)) throw new TypeError('unknown provider');
   if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > 1024 * 1024) throw new TypeError('invalid response byte limit');
   if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 50) throw new TypeError('invalid result limit');
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new TypeError('invalid provider timeout');
   if (site !== null && (name !== 'tencent' || typeof site !== 'string' || !/^[a-z0-9.-]+$/i.test(site))) throw new TypeError('invalid provider site');
+  if (tencentCostPolicy !== undefined && (name !== 'tencent' || !Object.isFrozen(tencentCostPolicy) ||
+      tencentCostPolicy.transport !== transport || !Object.isFrozen(transport) || tencentCostPolicy.version !== 'documented-max' ||
+      !Number.isSafeInteger(transport?.estimatedCostCents) || transport.estimatedCostCents < 3 ||
+      tencentCostPolicy.costCents !== transport.estimatedCostCents)) throw new TypeError('invalid Tencent cost binding');
+  let posteriorVersion = null;
   return Object.freeze({
     name,
+    get posteriorVersion() { return posteriorVersion; },
     get enabled() { return enabled === true && typeof transport === 'function'; },
     cacheIdentity(input) {
       const value = inputQuery(input);
       return { key: JSON.stringify([name, site, maxResults, value.key]), ttlMs: providerCacheTtlMs(value.mode, value.timeWindow) };
     },
     async search(input) {
+      posteriorVersion = null;
       const { query, timeWindow } = inputQuery(input);
       if (enabled !== true || typeof transport !== 'function') throw failure('provider_unconfigured');
       let body;
@@ -79,7 +86,13 @@ export function createProviderAdapter({ name, transport, enabled = false, site =
         const kind = /Unauthorized|Auth|AccessKey/i.test(String(code)) ? 'authentication' : /Limit|Throttl/i.test(String(code)) ? 'rate_limited' : 'upstream_error';
         throw failure(kind);
       }
-      if (name === 'tencent' && data.Response?.Version !== 'lite') throw failure('provider_version_mismatch');
+      if (name === 'tencent') {
+        const version = data.Response?.Version;
+        if (tencentCostPolicy ? !['lite', 'standard', 'flagship'].includes(version) || response.tencentVersion !== version : version !== 'lite') {
+          throw failure('provider_version_mismatch');
+        }
+        posteriorVersion = version;
+      }
       let items = name === 'baidu' ? data.references : name === 'aliyun' ? data.pageItems : data.Response?.Pages;
       if (!Array.isArray(items)) throw failure('invalid_response');
       try {

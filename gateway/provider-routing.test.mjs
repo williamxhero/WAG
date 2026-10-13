@@ -1,0 +1,241 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { extractPageEvidence } from './evidence-metadata.mjs';
+import { searchSearxng } from './search.mjs';
+import { createProviderRouting, createSearchProviderRuntime } from './provider-routing.mjs';
+import { createPersistentBudgetLedger } from './provider-budget.mjs';
+import { createProviderAdapter } from './provider-adapters.mjs';
+import { createProviderHttpTransport } from './provider-http-transport.mjs';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { mkdtemp, rm, writeFile, chmod, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+const NOW = Date.parse('2026-10-13T12:00:00Z');
+const recall = [{ title: 'Publisher report', url: 'https://publisher.example/articles/report', content: 'A substantive publisher report.', publishedDate: '2026-10-13T10:00:00Z', engine: 'fixture' }];
+const fetchRecall = async () => ({ ok: true, json: async () => ({ results: recall }) });
+
+test('provider runtime uses explicit environment controls and ignores obsolete WSA credentials', async () => {
+  const runtime = createSearchProviderRuntime({ env: { WAG_SEARCH_BAIDU_ENABLED: '1', APPBUILDER_API_KEY: 'dummy-key', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1', TENCENTCLOUD_WSA_APIKEY: 'obsolete' }, databasePath: path.join(tmpdir(), 'missing-provider-budget.sqlite') });
+  assert.equal(runtime.active, true);
+  assert.equal(runtime.evidencePolicy, 'spec78_legacy');
+  runtime.close();
+});
+
+test('runtime loads only missing allowlisted credentials from a private nonexecuting dummy file', async t => {
+  const { budget, databasePath } = await ledgerFixture(t);
+  const secretPath = path.join(path.dirname(databasePath), 'dummy-providers.env');
+  await writeFile(secretPath, 'APPBUILDER_API_KEY="dummy-file-key"\nIQS_API_KEY=dummy-iqs\nWAG_SEARCH_TENCENT_ENABLED=1\nTENCENTCLOUD_WSA_APIKEY=unused\n', { mode: 0o600 });
+  const calls = [];
+  const request = (url, options, callback) => {
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    req.end = () => {
+      calls.push(options.headers.Authorization);
+      const res = Readable.from(['{"references":[]}']);
+      res.statusCode = 200;
+      res.headers = {};
+      queueMicrotask(() => callback(res));
+    };
+    return req;
+  };
+  const runtime = createSearchProviderRuntime({ env: { WAG_SEARCH_BAIDU_ENABLED: '1', WAG_SEARCH_PROVIDER_TARIFF_CONFIRMED: '1' }, databasePath, secretPath, now: () => NOW, request });
+  try {
+    const result = await runtime.dispatch({ provider: 'baidu', query: 'synthetic' });
+    assert.equal(result.attempts[0].status, 'empty');
+    assert.deepEqual(calls, ['Bearer dummy-file-key']);
+    assert.equal((await runtime.dispatch({ provider: 'tencent', query: 'synthetic' })).attempts[0].status, 'provider_unconfigured');
+    assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1);
+  } finally { runtime.close(); }
+});
+
+test('SPEC82 strict search rejects search/API dates without publisher PAGE proof', async () => {
+  let reads = 0;
+  const result = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    fetchImpl: fetchRecall, now: () => NOW, timeWindowStrict: true, evidencePolicy: 'spec82_page_only',
+    verifyPage: async candidate => {
+      reads++;
+      return extractPageEvidence('<article>Undated report</article>', candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true });
+    } });
+  assert.deepEqual(result.results, [], 'E4 search dates cannot leak into strict results');
+  assert.equal(reads, 1);
+  assert.equal(result.evidence_policy, 'spec82_page_only');
+  assert.equal(result.page_verification.verified_count, 0);
+});
+
+async function ledgerFixture(t) {
+  const root = await mkdtemp(path.join(tmpdir(), 'wag-routing-'));
+  const databasePath = path.join(root, 'budget.sqlite');
+  const budget = createPersistentBudgetLedger({ databasePath, initialize: true, now: () => NOW });
+  t.after(() => { budget.close(); return rm(root, { recursive: true, force: true }); });
+  return { budget, databasePath };
+}
+
+function providerFixture(name, budget, calls, urls, { delayMs = 0, onSend } = {}) {
+  const transport = createProviderHttpTransport({ name, credentials: { apiKey: 'dummy-key' }, now: () => NOW,
+    tariff: name === 'baidu' ? { confirmed: true, freeQuotaOnly: true } : { confirmed: true, version: 'CNLiteBasic', costCents: 1 },
+    request: (url, options, callback) => {
+      const request = new EventEmitter();
+      request.destroy = () => {};
+      request.end = payload => {
+        calls.push({ name, body: JSON.parse(payload), usage: budget.snapshot() });
+        const done = onSend?.();
+        const items = urls.map(url => ({ title: 'Publisher report', url, link: url, content: 'Report', snippet: 'Report', publishedTime: '2026-10-13T10:00:00Z' }));
+        const response = Readable.from([JSON.stringify(name === 'baidu' ? { references: items } : { pageItems: items })]);
+        response.statusCode = 200;
+        response.headers = {};
+        const reply = () => { done?.(); callback(response); };
+        if (delayMs) setTimeout(reply, delayMs); else queueMicrotask(reply);
+      };
+      return request;
+    } });
+  return createProviderAdapter({ name, transport, enabled: true });
+}
+
+const publisherPage = (candidate, finalUrl = candidate.url, redirectValidated = false) => {
+  if (typeof finalUrl !== 'string') finalUrl = candidate.url;
+  return { ...extractPageEvidence('<meta property="article:published_time" content="2026-10-13T10:00:00Z"><article>Publisher report</article>', finalUrl, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true }),
+    requested_url: candidate.url, final_url: finalUrl, redirect_validated: redirectValidated };
+};
+
+test('strict page proof is bound to the requested URL unless the trusted reader records a validated redirect', async () => {
+  const mismatched = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    fetchImpl: fetchRecall, now: () => NOW, timeWindowStrict: true, evidencePolicy: 'spec82_page_only',
+    verifyPage: candidate => publisherPage(candidate, 'https://other.example/unrelated') });
+  assert.deepEqual(mismatched.results, []);
+  assert.equal(mismatched.page_verification.verified_count, 0);
+  const redirected = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    fetchImpl: fetchRecall, now: () => NOW, timeWindowStrict: true, evidencePolicy: 'spec82_page_only',
+    verifyPage: candidate => publisherPage(candidate, 'https://publisher.example/final-report', true) });
+  assert.equal(redirected.results.length, 1);
+  assert.equal(redirected.results[0].final_url, 'https://publisher.example/final-report');
+  assert.equal(redirected.results[0].spec82_evidence.evidence_url, 'https://publisher.example/final-report');
+});
+
+test('three validated redirect aliases count one final article and ordinary fallback continues', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const baidu = providerFixture('baidu', budget, calls, ['https://publisher.example/extra']);
+  const router = createProviderRouting({ now: () => NOW, providers: [baidu], budget, estimateCostCents: () => 0 });
+  const aliases = Array.from({ length: 3 }, (_, index) => ({ ...recall[0], url: `https://publisher.example/alias/${index}` }));
+  const result = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ results: aliases }) }), now: () => NOW,
+    timeWindowStrict: true, evidencePolicy: 'spec82_page_only', providerRouting: router,
+    verifyPage: candidate => publisherPage(candidate, candidate.url.includes('/alias/') ? 'https://publisher.example/final' : candidate.url, true) });
+  assert.equal(calls.length, 1, 'one final publisher article does not satisfy strict three');
+  assert.equal(result.page_verification.verified_count, 2);
+  assert.equal(result.results.length, 2);
+  const final = result.results.find(item => item.url === 'https://publisher.example/final');
+  assert.equal(final.final_url, final.spec82_evidence.evidence_url);
+  assert.equal(final.requested_urls.length, 3);
+  assert.ok(result.page_verification.read_attempts <= 20);
+});
+
+test('strict small recall fuses Baidu then Ali with durable reserve-before-send and canonical caches', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const baidu = providerFixture('baidu', budget, calls, ['https://publisher.example/articles/baidu']);
+  const aliyun = providerFixture('aliyun', budget, calls, ['https://publisher.example/articles/ali', recall[0].url]);
+  const router = createProviderRouting({ now: () => NOW, providers: [baidu, aliyun], budget, estimateCostCents: name => name === 'baidu' ? 0 : 1 });
+  const search = () => searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' }, fetchImpl: fetchRecall,
+    now: () => NOW, timeWindowStrict: true, evidencePolicy: 'spec82_page_only', providerRouting: router, verifyPage: publisherPage });
+  const result = await search();
+  assert.equal(result.results.length, 3);
+  assert.deepEqual(calls.map(item => item.name), ['baidu', 'aliyun']);
+  assert.equal(calls[0].usage.providers.baidu.dailyCalls, 1);
+  assert.equal(calls[1].usage.providers.aliyun.monthlyCents, 1);
+  assert.ok(result.results.every(item => item.state === 'verified' && ['E1', 'E2'].includes(item.date_level)));
+  assert.deepEqual(result.results[0].providers, ['searxng', 'aliyun']);
+  const cached = await search();
+  assert.equal(calls.length, 2, 'canonical cache hits must not charge or send again');
+  assert.deepEqual(cached.provider_attempts.map(item => item.status), ['cache_hit', 'cache_hit']);
+  assert.equal(budget.snapshot().globalMonthlyCents, 1);
+});
+
+test('long E4-only free recall leaves bounded publisher-read shares for real provider candidates', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const free = Array.from({ length: 20 }, (_, index) => ({ ...recall[0], url: `https://publisher.example/free/${index}` }));
+  const baidu = providerFixture('baidu', budget, calls, ['https://publisher.example/paid/a', free[0].url]);
+  const aliyun = providerFixture('aliyun', budget, calls, ['https://publisher.example/paid/b', 'https://publisher.example/paid/c', 'https://publisher.example/paid/a']);
+  const router = createProviderRouting({ now: () => NOW, providers: [baidu, aliyun], budget, estimateCostCents: name => name === 'baidu' ? 0 : 1 });
+  const reads = [];
+  const result = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ results: free }) }), now: () => NOW,
+    timeWindowStrict: true, evidencePolicy: 'spec82_page_only', providerRouting: router, verifyPage: candidate => {
+      reads.push(candidate.url);
+      return candidate.url.includes('/paid/') ? publisherPage(candidate)
+        : extractPageEvidence('<article>Undated free report</article>', candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true });
+    } });
+  assert.equal(result.results.length, 3, 'valid fallback must not be discarded after charging');
+  assert.deepEqual(calls.map(item => item.name), ['baidu', 'aliyun']);
+  assert.ok(reads.length <= 20);
+  assert.equal(new Set(reads).size, reads.length, 'URL duplicates use one publisher read');
+  assert.deepEqual(result.results.find(item => item.url.endsWith('/paid/a')).providers, ['baidu', 'aliyun']);
+});
+
+test('page work uses concurrency two and cancellation stops queued reads and unusable paid fallback', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const baidu = providerFixture('baidu', budget, calls, ['https://publisher.example/paid/a']);
+  const router = createProviderRouting({ now: () => NOW, providers: [baidu], budget, estimateCostCents: () => 0, pageTimeoutMs: 30 });
+  let active = 0;
+  let maximum = 0;
+  let reads = 0;
+  let aborted = 0;
+  const many = Array.from({ length: 20 }, (_, index) => ({ ...recall[0], url: `https://publisher.example/slow/${index}` }));
+  const started = Date.now();
+  const result = await searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range: 'day' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ results: many }) }), now: () => NOW, signal: new AbortController().signal,
+    timeWindowStrict: true, evidencePolicy: 'spec82_page_only', providerRouting: router, verifyPage: (candidate, { signal }) => {
+      reads++;
+      active++;
+      maximum = Math.max(maximum, active);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { active--; resolve(publisherPage(candidate)); }, 100);
+        signal.addEventListener('abort', () => { clearTimeout(timer); active--; aborted++; reject(new Error('offline abort')); }, { once: true });
+      });
+    } });
+  assert.equal(maximum, 2);
+  assert.equal(reads, 2, 'deadline stops queued publisher reads');
+  assert.equal(aborted, 2);
+  assert.ok(Date.now() - started < 500);
+  assert.deepEqual(result.results, []);
+  assert.equal(calls.length, 0, 'do not charge providers after verification time is exhausted');
+  assert.ok(result.provider_attempts.some(item => item.status === 'verification_budget_exhausted'));
+  assert.equal(budget.snapshot().providers.baidu, undefined);
+});
+
+test('concurrent searches serialize provider sends and single-flight identical canonical dispatches', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  let active = 0;
+  let maximum = 0;
+  const baidu = providerFixture('baidu', budget, calls, ['https://publisher.example/article'], { delayMs: 20,
+    onSend: () => { active++; maximum = Math.max(maximum, active); return () => { active--; }; } });
+  const router = createProviderRouting({ now: () => NOW, providers: [baidu], budget, estimateCostCents: () => 0 });
+  const search = query => router.search({ input: { query }, results: [], strict: false });
+  await Promise.all([search('first'), search('second'), search('  first  ')]);
+  assert.equal(maximum, 1, 'all provider sends in the router instance are serial');
+  assert.equal(calls.length, 2, 'identical canonical requests share their pending dispatch');
+  assert.equal(budget.snapshot().providers.baidu.dailyCalls, 2);
+});
+
+test('bounded page cache re-evaluates current windows and wider strict week uses seven days', async () => {
+  let clock = NOW;
+  let reads = 0;
+  const router = createProviderRouting({ now: () => clock });
+  const read = candidate => {
+    reads++;
+    return extractPageEvidence('<meta property="article:published_time" content="2026-10-10T10:00:00Z"><article>Report</article>', candidate.url, {}, new Date(clock).toISOString(), { chinesePublicationDates: true });
+  };
+  const search = time_range => searchSearxng({ baseUrl: 'http://searxng.test', input: { query: 'report', time_range },
+    fetchImpl: fetchRecall, now: () => clock, timeWindowStrict: true, evidencePolicy: 'spec82_page_only', providerRouting: router, verifyPage: read });
+  assert.equal((await search('week')).results.length, 1, 'week is evaluated with a seven-day instant window');
+  assert.equal((await search('day')).results.length, 0);
+  assert.equal(reads, 1, 'cache holds page evidence, not a window-relative verdict');
+  clock += 7 * 86400000 + 1;
+  assert.equal((await search('week')).results.length, 0);
+  assert.equal(reads, 2, 'seven-day evidence TTL expires');
+});

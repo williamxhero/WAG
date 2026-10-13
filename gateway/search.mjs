@@ -1,3 +1,4 @@
+import { createProviderRouting } from './provider-routing.mjs';
 import { filterLowQualityResults, normalizeSearchResults, normalizeUrlForDedup, strictTimeRangeCompliance, timeRangeCompliance } from './evidence-metadata.mjs';
 import { applyEnginePool, createEngineHealth, enginePoolConfig, failureClasses } from './engine-health.mjs';
 import { evaluateResultEvidence, evaluateVerifiedStatus, normalizeNewsMode, normalizeVerifiedParams, resolveNewsWindow, aggregatePublisherEvidence } from './news-verified.mjs';
@@ -312,7 +313,7 @@ function readFailureEvidence(candidate, checkedAt, failure) {
   };
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage, discoverGdelt } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage, discoverGdelt, evidencePolicy = 'spec78_legacy', providerRouting } = {}) {
   const stages_ms = {};
   // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
   // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
@@ -398,7 +399,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const ranked = newsEnabled ? rankNewsResults(results, input.query) : null;
   let verifiedResults = ranked ?? results;
   let newsVerification = null;
-  if (normalizedNewsMode === 'verified') {
+  if (normalizedNewsMode === 'verified' && evidencePolicy !== 'spec82_page_only') {
     const verifiedNow = typeof now === 'function' ? now() : now;
     const window = resolveNewsWindow({ window: verifiedParams.news_window, now: verifiedNow });
     const checkedAt = new Date(verifiedNow).toISOString();
@@ -496,8 +497,13 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     : null;
   const cooldownSnapshot = enginePoolField ? engineHealth.snapshot(now()) : null;
 
+  const routed = evidencePolicy === 'spec82_page_only'
+    ? await (providerRouting ?? createProviderRouting({ now })).search({ input, results: ranked ?? filteredResults,
+        signal, verifyPage, strict: strictWindow || normalizedNewsMode === 'verified' })
+    : null;
   return {
     results: verifiedResults,
+    ...(routed ?? {}),
     number_of_results: body.number_of_results ?? results.length,
     stages_ms,
     attempts,

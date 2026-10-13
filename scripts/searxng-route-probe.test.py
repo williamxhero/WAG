@@ -625,6 +625,14 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(result["status"], "timeout")
         self.assertFalse(result["attempted"])
 
+    def test_measured_deadline_overrun_is_retained_without_clamping(self):
+        probe = helper()
+        result = probe.safe_result({"status": "timeout", "elapsed": 3.2, "attempted": True})
+        self.assertEqual(result.get("elapsed"), 3.2)
+        self.assertTrue(result["deadline_exceeded"])
+        self.assertEqual(result["status"], "timeout")
+        self.assertTrue(result["attempted"])
+
     def test_failed_connect_still_counts_a_known_network_attempt(self):
         probe = helper()
         transport = probe.OneSendTransport({"all://": "http://127.0.0.1:9"}, local_only=True)

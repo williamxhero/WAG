@@ -329,8 +329,9 @@ class OneSendTransport:
         result["attempted"] = attempted
         result["http_attempted"] = http_attempted
         elapsed = time.monotonic() - started + prepared
-        if elapsed <= 3:
+        if math.isfinite(elapsed) and 0 <= elapsed <= 3600:
             result["elapsed"] = elapsed
+            result["deadline_exceeded"] = elapsed > 3
         return result
 
     def _send(self, request, runtime, arm, mark_attempt):
@@ -478,8 +479,9 @@ def safe_result(value):
     if type(value.get("result_count")) is int and 0 <= value["result_count"] <= 100:
         result["result_count"] = value["result_count"]
     elapsed = value.get("elapsed")
-    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 3:
+    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 3600:
         result["elapsed"] = elapsed
+        result["deadline_exceeded"] = elapsed > 3
     for key in ("attempted", "http_attempted"):
         if type(value.get(key)) is bool:
             result[key] = value[key]

@@ -1,24 +1,42 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { createReadiness } from './readiness.mjs';
 import { waitForListening } from './test-fixtures/wait-for-listening.mjs';
+import { listenHttp, reserveHttpPort } from './fixtures/safe-listen.mjs';
+
+test('gateway fixture cleans partial setup after reservation allocation fails', async () => {
+  const hooks = []; const servers = [];
+  const before = (await readdir(os.tmpdir())).filter(name => name.startsWith('wag-health-')).sort();
+  const cause = Object.assign(new Error('fixture invalid address'), { code: 'EADDRNOTAVAIL' });
+  try {
+    await assert.rejects(gatewayFixture({ after: hook => hooks.push(hook) }, { listenOptions: { listen: (server, options) => {
+      servers.push(server);
+      if (servers.length === 3) throw cause;
+      return server.listen(options);
+    } } }), error => error === cause);
+  } finally {
+    for (const hook of hooks) await hook();
+  }
+  assert.equal(servers.length, 3);
+  for (const server of servers) assert.equal(server.listening, false);
+  assert.deepEqual((await readdir(os.tmpdir())).filter(name => name.startsWith('wag-health-')).sort(), before);
+});
 
 const token = 'offline-gateway-token-'.repeat(3);
 const crawlToken = 'offline-crawler-secret-'.repeat(3);
 const validSearch = { results: [{ title: 'Example', url: 'https://example.com/', content: 'An example result' }] };
 
-async function listen(server) {
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  return `http://127.0.0.1:${server.address().port}`;
+async function listen(server, options) {
+  return (await listenHttp(server, options)).url;
 }
 
-async function gatewayFixture(t, { search = validSearch, searchTiming, searchDelayMs = 0, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, requestTimeoutMs = 8000, env = {} } = {}) {
+async function gatewayFixture(t, { search = validSearch, searchTiming, searchDelayMs = 0, crawler = { ok: true, initialized: true, lifecycle: 'ready' }, proxyHang = false, requestTimeoutMs = 8000, env = {}, listenOptions = {} } = {}) {
   const counts = { search: 0, crawler: 0, crawl: 0 };
   const backend = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
@@ -34,7 +52,6 @@ async function gatewayFixture(t, { search = validSearch, searchTiming, searchDel
     if (req.url === '/readyz' || req.url === '/healthz') { counts.crawler++; return res.end(JSON.stringify(crawler)); }
     res.statusCode = 405; res.end('{}');
   });
-  const backendUrl = await listen(backend);
   const proxy = http.createServer();
   const proxySockets = new Set();
   const proxyState = { active: 0, closed: 0 };
@@ -45,31 +62,35 @@ async function gatewayFixture(t, { search = validSearch, searchTiming, searchDel
     socket.resume();
     if (!proxyHang) socket.end('HTTP/1.1 503 Offline fixture\r\nConnection: close\r\n\r\n');
   });
-  const proxyUrl = await listen(proxy);
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'wag-health-'));
+  let directory; let reservation; let child; let exited; let logs = '';
+  t.after(async () => {
+    if (child) { child.kill(); await exited; }
+    backend.closeAllConnections(); proxy.closeAllConnections();
+    for (const socket of proxySockets) socket.destroy();
+    await Promise.all([
+      ...[backend, proxy].map(server => new Promise((resolve, reject) => server.close(error => error && error.code !== 'ERR_SERVER_NOT_RUNNING' ? reject(error) : resolve()))),
+      reservation?.release(),
+      directory ? rm(directory, { recursive: true, force: true }) : undefined,
+    ]);
+    assert.ok(!logs.includes(token) && !logs.includes(crawlToken), 'gateway logs must not contain tokens');
+  });
+  const backendUrl = await listen(backend, listenOptions);
+  const proxyUrl = await listen(proxy, listenOptions);
+  directory = await mkdtemp(path.join(os.tmpdir(), 'wag-health-'));
   const preload = path.join(directory, 'dns-fixture.mjs');
   // Only the isolated child resolves the fixed public connectivity probe offline.
   await writeFile(preload, `import dns from 'node:dns/promises';\nconst original = dns.lookup;\ndns.lookup = (host, options) => host === 'example.com' ? Promise.resolve([{address:'93.184.216.34',family:4}]) : original(host, options);\n`);
-  const reservation = http.createServer();
-  await listen(reservation);
-  const port = reservation.address().port;
-  await new Promise(resolve => reservation.close(resolve));
-  const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(import.meta.dirname, 'server.mjs')], {
+  reservation = await reserveHttpPort(listenOptions);
+  const { port } = reservation;
+  // Release immediately before spawn; this handoff is not an atomic port lock.
+  await reservation.release();
+  child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(import.meta.dirname, 'server.mjs')], {
     env: { ...process.env, GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1', GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(port), GATEWAY_TOKEN: token, GATEWAY_ALLOW_ANONYMOUS: undefined, CRAWL4AI_TOKEN: crawlToken, CRAWL4AI_URL: backendUrl, SEARXNG_URL: backendUrl, PLAYWRIGHT_MCP_URL: `${backendUrl}/mcp`, EGRESS_PROXY: proxyUrl, GATEWAY_PROBE_TIMEOUT_MS: undefined, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let logs = '';
   child.stdout.on('data', chunk => { logs += chunk; });
   child.stderr.on('data', chunk => { logs += chunk; });
-  const exited = new Promise(resolve => child.once('exit', resolve));
-  t.after(async () => {
-    child.kill(); await exited;
-    backend.closeAllConnections(); proxy.closeAllConnections();
-    for (const socket of proxySockets) socket.destroy();
-    await Promise.all([new Promise(resolve => backend.close(resolve)), new Promise(resolve => proxy.close(resolve))]);
-    await rm(directory, { recursive: true, force: true });
-    assert.ok(!logs.includes(token) && !logs.includes(crawlToken), 'gateway logs must not contain tokens');
-  });
+  exited = new Promise(resolve => child.once('close', resolve));
   const base = `http://127.0.0.1:${port}`;
   const request = (route, authenticated = true) => fetch(`${base}${route}`, { headers: authenticated ? { authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(requestTimeoutMs) });
   await waitForListening(child);
@@ -277,8 +298,8 @@ async function readinessFixture(t, options = {}) {
     res.end(state[`${name}Raw`] ?? JSON.stringify(state[name] ?? {}));
   });
   backend.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
-  const url = await listen(backend);
   t.after(async () => { for (const socket of sockets) socket.destroy(); await new Promise(resolve => backend.close(resolve)); });
+  const url = await listen(backend, options.listenOptions);
   const read = createReadiness({
     searxUrl: url, crawlUrl: url, crawlToken, playwrightUrl: `${url}/mcp`, secrets: [token, 'offline-extra-secret'],
     egressProbe: async signal => { counts.egress++; if (state.egressError) throw state.egressError; if (state.egressHang) return new Promise(() => {}); assert.equal(signal.aborted, false); return { http_status: 200 }; },

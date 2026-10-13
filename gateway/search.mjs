@@ -1,3 +1,4 @@
+import { createProviderRouting } from './provider-routing.mjs';
 import { filterLowQualityResults, normalizeSearchResults, normalizeUrlForDedup, strictTimeRangeCompliance, timeRangeCompliance } from './evidence-metadata.mjs';
 import { applyEnginePool, createEngineHealth, enginePoolConfig, failureClasses } from './engine-health.mjs';
 import { evaluateResultEvidence, evaluateVerifiedStatus, normalizeNewsMode, normalizeVerifiedParams, resolveNewsWindow, aggregatePublisherEvidence } from './news-verified.mjs';
@@ -185,13 +186,23 @@ export function summarizeSourceEvidence(rawResults) {
   };
 }
 
-async function requestSearch({ baseUrl, input, fetchImpl, signal, relaxed }) {
+async function requestSearch({ baseUrl, input, fetchImpl, signal, deadlineSignal, deadlineAt, cancelRecall, relaxed }) {
   const params = buildSearchParams(input, { relaxed });
-  const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal });
-  if (!response.ok) {
-    throw searchError(`SearXNG returned ${response.status}`, 'search_backend_status', { httpStatus: response.status });
-  }
-  return response.json();
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.aborted ? signal.reason : searchError('Search deadline exceeded', 'timeout'));
+    if (deadlineSignal.aborted || performance.now() >= deadlineAt) { abort(); return; }
+    deadlineSignal.addEventListener('abort', abort, { once: true });
+    Promise.resolve().then(async () => {
+      if (deadlineSignal.aborted || performance.now() >= deadlineAt) { abort(); return; }
+      // Legacy retains exact caller signal identity. Opt-in policy/provider routing
+      // also cancels transport I/O at the shared deadline without mutating the caller.
+      const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal: cancelRecall ? deadlineSignal : signal });
+      if (!response.ok) throw searchError(`SearXNG returned ${response.status}`, 'search_backend_status', { httpStatus: response.status });
+      const body = await response.json();
+      if (deadlineSignal.aborted || performance.now() >= deadlineAt) { abort(); return; }
+      return body;
+    }).then(resolve, reject).finally(() => deadlineSignal.removeEventListener('abort', abort));
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -312,7 +323,14 @@ function readFailureEvidence(candidate, checkedAt, failure) {
   };
 }
 
-export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage, discoverGdelt } = {}) {
+export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage, discoverGdelt, evidencePolicy = 'spec78_legacy', providerRouting, searchTimeoutMs = 30000 } = {}) {
+  if (!Number.isInteger(searchTimeoutMs) || searchTimeoutMs < 1 || searchTimeoutMs > 30000) throw new TypeError('invalid search deadline');
+  // Start once, before free recall. Routing and publisher reads inherit the remaining deadline.
+  const deadlineAt = performance.now() + searchTimeoutMs;
+  const deadline = AbortSignal.timeout(searchTimeoutMs);
+  const deadlineSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  signal ??= deadline;
+  const cancelRecall = evidencePolicy === 'spec82_page_only' || Boolean(providerRouting?.active);
   const stages_ms = {};
   // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
   // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
@@ -326,7 +344,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     ? { ...input, engines: poolSelection.engines.join(',') }
     : input;
   const firstStarted = Date.now();
-  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, relaxed: false });
+  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, deadlineSignal, deadlineAt, cancelRecall, relaxed: false });
   stages_ms.search_ms = Date.now() - firstStarted;
 
   const strictWindow = Boolean(timeWindowStrict);
@@ -344,12 +362,16 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
       input: { ...effectiveInput, time_range: undefined },
       fetchImpl,
       signal,
+      deadlineSignal,
+      deadlineAt,
+      cancelRecall,
       relaxed: true,
     });
     stages_ms.search_retry_ms = Date.now() - retryStarted;
     attempts = 2;
   }
 
+  signal = deadlineSignal;
   const retrievedAt = new Date().toISOString();
   const normalized = normalizeSearchResults(body.results, retrievedAt, 20);
   const filterEnabled = qualityFilter === undefined ? qualityFilterDefault() : Boolean(qualityFilter);
@@ -398,7 +420,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const ranked = newsEnabled ? rankNewsResults(results, input.query) : null;
   let verifiedResults = ranked ?? results;
   let newsVerification = null;
-  if (normalizedNewsMode === 'verified') {
+  if (normalizedNewsMode === 'verified' && evidencePolicy !== 'spec82_page_only') {
     const verifiedNow = typeof now === 'function' ? now() : now;
     const window = resolveNewsWindow({ window: verifiedParams.news_window, now: verifiedNow });
     const checkedAt = new Date(verifiedNow).toISOString();
@@ -496,6 +518,35 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     : null;
   const cooldownSnapshot = enginePoolField ? engineHealth.snapshot(now()) : null;
 
+  let routeCandidates = ranked ?? filteredResults;
+  let routeReader = verifyPage;
+  let routeSourceFailures = [];
+  if (evidencePolicy === 'spec82_page_only' && verifiedParams) {
+    const gdeltWired = typeof discoverGdelt === 'function';
+    routeSourceFailures = newsSourceFailures(verifiedParams.news_source, { gdeltWired });
+    if (!newsReadSourceReady(verifiedParams.news_source, { gdeltWired })) routeReader = undefined;
+    if (['gdelt', 'hybrid'].includes(verifiedParams.news_source) && gdeltWired) {
+      const window = resolveNewsWindow({ window: verifiedParams.news_window, now: now() });
+      const discovered = await collectGdeltCandidates({ discoverGdelt, query: input.query, window, signal, retrievedAt: window.evaluated_at });
+      if (discovered.source_failure) routeSourceFailures.push(discovered.source_failure);
+      routeCandidates = mergeGdeltCandidates(verifiedParams.news_source === 'gdelt' ? [] : routeCandidates,
+        discovered.candidates.map(item => ({ ...item, provider: 'gdelt' })));
+    }
+  }
+  const routed = evidencePolicy === 'spec82_page_only' || providerRouting?.active
+    ? await (providerRouting ?? createProviderRouting({ now })).search({ input: verifiedParams ? { ...input, ...verifiedParams, news_mode: 'verified' } : input,
+        results: evidencePolicy === 'spec82_page_only' ? routeCandidates : verifiedResults,
+        signal, deadlineAt, verifyPage: routeReader, sourceFailures: routeSourceFailures, evidencePolicy, strict: evidencePolicy === 'spec82_page_only' && (strictWindow || normalizedNewsMode === 'verified') })
+    : null;
+  if (routed && evidencePolicy === 'spec78_legacy' && (strictWindow || normalizedNewsMode === 'verified')) {
+    // Enabling a provider must not make its API date satisfy the legacy verified contract.
+    routed.results = routed.results.filter(item => verifiedResults.some(original => normalizeUrlForDedup(original.url) === normalizeUrlForDedup(item.url)));
+  }
+  if (routed && newsEnabled) {
+    const before = routed.results;
+    routed.results = rankNewsResults(before, input.query);
+    routed.news_ranking = summarizeNewsRanking(before, routed.results, input.query);
+  }
   return {
     results: verifiedResults,
     number_of_results: body.number_of_results ?? results.length,
@@ -516,6 +567,8 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     ...(Object.prototype.hasOwnProperty.call(body, 'unresponsive_engines')
       ? { unresponsive_engines: body.unresponsive_engines, failure_classes: failureClasses(body.unresponsive_engines) }
       : {}),
+    ...(routed ?? {}),
+    ...(routed ? { number_of_results: routed.results.length } : {}),
     ...(cooldownSnapshot && cooldownSnapshot.cooldown_engines.length
       ? { cooldown_engines: cooldownSnapshot.cooldown_engines }
       : {}),

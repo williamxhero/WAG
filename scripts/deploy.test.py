@@ -25,7 +25,7 @@ class ReleaseTests(unittest.TestCase):
         self.units.mkdir()
         files = subprocess.check_output(["git", "-C", str(SOURCE), "ls-files"], text=True).splitlines()
         # Include the candidate implementation before it has been committed.
-        files += [name for name in ("scripts/release.py", "scripts/searxng-overlay.py", "proxy/public-address.mjs") if (SOURCE / name).exists()]
+        files += [name for name in ("scripts/release.py", "scripts/searxng-overlay.py", "proxy/public-address.mjs", "scripts/provider-canary.mjs") if (SOURCE / name).exists()]
         for name in set(files):
             file = SOURCE / name
             if file.is_file():
@@ -398,7 +398,8 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                              provenance["inventory"]["runtime/gateway/" + module + ".mjs"]["sha256"])
             test = self.base / (module + ".test.mjs")
             test.write_text((SOURCE / "gateway" / (module + ".test.mjs")).read_text()
-                            .replace("'./" + module + ".mjs'", "'" + installed.as_uri() + "'"))
+                            .replace("'./" + module + ".mjs'", "'" + installed.as_uri() + "'")
+                            .replace("'./fixtures/safe-listen.mjs'", "'" + (SOURCE / "gateway/fixtures/safe-listen.mjs").as_uri() + "'"))
             tests.append(str(test))
         result = subprocess.run([str(node), "--test", "--test-concurrency=1", *tests],
                                 capture_output=True, text=True, timeout=30)
@@ -1037,6 +1038,32 @@ if [[ "$1" == disable ]]; then rm -f -- "$TEST_UNIT_DIR/$2"; fi''')
                 self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "restored")
                 self.retain_evidence(tx, "gateway-endpoint-" + key.lower())
         file.write_text(original)
+
+    def test_provider_configuration_drift_blocks_commit_without_hashing_credentials(self):
+        file = self.root / "secrets/gateway.env"
+        file.write_text(file.read_text() + "WAG_SEARCH_BAIDU_ENABLED=0\nWAG_SEARCH_EVIDENCE_POLICY=spec78_legacy\nAPPBUILDER_API_KEY=dummy-provider-one\n")
+        provider_file = self.root / "secrets/search-providers.env"
+        provider_file.write_text("IQS_API_KEY=dummy-provider-file-one\n")
+        tx = self.prepare()
+        first = (tx / "provenance.json").read_bytes()
+        inventory = json.loads(first)["inventory"]
+        for name in ("runtime/gateway/provider-routing.mjs", "runtime/gateway/provider-budget.mjs", "runtime/gateway/provider-adapters.mjs",
+                     "runtime/gateway/provider-http-transport.mjs", "runtime/gateway/provider-contract.mjs", "runtime/gateway/spec82-evidence.mjs", "scripts/provider-canary.mjs"):
+            self.assertIn(name, inventory)
+        self.assertFalse(any(".test." in name or "fixtures/" in name for name in inventory))
+        self.assertEqual(self.command("abort", tx).returncode, 0)
+        file.write_text(file.read_text().replace("dummy-provider-one", "dummy-provider-two"))
+        provider_file.write_text("IQS_API_KEY=dummy-provider-file-two\n")
+        tx = self.prepare()
+        self.assertEqual(first, (tx / "provenance.json").read_bytes())
+        self.assertNotIn("dummy-provider", first.decode())
+        self.assertEqual(self.command("activate", tx).returncode, 0)
+        file.write_text(file.read_text().replace("WAG_SEARCH_BAIDU_ENABLED=0", "WAG_SEARCH_BAIDU_ENABLED=1"))
+        result = self.command("commit", tx)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("safe configuration changed", result.stderr)
+        self.assertIn("WAG_SEARCH_BAIDU_ENABLED=1", file.read_text())
+        self.assertEqual(json.loads((tx / "state.json").read_text())["status"], "restored")
 
     def test_gateway_endpoint_projection_is_credential_insensitive_and_parsed(self):
         file = self.root / "secrets/gateway.env"

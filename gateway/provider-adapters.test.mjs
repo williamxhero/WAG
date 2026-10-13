@@ -99,6 +99,21 @@ test('deadline aborts even an uncooperative transport and observes late rejectio
   assert.equal(signal.aborted, true);
 });
 
+test('explicit frozen documented-max binding accepts only matching known Tencent posterior versions', async () => {
+  for (const version of ['lite', 'standard', 'flagship']) {
+    const transport = Object.freeze(Object.assign(async () => ({ ...response({ Response: { Version: version, Pages: fixtures.tencent.Response.Pages } }), tencentVersion: version }), { estimatedCostCents: 3 }));
+    const tencentCostPolicy = Object.freeze({ transport, version: 'documented-max', costCents: 3 });
+    const adapter = adapterFor('tencent', transport, { tencentCostPolicy });
+    assert.equal((await adapter.search({ query: '公众号' })).length, 1);
+    assert.equal(adapter.posteriorVersion, version);
+  }
+  const mismatched = Object.freeze(Object.assign(async () => ({ ...response({ Response: { Version: 'standard', Pages: [] } }), tencentVersion: 'lite' }), { estimatedCostCents: 3 }));
+  await assert.rejects(adapterFor('tencent', mismatched, { tencentCostPolicy: Object.freeze({ transport: mismatched, version: 'documented-max', costCents: 3 }) }).search({ query: '政策' }), { kind: 'provider_version_mismatch' });
+  assert.throws(() => adapterFor('tencent', mismatched, { tencentCostPolicy: { transport: mismatched, version: 'documented-max', costCents: 3 } }), TypeError);
+  const cheap = Object.freeze(Object.assign(async () => {}, { estimatedCostCents: 2 }));
+  assert.throws(() => adapterFor('tencent', cheap, { tencentCostPolicy: Object.freeze({ transport: cheap, version: 'documented-max', costCents: 2 }) }), TypeError);
+});
+
 for (const name of Object.keys(fixtures)) {
   test(`${name} maps official fields to claimed-only results and remains disabled by default`, async () => {
     let called = false;

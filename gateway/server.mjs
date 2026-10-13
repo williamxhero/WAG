@@ -17,8 +17,11 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as z from 'zod/v4';
-import { extractPageEvidence, prependPublishedEvidence } from './evidence-metadata.mjs';
+import { extractPageEvidence, prependPublishedEvidence, normalizeUrlForDedup } from './evidence-metadata.mjs';
 import { searchSearxng } from './search.mjs';
+import { createSearchProviderRuntime } from './provider-routing.mjs';
+import { evaluateSpec82Evidence } from './spec82-evidence.mjs';
+import { resolveNewsWindow } from './news-verified.mjs';
 import { discoverGdeltCandidates, GDELT_ORIGIN } from './news-gdelt.mjs';
 import { enginePoolConfig, validateStrictPool } from './engine-health.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
@@ -27,6 +30,8 @@ import { isPublicAddress as classifyPublicAddress } from '../proxy/public-addres
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const providerRouting = createSearchProviderRuntime();
+const evidencePolicy = providerRouting.evidencePolicy;
 const cfg = Object.freeze({
   host: process.env.GATEWAY_HOST ?? 'yosef-server',
   bindHost: process.env.GATEWAY_BIND_HOST ?? process.env.GATEWAY_HOST ?? 'yosef-server',
@@ -334,7 +339,9 @@ async function withHostSlot(host, job) {
 async function fetchPublic(raw, signal, redirectOrigin = null) {
   let current = raw;
   for (let redirects = 0; redirects <= 5; redirects++) {
+    signal?.throwIfAborted();
     const { url, records } = await resolvePublicUrl(current);
+    signal?.throwIfAborted();
     let response;
     try {
       response = await withHostSlot(url.hostname.toLowerCase(), () => requestOnce(url, records, signal));
@@ -457,11 +464,60 @@ function renderedMetadata(rendered) {
 // Publisher evidence for a renderer-only read. Prefer the renderer's own HTML so
 // canonical/published metadata is preserved; otherwise emit the contract's
 // required fields with explicit nulls rather than dropping them.
+function applyPagePolicy(page) {
+  if (evidencePolicy !== 'spec82_page_only') return page;
+  const now = Date.now();
+  const identityMismatch = page.publication_identity_validated === false;
+  const evaluated = evaluateSpec82Evidence(identityMismatch ? {} : page, resolveNewsWindow({ now }), { checked_at: new Date(now).toISOString() });
+  const verdict = identityMismatch ? { ...evaluated, reason: 'publication_identity_mismatch', evidence_url: page.source?.url ?? null } : evaluated;
+  const conflict = verdict.reason === 'conflicting_evidence';
+  return { ...page, published_at: conflict ? null : verdict.published_at, published_on: conflict ? null : verdict.published_on,
+    precision: conflict ? null : verdict.precision, policy: evidencePolicy, state: verdict.status,
+    date_level: verdict.evidence_level, spec82_evidence: verdict };
+}
+function publisherEvidence(html, finalUrl, headers = {}) {
+  const page = extractPageEvidence(html, finalUrl, headers, new Date().toISOString(), { chinesePublicationDates: evidencePolicy === 'spec82_page_only' });
+  if (evidencePolicy !== 'spec82_page_only') return page;
+  // The shared extractor keeps dates, not the declaring Article's identity. Bind
+  // explicit entity/canonical identities here, while the actual final HTML exists.
+  const dom = new JSDOM(html, { url: finalUrl });
+  const samePage = value => {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    try { return normalizeUrlForDedup(new URL(value, finalUrl).href) === normalizeUrlForDedup(finalUrl); }
+    catch { return false; }
+  };
+  const identityMatches = value => {
+    if (typeof value === 'string') return samePage(value);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const identities = ['@id', 'url'].filter(key => Object.hasOwn(value, key));
+    return identities.length > 0 && identities.every(key => samePage(value[key]));
+  };
+  let valid = [...dom.window.document.querySelectorAll('link[rel~="canonical"]')].every(node => samePage(node.getAttribute('href'))) &&
+    [...dom.window.document.querySelectorAll('meta[property="og:url" i]')].every(node => samePage(node.getAttribute('content')));
+  const pending = [];
+  for (const script of dom.window.document.querySelectorAll('script[type="application/ld+json"]')) {
+    try { pending.push(JSON.parse(script.textContent)); } catch { /* Invalid JSON-LD supplies no extracted proof. */ }
+  }
+  let visited = 0;
+  while (valid && pending.length) {
+    const entity = pending.pop();
+    if (++visited > 1000) { valid = false; break; }
+    if (Array.isArray(entity)) { pending.push(...entity); continue; }
+    if (!entity || typeof entity !== 'object') continue;
+    if (entity['@graph']) pending.push(entity['@graph']);
+    if (Object.hasOwn(entity, 'datePublished')) {
+      valid = ['url', '@id', 'mainEntityOfPage'].every(key => !Object.hasOwn(entity, key) || identityMatches(entity[key]));
+    }
+  }
+  dom.window.close();
+  return applyPagePolicy({ ...page, publication_identity_validated: valid });
+}
 function evidenceFromRendered(rendered, finalUrl) {
   const html = rendered?.result?.html;
-  if (typeof html === 'string' && html) return extractPageEvidence(html, finalUrl, {});
+  if (typeof html === 'string' && html && (evidencePolicy !== 'spec82_page_only' ||
+      (Number.isInteger(rendered.result.status_code) && rendered.result.status_code >= 200 && rendered.result.status_code < 300 && rendered.result.success !== false))) return publisherEvidence(html, finalUrl);
   const retrievedAt = new Date().toISOString();
-  return {
+  return applyPagePolicy({
     published_at: null,
     published_on: null,
     precision: null,
@@ -469,11 +525,25 @@ function evidenceFromRendered(rendered, finalUrl) {
     retrieved_at: retrievedAt,
     source: { url: finalUrl, host: new URL(finalUrl).hostname.toLowerCase(), site_name: null, author: null },
     temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }],
-  };
+  });
 }
-async function withSlot(pool, job) {
+async function validatedRenderedUrl(rendered, requested, signal) {
+  signal?.throwIfAborted();
+  const finalUrl = rendered.result.redirected_url ?? rendered.result.url ?? requested;
+  if (typeof finalUrl !== 'string') throw rejectError('invalid renderer identity', 'render_invalid_response');
+  const validated = (await resolvePublicUrl(finalUrl)).url.href;
+  signal?.throwIfAborted();
+  return validated;
+}
+async function withSlot(pool, job, signal) {
   const started = Date.now();
-  while (pool.active >= pool.limit) { if (Date.now() - started > 30000) throw rejectError('service is busy; retry shortly', 'capacity_exhausted'); await sleep(100); }
+  signal?.throwIfAborted();
+  while (pool.active >= pool.limit) {
+    if (Date.now() - started > 30000) throw rejectError('service is busy; retry shortly', 'capacity_exhausted');
+    await sleep(100);
+    signal?.throwIfAborted();
+  }
+  signal?.throwIfAborted();
   pool.active++;
   try { return await job(); } finally { pool.active--; }
 }
@@ -502,13 +572,13 @@ async function readCrawlResponse(response, controller) {
     reader.releaseLock();
   }
 }
-async function callCrawl4ai(url, output) {
+async function callCrawl4ai(url, output, callerSignal) {
   return withSlot(renderSlots, async () => {
     const controller = new AbortController();
     const response = await fetch(`${cfg.crawlUrl}/crawl`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.crawlToken}` },
       body: JSON.stringify({ urls: [url], browser_config: { type: 'BrowserConfig', params: { headless: true } }, crawler_config: { type: 'CrawlerRunConfig', params: { cache_mode: 'bypass', screenshot: output === 'screenshot', pdf: output === 'pdf' } } }),
-      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000)]),
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000), ...(callerSignal ? [callerSignal] : [])]),
     });
     const body = await readCrawlResponse(response, controller);
     if (!response.ok) throw rejectError(`Crawl4AI returned ${response.status}: ${body.subarray(0, 500).toString('utf8')}`, 'render_backend_status', { httpStatus: response.status });
@@ -526,7 +596,30 @@ async function callCrawl4ai(url, output) {
     validateArtifactEncoding(result.screenshot);
     validateArtifactEncoding(result.pdf);
     return { result, markdown: text };
-  });
+  }, callerSignal);
+}
+async function readPublisherPage(candidate, { signal, render = 'never' } = {}) {
+  let fetched;
+  let renderUrl;
+  try { fetched = await fetchPublic(candidate.url, signal); }
+  catch (error) {
+    if (evidencePolicy !== 'spec82_page_only' || render !== 'auto' || !isOriginBotChallenge(error)) throw error;
+    renderUrl = error.finalUrl ?? candidate.url;
+  }
+  if (fetched) {
+    if (!fetched.contentType.toLowerCase().includes('html')) throw rejectError('publisher page is not HTML', 'unsupported_content_type');
+    const decoded = decodePageBody(fetched.body, fetched.contentType);
+    if (render !== 'auto' || evidencePolicy !== 'spec82_page_only' || lightExtract(decoded.text, fetched.finalUrl).markdown.length >= 700) {
+      return { ...publisherEvidence(decoded.text, fetched.finalUrl, fetched.headers), requested_url: candidate.url, final_url: fetched.finalUrl, redirect_validated: true };
+    }
+    renderUrl = fetched.finalUrl;
+  }
+  signal?.throwIfAborted();
+  renderUrl = (await resolvePublicUrl(renderUrl)).url.href;
+  const rendered = await callCrawl4ai(renderUrl, 'markdown', signal);
+  const finalUrl = await validatedRenderedUrl(rendered, renderUrl, signal);
+  if (Number.isInteger(rendered.result.status_code) && rendered.result.status_code >= 400) throw rejectError('publisher renderer did not recover', 'upstream_http_status');
+  return { ...evidenceFromRendered(rendered, finalUrl), requested_url: candidate.url, final_url: finalUrl, redirect_validated: true };
 }
 function validateArtifactEncoding(value) {
   if (value == null || value === '') return null;
@@ -637,7 +730,8 @@ async function browserLocation(session) {
 function browserEvidence(session, retrievedAt = new Date().toISOString()) {
   if (!session.url) return {};
   const source = { url: session.url, host: new URL(session.url).hostname.toLowerCase() };
-  return { url: session.url, retrieved_at: retrievedAt, source, temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }] };
+  return { url: session.url, retrieved_at: retrievedAt, source, temporal_evidence: [{ kind: 'retrieved_at', value: retrievedAt, source: 'gateway.clock' }],
+    ...(evidencePolicy === 'spec82_page_only' ? { policy: evidencePolicy, state: 'unknown', date_level: 'E5', published_at: null, published_on: null, precision: null } : {}) };
 }
 async function browserAction(session, action) {
   const type = action.type;
@@ -696,7 +790,7 @@ const sourceSchema = z.object({ url: z.string(), host: z.string(), canonical_url
 const newsEvidenceSchema = z.object({ status: z.enum(['verified', 'stale', 'unknown', 'read_failure', 'unread', 'irrelevant']), source_kind: z.string(), source: z.string().nullable(), verified_eligible: z.boolean(), published_at: z.string().nullable(), published_on: z.string().nullable(), precision: z.string().nullable(), evidence_url: z.string().nullable(), checked_at: z.string().nullable(), conflict_count: z.number().int() }).passthrough();
 const newsVerificationSchema = z.object({ mode: z.literal('verified'), source: z.string(), window: z.string(), window_timezone: z.string(), evaluated_at: z.string(), time_range_is_discovery_hint: z.literal(true), render: z.enum(['never', 'auto']), status: z.enum(['verified', 'partial', 'no_verified_result']), candidate_count: z.number().int(), read_attempts: z.number().int(), verified_count: z.number().int(), distinct_publishers: z.number().int(), min_sources: z.number().int(), stale_count: z.number().int(), unknown_count: z.number().int(), read_failure_count: z.number().int(), unread_count: z.number().int(), irrelevant_count: z.number().int(), read_failures: z.array(z.object({ url: z.string().nullable(), error_kind: z.string(), error_code: z.string().nullable() }).passthrough()), source_failures: z.array(z.object({ source: z.string(), code: z.string(), retryable: z.boolean() }).passthrough()) }).passthrough();
 const telemetrySchema = z.object({ first_valid_result_ms: z.number().optional(), stages_ms: z.record(z.string(), z.number()).optional() }).passthrough();
-const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), time_range_status: z.string().optional(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema), news_evidence: newsEvidenceSchema.optional() })), time_range: z.string().nullable().optional(), time_range_applied: z.boolean().optional(), time_range_enforced: z.boolean().optional(), time_range_note: z.string().nullable().optional(), time_window_strict: z.boolean().optional(), filtered_out: z.number().optional(), filtered_reasons: z.record(z.string(), z.number()).optional(), unresponsive_engines: z.unknown().optional(), engine_pool: z.object({ layer: z.string(), engines: z.array(z.string()), source: z.string() }).passthrough().optional(), failure_classes: z.record(z.string(), z.number()).optional(), cooldown_engines: z.array(z.object({ engine: z.string(), reason: z.string(), failure_class: z.string(), until_ms: z.number() }).passthrough()).optional(), news_mode: z.boolean().optional(), news_ranking: z.object({ applied: z.boolean(), total: z.number(), moved: z.number(), demoted: z.number(), promoted: z.number(), reasons: z.record(z.string(), z.number()) }).passthrough().optional(), news_verification: newsVerificationSchema.optional(), dedup: z.object({ raw_results: z.number(), unique_urls: z.number(), merged: z.number(), multi_source: z.number(), sources: z.array(z.object({ url: z.string(), engines: z.array(z.string()) })) }).passthrough().optional(), telemetry: telemetrySchema }).passthrough();
+const searchOutputSchema = z.object({ trace_id: z.string(), query: z.string(), number_of_results: z.number(), results: z.array(z.object({ title: z.string().nullable().optional(), url: z.string(), content: z.string(), engine: z.string().nullable().optional(), category: z.string().nullable().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string(), time_range_status: z.string().optional(), source: sourceSchema, temporal_evidence: z.array(temporalEvidenceSchema), news_evidence: newsEvidenceSchema.optional(), provider: z.string().optional(), providers: z.array(z.string()).optional(), requested_urls: z.array(z.string()).optional(), final_url: z.string().optional(), date_level: z.enum(['E1', 'E2', 'E3', 'E4', 'E5']).optional(), state: z.string().optional(), policy: z.string().optional(), spec82_evidence: z.record(z.string(), z.unknown()).optional() })), time_range: z.string().nullable().optional(), time_range_applied: z.boolean().optional(), time_range_enforced: z.boolean().optional(), time_range_note: z.string().nullable().optional(), time_window_strict: z.boolean().optional(), filtered_out: z.number().optional(), filtered_reasons: z.record(z.string(), z.number()).optional(), unresponsive_engines: z.unknown().optional(), engine_pool: z.object({ layer: z.string(), engines: z.array(z.string()), source: z.string() }).passthrough().optional(), failure_classes: z.record(z.string(), z.number()).optional(), cooldown_engines: z.array(z.object({ engine: z.string(), reason: z.string(), failure_class: z.string(), until_ms: z.number() }).passthrough()).optional(), news_mode: z.boolean().optional(), news_ranking: z.object({ applied: z.boolean(), total: z.number(), moved: z.number(), demoted: z.number(), promoted: z.number(), reasons: z.record(z.string(), z.number()) }).passthrough().optional(), news_verification: newsVerificationSchema.optional(), dedup: z.object({ raw_results: z.number(), unique_urls: z.number(), merged: z.number(), multi_source: z.number(), sources: z.array(z.object({ url: z.string(), engines: z.array(z.string()) })) }).passthrough().optional(), telemetry: telemetrySchema }).passthrough();
 const readOutputSchema = z.object({ trace_id: z.string(), url: z.string().optional(), renderer: z.string().optional(), title: z.string().optional(), markdown: z.string().optional(), http_status: z.number().optional(), content_type: z.string().nullable().optional(), bytes: z.number().optional(), content_hash: z.string().optional(), charset: z.string().optional(), published_at: z.string().nullable().optional(), published_on: z.string().nullable().optional(), precision: z.string().nullable().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), artifact: z.record(z.string(), z.unknown()).optional(), expires_after_days: z.number().optional(), blocked_reason: z.string().nullable().optional(), telemetry: telemetrySchema.optional() }).passthrough();
 const browserOutputSchema = z.object({ trace_id: z.string(), session_id: z.string().optional(), expires_in_seconds: z.number().optional(), url: z.string().optional(), retrieved_at: z.string().optional(), source: sourceSchema.optional(), temporal_evidence: z.array(temporalEvidenceSchema).optional(), outputs: z.array(z.record(z.string(), z.unknown())).optional(), closed: z.boolean().optional(), telemetry: telemetrySchema }).passthrough();
 function getServer() {
@@ -707,14 +801,8 @@ function getServer() {
       // Opt-in news mode (SPEC #72): an explicit `news_mode` flag wins; otherwise the search module
       // auto-opts-in when `categories` contains `news`. Only the named control is forwarded (never
       // the raw input), so no extra caller field reaches the SearXNG query string.
-      // Verified mode's candidate reader. It is the lightweight path only (`news_render: never`);
-      // `news_render: auto` never reaches a reader — the search module refuses it fail-closed, because
-      // answering from this path while echoing `auto` would misreport how the page was read.
-      const search = await searchSearxng({ baseUrl: cfg.searxUrl, input, signal: AbortSignal.timeout(30000), timeWindowStrict: input.time_window_strict, newsMode: input.news_mode, verifyPage: async candidate => {
-        const fetched = await fetchPublic(candidate.url);
-        const decoded = decodePageBody(fetched.body, fetched.contentType);
-        return extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
-      }, discoverGdelt: ({ query, window, signal }) => discoverGdeltCandidates({
+      // Legacy auto stays unsupported; explicit page-only policy has a bounded, validated renderer.
+      const search = await searchSearxng({ baseUrl: cfg.searxUrl, input, signal: AbortSignal.timeout(30000), timeWindowStrict: input.time_window_strict, newsMode: input.news_mode, evidencePolicy, providerRouting, verifyPage: readPublisherPage, discoverGdelt: ({ query, window, signal }) => discoverGdeltCandidates({
         // SPEC #78 stage D: fixed-origin GDELT discovery, candidates only. The origin/path/params live
         // in news-gdelt.mjs and no caller can override them; the request goes through the same
         // SSRF-checked, address-pinned `fetchPublic` transport as every other public read.
@@ -729,7 +817,7 @@ function getServer() {
       // only when the module actually produced them so compatibility responses keep their previous
       // shape (a normal search never grows a `news_mode`/`news_ranking`/`dedup` key).
       const diagnostics = {};
-      for (const key of ['time_range', 'time_range_applied', 'time_range_enforced', 'time_range_note', 'time_window_strict', 'filtered_out', 'filtered_reasons', 'engine_pool', 'failure_classes', 'cooldown_engines', 'news_mode', 'news_ranking', 'news_verification', 'dedup']) {
+      for (const key of ['time_range', 'time_range_applied', 'time_range_enforced', 'time_range_note', 'time_window_strict', 'filtered_out', 'filtered_reasons', 'engine_pool', 'failure_classes', 'cooldown_engines', 'news_mode', 'news_ranking', 'news_verification', 'dedup', 'evidence_policy', 'provider_attempts', 'provider_budget', 'page_verification']) {
         if (Object.prototype.hasOwnProperty.call(search, key)) diagnostics[key] = search[key];
       }
       return textResult({
@@ -780,7 +868,7 @@ function getServer() {
           light = lightExtract(decoded.text, fetched.finalUrl);
           stages_ms.extract_ms = Date.now() - extractStarted;
           if (input.render === 'never' || (light.markdown.length >= 700 && input.output === 'markdown')) {
-            const evidence = extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
+            const evidence = publisherEvidence(decoded.text, fetched.finalUrl, fetched.headers);
             return textResult({ trace_id, telemetry: { first_valid_result_ms: Date.now() - started, stages_ms }, url: fetched.finalUrl, renderer: 'lightweight', title: light.title, markdown: trimText(prependPublishedEvidence(light.markdown, evidence)), ...fetchedMetadata(fetched), charset: decoded.charset, ...evidence });
           }
         }
@@ -807,10 +895,14 @@ function getServer() {
       let charset = 'utf-8';
       let evidence;
       let metadata;
-      if (fetched) {
+      if (evidencePolicy === 'spec82_page_only') {
+        renderUrl = await validatedRenderedUrl(rendered, renderUrl);
+        evidence = evidenceFromRendered(rendered, renderUrl);
+        metadata = renderedMetadata(rendered);
+      } else if (fetched) {
         const decoded = decodePageBody(fetched.body, fetched.contentType);
         charset = decoded.charset;
-        evidence = extractPageEvidence(decoded.text, fetched.finalUrl, fetched.headers);
+        evidence = publisherEvidence(decoded.text, fetched.finalUrl, fetched.headers);
         metadata = fetchedMetadata(fetched);
       } else {
         evidence = evidenceFromRendered(rendered, renderUrl);

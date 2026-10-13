@@ -91,7 +91,7 @@ async function browserFixture(t, env = {}) {
   const child = spawn(process.execPath, [path.join(moduleDir, 'server.mjs')], {
     cwd: moduleDir,
     env: {
-      ...process.env,
+      PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
       GATEWAY_TOKEN: token,
       CRAWL4AI_TOKEN: '',
       GATEWAY_BIND_HOST: '127.0.0.1',
@@ -143,6 +143,17 @@ async function browserFixture(t, env = {}) {
   });
   return { client, waits, call, close, failure, streams, disconnected, artifactDir, outputDir, screenshot, token };
 }
+
+test('page-only browser output remains retrieval-only and cannot manufacture publication proof', async t => {
+  const fixture = await browserFixture(t, { WAG_SEARCH_EVIDENCE_POLICY: 'spec82_page_only' });
+  const result = await fixture.call({ actions: [{ type: 'wait', ms: 100 }] });
+  assert.notEqual(result.isError, true, JSON.stringify(result));
+  assert.equal(result.structuredContent.policy, 'spec82_page_only');
+  assert.equal(result.structuredContent.state, 'unknown');
+  assert.equal(result.structuredContent.date_level, 'E5');
+  assert.equal(result.structuredContent.published_at, null);
+  assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+});
 
 test('installed browser output is outside retained storage and its directory is provisioned for both services', async () => {
   const root = path.resolve(moduleDir, '..');

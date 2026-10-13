@@ -114,6 +114,19 @@ test('explicit frozen documented-max binding accepts only matching known Tencent
   assert.throws(() => adapterFor('tencent', cheap, { tencentCostPolicy: Object.freeze({ transport: cheap, version: 'documented-max', costCents: 2 }) }), TypeError);
 });
 
+test('Tencent version and authentication success commit only after every record validates', async () => {
+  const adapter = adapterFor('tencent', async () => response({ Response: {
+    Version: 'lite', Pages: [fixtures.tencent.Response.Pages[0], JSON.stringify({ title: 'malformed record' })],
+  } }));
+  await assert.rejects(adapter.search({ query: '政策' }), error => {
+    assert.equal(error.kind, 'invalid_response');
+    assert.equal(error.diagnostic?.stage, 'record_validation');
+    assert.notEqual(error.diagnostic?.auth_success, true);
+    return true;
+  });
+  assert.equal(adapter.posteriorVersion, null);
+});
+
 for (const name of Object.keys(fixtures)) {
   test(`${name} maps official fields to claimed-only results and remains disabled by default`, async () => {
     let called = false;

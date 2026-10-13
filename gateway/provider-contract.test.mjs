@@ -9,6 +9,7 @@ import {
   normalizeProviderResult,
   providerCacheKey,
   providerCacheTtlMs,
+  projectProviderDiagnostic,
   runOrderedFallback,
 } from './provider-contract.mjs';
 
@@ -18,6 +19,28 @@ const fixtures = Object.freeze({
   baidu: [{ title: 'Baidu result', url: 'https://example.cn/news/1', snippet: 'Baidu snippet', source: 'Example', claimed_date: '2026-10-12 09:00:00' }],
   aliyun: [{ title: 'Ali result', url: 'https://example.cn/news/2', snippet: 'Ali snippet', source: 'Example' }],
   tencent: [],
+});
+
+test('Tencent diagnostic projector accepts only typed allowlisted fields and rejects poison', () => {
+  const valid = { stage: 'record_validation', auth_success: null, page_count: 2, parsed_page_count: 1, record_type: 'object' };
+  assert.deepEqual(projectProviderDiagnostic(valid), valid);
+  const complete = { stage: 'complete', auth_success: true, page_count: 1, parsed_page_count: 1, result_count: 1 };
+  assert.deepEqual(projectProviderDiagnostic(complete), complete);
+  for (const diagnostic of [
+    { stage: 'complete', auth_success: true, page_count: 0, parsed_page_count: 0, result_count: 1 },
+    { stage: 'complete', auth_success: true, page_count: 2, parsed_page_count: 1, result_count: 1 },
+    { stage: 'page_json', auth_success: null, page_count: 2, parsed_page_count: 3, page_type: 'string' },
+    { stage: 'record_validation', auth_success: null, page_count: 2, parsed_page_count: 1, result_count: 2, record_type: 'object' },
+  ]) assert.equal(projectProviderDiagnostic(diagnostic), null);
+  for (const diagnostic of [
+    { ...valid, body: 'private sentinel' },
+    { ...valid, page_count: -1 },
+    { ...valid, page_count: 1.5 },
+    { ...valid, auth_success: 'true' },
+    { ...valid, record_type: 'private sentinel' },
+    { ...valid, nested: { key: 'private sentinel' } },
+  ]) assert.equal(projectProviderDiagnostic(diagnostic), null);
+  assert.equal(projectProviderDiagnostic({ ...valid, stage: 'unknown' }), null);
 });
 
 test('normalizes provider results to the shared contract and keeps provider dates claimed', () => {

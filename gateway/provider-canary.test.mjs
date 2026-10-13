@@ -22,6 +22,7 @@ test('canary executable selects one disabled provider and emits only sanitized d
   assert.equal(result.status, 'provider_unconfigured');
   assert.equal(result.resultcount, 0);
   assert.equal(result.budget, null);
+  assert.equal(Object.hasOwn(result, 'diagnostic'), false);
   assert.equal(child.stdout.includes('private-query'), false);
   assert.equal(child.status, 1);
 });
@@ -36,7 +37,9 @@ test('canary cleanup failures return a safe failure without printing private mes
   const root = await mkdtemp(path.join(tmpdir(), 'wag-canary-close-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'scripts'));
+  await mkdir(path.join(root, 'gateway'));
   await mkdir(path.join(root, 'runtime', 'gateway'), { recursive: true });
+  await copyFile(path.join(path.dirname(fileURLToPath(import.meta.url)), 'provider-contract.mjs'), path.join(root, 'gateway', 'provider-contract.mjs'));
   const deployed = path.join(root, 'scripts', 'provider-canary.mjs');
   await copyFile(script, deployed);
   await writeFile(path.join(root, 'runtime', 'gateway', 'provider-routing.mjs'), source);
@@ -45,6 +48,48 @@ test('canary cleanup failures return a safe failure without printing private mes
   assert.equal(child.status, 1);
   assert.equal(JSON.parse(child.stdout).status, 'budget_storage_error');
   assert.equal(/private|Error|stack|\.mjs/.test(child.stdout), false);
+});
+
+test('canary drops poisoned diagnostic fields without serializing sentinels', async () => {
+  const result = await runProviderCanary(['--provider', 'tencent', '--query', 'private query sentinel', '--confirm-send'], {
+    runtimeFactory: () => ({ snapshot: () => null, close() {}, dispatch: async () => ({ results: [], posterior_version: null,
+      attempts: [{ status: 'invalid_response', diagnostic: { stage: 'record_validation', auth_success: null,
+        page_count: 1, parsed_page_count: 1, record_type: 'object', body: 'private body sentinel', title: 'private title sentinel' } }], provider_budget: null }) }),
+  });
+  assert.equal(result.status, 'invalid_response');
+  assert.equal(Object.hasOwn(result, 'diagnostic'), false);
+  assert.equal(JSON.stringify(result).includes('sentinel'), false);
+});
+
+test('canary resolves its projector in native source and runtime layouts and fails closed when absent', async t => {
+  for (const includeProjector of [true, false]) {
+    const root = await mkdtemp(path.join(tmpdir(), 'wag-canary-layout-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const scripts = path.join(root, 'scripts');
+    const runtime = path.join(root, 'runtime', 'gateway');
+    await mkdir(scripts, { recursive: true });
+    await mkdir(runtime, { recursive: true });
+    const deployed = path.join(scripts, 'provider-canary.mjs');
+    await copyFile(script, deployed);
+    await writeFile(path.join(runtime, 'provider-routing.mjs'), `export function createSearchProviderRuntime() { return {
+      snapshot: () => null, close() {}, dispatch: async () => ({ results: [], posterior_version: 'lite', provider_budget: null,
+        attempts: [{ status: 'empty', diagnostic: { stage: 'complete', auth_success: true, page_count: 0, parsed_page_count: 0, result_count: 0 } }] })
+    }; }`);
+    if (includeProjector) await copyFile(path.join(path.dirname(fileURLToPath(import.meta.url)), 'provider-contract.mjs'),
+      path.join(runtime, 'provider-contract.mjs'));
+    const child = spawnSync(process.execPath, [deployed, '--provider', 'tencent', '--query', 'offline', '--confirm-send'],
+      { env: dummyEnv, encoding: 'utf8' });
+    assert.equal(child.stderr, '');
+    assert.equal(child.status, includeProjector ? 0 : 1);
+    const result = JSON.parse(child.stdout);
+    if (includeProjector) assert.deepEqual(result.diagnostic,
+      { stage: 'complete', auth_success: true, page_count: 0, parsed_page_count: 0, result_count: 0 });
+    else {
+      assert.equal(result.status, 'budget_storage_error');
+      assert.equal(Object.hasOwn(result, 'diagnostic'), false);
+      assert.equal(/Error|stack|\.mjs/.test(child.stdout), false);
+    }
+  }
 });
 
 test('Tencent canary uses the real fixed-site transport and reserves three cents before its only send', async t => {
@@ -71,6 +116,7 @@ test('Tencent canary uses the real fixed-site transport and reserves three cents
   const result = await runProviderCanary(['--provider', 'tencent', '--query', 'Private query', '--confirm-send'], { runtimeFactory });
   assert.equal(result.status, 'success');
   assert.equal(result.posterior_version, 'standard');
+  assert.deepEqual(result.diagnostic, { stage: 'complete', auth_success: true, page_count: 1, parsed_page_count: 1, result_count: 1 });
   assert.equal(result.resultcount, 1);
   assert.deepEqual(result.e4counts, { claimed: 1, unknown: 0 });
   assert.equal(result.spend_cents, 3);

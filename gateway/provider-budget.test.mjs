@@ -139,6 +139,30 @@ test('budgeted dispatch requires persistent storage, skips disabled providers, r
   assert.equal(budget.snapshot().globalMonthlyCents, 2);
 });
 
+test('Tencent safe diagnostic survives budget attempts while failures remain charged and cache hits stay clean', async t => {
+  const fixture = database(t);
+  const budget = fixture.open({ initialize: true });
+  const badProvider = createProviderAdapter({ name: 'tencent', enabled: true, transport: async () => ({ status: 200,
+    body: JSON.stringify({ Response: { Version: 'lite', Pages: [JSON.stringify({ title: 'bad record' })] } }) }) });
+  const failed = await createBudgetedProviderSearch({ providers: [badProvider], budget, estimateCostCents: () => 3 })({ query: 'one' });
+  assert.equal(failed.attempts[0].status, 'invalid_response');
+  assert.equal(failed.attempts[0].diagnostic.stage, 'record_validation');
+  assert.equal(failed.attempts[0].diagnostic.auth_success, null);
+  assert.equal(budget.snapshot().providers.tencent.monthlyCents, 3);
+  assert.equal(fixture.open().snapshot().globalMonthlyCents, 3);
+
+  const goodProvider = createProviderAdapter({ name: 'tencent', enabled: true, transport: async () => ({ status: 200,
+    body: JSON.stringify({ Response: { Version: 'lite', Pages: [] } }) }) });
+  const dispatch = createBudgetedProviderSearch({ providers: [goodProvider], budget, estimateCostCents: () => 3 });
+  const first = await dispatch({ query: 'empty' });
+  const cached = await dispatch({ query: 'empty' });
+  assert.equal(first.attempts[0].diagnostic.stage, 'complete');
+  assert.equal(first.attempts[0].diagnostic.auth_success, true);
+  assert.equal(cached.attempts[0].status, 'cache_hit');
+  assert.equal(Object.hasOwn(cached.attempts[0], 'diagnostic'), false);
+  assert.equal(budget.snapshot().providers.tencent.monthlyCents, 6);
+});
+
 test('failed and empty dispatch attempts remain charged and storage failure never invokes transport', async t => {
   const fixture = database(t);
   const budget = fixture.open({ initialize: true });

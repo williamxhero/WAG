@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { listenHttp } from './fixtures/safe-listen.mjs';
 import { buildSearchParams, searchSearxng } from './search.mjs';
 
 async function searchFixture(bodies, input = { query: 'example' }) {
@@ -304,13 +305,10 @@ test('opt-in deadline closes a stalled native HTTP recall socket', { timeout: 50
     request.socket.once('close', closed);
     // Leave the actual HTTP response stalled until native fetch is canceled.
   });
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
+  const { url } = await listenHttp(server);
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
   await assert.rejects(searchSearxng({
-    baseUrl: `http://127.0.0.1:${server.address().port}`, input: { query: 'example' },
+    baseUrl: url, input: { query: 'example' },
     evidencePolicy: 'spec82_page_only', signal: controller.signal, searchTimeoutMs: 1000,
     fetchImpl: (url, options) => { fetchSignal = options.signal; return fetch(url, options); },
   }), error => error.kind === 'timeout');

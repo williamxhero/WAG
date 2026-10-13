@@ -163,6 +163,9 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
     const entry = { controller, waiters: new Set(), started: false, operation: null };
     const dispatcher = dispatchers.get(provider);
     entry.operation = serial.then(async () => {
+      for (const waiter of entry.waiters) {
+        if (performance.now() >= waiter.deadlineAt) waiter.expire();
+      }
       if (entry.waiters.size === 0 || controller.signal.aborted) return emptyResult(provider, 'timeout');
       entry.started = true;
       try {
@@ -176,9 +179,9 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
     serial = entry.operation.then(() => {}, () => {});
     return entry;
   }
-  function waitForFlight(entry, callerSignal, provider) {
-    if (callerSignal?.aborted) return Promise.resolve(emptyResult(provider, 'timeout'));
-    const waiter = { aborted: false };
+  function waitForFlight(entry, callerSignal, provider, deadlineAt) {
+    if (callerSignal?.aborted || performance.now() >= deadlineAt) return Promise.resolve(emptyResult(provider, 'timeout'));
+    const waiter = { aborted: false, deadlineAt, expire: null };
     entry.waiters.add(waiter);
     return new Promise(resolve => {
       let settled = false;
@@ -195,14 +198,15 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
         if (entry.waiters.size === 0) entry.controller.abort();
         finish(emptyResult(provider, 'timeout'));
       };
+      waiter.expire = abort;
       callerSignal?.addEventListener('abort', abort, { once: true });
       entry.operation.then(result => finish(result), () => finish(emptyResult(provider, 'transport_error')));
     });
   }
-  async function dispatchOne({ provider, signal: callerSignal, ...input }) {
+  async function dispatchOne({ provider, signal: callerSignal, deadlineAt = performance.now() + 30000, ...input }) {
     const dispatcher = dispatchers.get(provider);
     if (!dispatcher) return emptyResult(provider, unavailable[provider] ?? 'provider_unconfigured');
-    if (callerSignal?.aborted) return emptyResult(provider, 'timeout');
+    if (callerSignal?.aborted || performance.now() >= deadlineAt) return emptyResult(provider, 'timeout');
     const key = adapters.get(provider).cacheIdentity(input).key;
     let entry = inFlight.get(key);
     if (!entry) {
@@ -210,11 +214,11 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
       entry = createFlight(key, provider, input);
     }
     if (entry.controller.signal.aborted) return emptyResult(provider, 'timeout');
-    return waitForFlight(entry, callerSignal, provider);
+    return waitForFlight(entry, callerSignal, provider, deadlineAt);
   }
   return Object.freeze({
     dispatch: dispatchOne,
-    async search({ input, results, signal: callerSignal, verifyPage, strict = false, evidencePolicy = 'spec82_page_only', sourceFailures = [] }) {
+    async search({ input, results, signal: callerSignal, deadlineAt = performance.now() + 30000, verifyPage, strict = false, evidencePolicy = 'spec82_page_only', sourceFailures = [] }) {
       const signal = callerSignal ?? AbortSignal.timeout(30000);
       const checkedAt = new Date(now()).toISOString();
       const window = resolveNewsWindow({ window: input.news_window ?? 'rolling_24h', now: now() });
@@ -275,8 +279,13 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
           }
           return { page, finalUrl };
         }
-        const started = Date.now();
-        const timer = setTimeout(() => controller.abort(), Math.max(1, pageRemainingMs));
+        const started = performance.now();
+        const pageDeadline = Math.min(deadlineAt, started + pageRemainingMs);
+        const pageExpired = () => {
+          if (performance.now() >= pageDeadline) controller.abort();
+          return pageSignal.aborted;
+        };
+        const timer = setTimeout(() => controller.abort(), Math.max(1, pageDeadline - started));
         let index = 0;
         async function worker() {
           while (index < pending.length) {
@@ -284,7 +293,7 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
             let page = {};
             let failed = false;
             let attempted = false;
-            if (strict && typeof verifyPage === 'function' && !pageSignal.aborted && pageRemainingMs > 0) {
+            if (strict && typeof verifyPage === 'function' && !pageExpired() && pageRemainingMs > 0) {
               const cacheKey = JSON.stringify([key, input.news_render ?? 'never']);
               const cached = pageCache.get(cacheKey);
               if (cached && cached.at <= now() && now() - cached.at < 7 * 86400000) { page = cached.page; attempted = true; }
@@ -293,7 +302,13 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
                 reads++;
                 attempted = true;
                 try {
-                  page = await abortable(() => verifyPage(candidate, { signal: pageSignal, render: input.news_render ?? 'never' }), pageSignal);
+                  page = await abortable(() => {
+                    pageExpired();
+                    pageSignal.throwIfAborted();
+                    return verifyPage(candidate, { signal: pageSignal, render: input.news_render ?? 'never' });
+                  }, pageSignal);
+                  pageExpired();
+                  pageSignal.throwIfAborted();
                   if (!pageBinding(page, candidate)) page = {};
                   if (!pageSignal.aborted && page.source?.url && Buffer.byteLength(JSON.stringify(page)) <= 262144) {
                     if (pageCache.size >= 100) pageCache.delete(pageCache.keys().next().value);
@@ -327,7 +342,7 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
           }
         }
         try { await Promise.all([worker(), worker()]); }
-        finally { clearTimeout(timer); if (strict) pageRemainingMs = Math.max(0, pageRemainingMs - (Date.now() - started)); }
+        finally { clearTimeout(timer); if (strict) pageRemainingMs = Math.max(0, pageRemainingMs - (performance.now() - started)); }
       }
       function fusedResults() {
         const unique = new Map();
@@ -355,14 +370,14 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
       }
       const verifiedCount = () => fusedResults().filter(item => item.state === 'verified').length;
       async function dispatch(name) {
-        if (signal?.aborted) { attempts.push({ provider: name, status: 'timeout' }); return; }
+        if (signal?.aborted || performance.now() >= deadlineAt) { attempts.push({ provider: name, status: 'timeout' }); return; }
         const dispatcher = dispatchers.get(name);
         if (!dispatcher) { attempts.push({ provider: name, status: unavailable[name] ?? 'provider_unconfigured' }); return; }
         if (candidates.size >= pageLimit || (strict && (pageRemainingMs <= 0 || typeof verifyPage !== 'function'))) {
           attempts.push({ provider: name, status: 'verification_budget_exhausted' }); return;
         }
         const response = await dispatchOne({ provider: name, query: input.query,
-          mode: strict ? 'strict' : input.news_mode ? 'news' : 'general', timeWindow: input.time_range ?? (strict ? 'day' : null), signal });
+          mode: strict ? 'strict' : input.news_mode ? 'news' : 'general', timeWindow: input.time_range ?? (strict ? 'day' : null), signal, deadlineAt });
         attempts.push(...response.attempts.map(item => ({ ...item, ...(response.posterior_version ? { posterior_version: response.posterior_version } : {}) })));
         const items = response.results.map(item => ({ title: item.title, url: item.url, content: item.snippet,
           engine: null, category: null, retrieved_at: checkedAt, source: { url: item.url, host: new URL(item.url).hostname, search_engine: null },

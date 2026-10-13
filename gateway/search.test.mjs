@@ -294,6 +294,23 @@ test('opt-in recall and fallback retain observable caller cancellation and its r
   assert.equal(signals.every(signal => signal.aborted && signal.reason === reason), true);
 });
 
+test('elapsed total deadline refuses fallback even before the abort timer is delivered', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  await assert.rejects(searchSearxng({
+    baseUrl: 'http://searxng.test', input: { query: 'example' }, evidencePolicy: 'spec82_page_only',
+    signal: controller.signal, searchTimeoutMs: 20,
+    fetchImpl: async () => {
+      calls++;
+      const until = performance.now() + 50;
+      while (performance.now() < until) { /* Delay timer delivery during free recall. */ }
+      return { ok: true, json: async () => ({ results: [] }) };
+    },
+  }), error => error.kind === 'timeout');
+  assert.equal(calls, 1, 'the elapsed free-recall budget cannot admit a fallback fetch');
+  assert.equal(controller.signal.aborted, false);
+});
+
 test('opt-in deadline closes a stalled native HTTP recall socket', { timeout: 5000 }, async t => {
   const controller = new AbortController();
   let fetchSignal;

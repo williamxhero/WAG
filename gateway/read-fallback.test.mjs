@@ -226,9 +226,11 @@ test('page-only MCP proof binds embedded publication entities and canonical to t
   }
   gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: `<link rel="canonical" href="${other}"><meta property="article:published_time" content="${instant}">` });
   assert.equal((await gateway.read('http://publisher.example.test/canonical-mismatch', 'never')).payload.state, 'unknown');
+  gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: `<meta property="og:url" content="${other}"><meta property="article:published_time" content="${instant}">` });
+  assert.equal((await gateway.read('http://publisher.example.test/og-mismatch', 'never')).payload.state, 'unknown');
   const finalUrl = 'http://publisher.example.test/final-matching';
   const matching = { '@type': 'NewsArticle', url: finalUrl, '@id': `${finalUrl}#article`, mainEntityOfPage: { '@id': finalUrl }, datePublished: instant };
-  const html = `<link rel="canonical" href="${finalUrl}"><script type="application/ld+json">${JSON.stringify(matching)}</script><article>Own report</article>`;
+  const html = `<link rel="canonical" href="${finalUrl}"><meta property="og:url" content="${finalUrl}"><script type="application/ld+json">${JSON.stringify(matching)}</script><article>Own report</article>`;
   gateway.setOrigin({ status: 200, headers: { 'content-type': 'text/html' }, body: html });
   assert.equal((await gateway.read(finalUrl, 'never')).payload.state, 'verified');
   gateway.setRecall([{ title: 'Own report', url: finalUrl, content: 'Discovery claim' }]);

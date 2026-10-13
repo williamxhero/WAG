@@ -492,7 +492,8 @@ function publisherEvidence(html, finalUrl, headers = {}) {
     const identities = ['@id', 'url'].filter(key => Object.hasOwn(value, key));
     return identities.length > 0 && identities.every(key => samePage(value[key]));
   };
-  let valid = [...dom.window.document.querySelectorAll('link[rel~="canonical"]')].every(node => samePage(node.getAttribute('href')));
+  let valid = [...dom.window.document.querySelectorAll('link[rel~="canonical"]')].every(node => samePage(node.getAttribute('href'))) &&
+    [...dom.window.document.querySelectorAll('meta[property="og:url" i]')].every(node => samePage(node.getAttribute('content')));
   const pending = [];
   for (const script of dom.window.document.querySelectorAll('script[type="application/ld+json"]')) {
     try { pending.push(JSON.parse(script.textContent)); } catch { /* Invalid JSON-LD supplies no extracted proof. */ }

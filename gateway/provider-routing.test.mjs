@@ -286,6 +286,33 @@ test('long E4-only free recall leaves bounded publisher-read shares for real pro
   assert.deepEqual(result.results.find(item => item.url.endsWith('/paid/a')).providers, ['baidu', 'aliyun']);
 });
 
+test('overdue PAGE deadline stops microtask-queued reads before delayed abort timers run', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const router = createProviderRouting({ now: () => NOW, providers: [providerFixture('baidu', budget, calls, ['https://publisher.example/paid'])],
+    budget, estimateCostCents: () => 0, pageTimeoutMs: 20 });
+  let reads = 0;
+  let ready;
+  let resolveFirst;
+  const twoStarted = new Promise(resolve => { ready = resolve; });
+  const operation = router.search({ input: { query: 'report', time_range: 'day' }, strict: true,
+    results: Array.from({ length: 6 }, (_, index) => ({ ...recall[0], url: `https://publisher.example/overdue/${index}` })),
+    verifyPage: (candidate, { signal }) => new Promise((resolve, reject) => {
+      reads++;
+      if (reads === 1) resolveFirst = () => resolve(publisherPage(candidate));
+      if (reads === 2) ready();
+      signal.addEventListener('abort', () => reject(new Error('offline abort')), { once: true });
+    }) });
+  await twoStarted;
+  const until = performance.now() + 50;
+  while (performance.now() < until) { /* Deliberately delay timer delivery, not the absolute deadline. */ }
+  resolveFirst();
+  const result = await operation;
+  assert.equal(reads, 2, 'overdue deadline must be checked before another read is queued');
+  assert.deepEqual(result.results, [], 'proof completing after the deadline is unusable');
+  assert.equal(calls.length, 0, 'overdue PAGE work must not admit provider spending');
+});
+
 test('page work uses concurrency two and cancellation stops queued reads and unusable paid fallback', async t => {
   const { budget } = await ledgerFixture(t);
   const calls = [];
@@ -331,6 +358,27 @@ test('one absolute search deadline includes free recall and clips the remaining 
   assert.equal(aborted, 1);
   assert.deepEqual(result.results, []);
   assert.ok(Date.now() - started < 220, 'publisher work cannot receive a fresh deadline after free recall');
+});
+
+test('elapsed caller deadline prevents queued provider reservation and send without waiting for abort delivery', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  let sent;
+  const firstSent = new Promise(resolve => { sent = resolve; });
+  const router = createProviderRouting({ now: () => NOW, budget, estimateCostCents: () => 0,
+    providers: [providerFixture('baidu', budget, calls, [recall[0].url], { delayMs: 100, onSend: () => sent() })] });
+  const first = router.dispatch({ provider: 'baidu', query: 'first' });
+  await firstSent;
+  const controller = new AbortController();
+  const queued = router.dispatch({ provider: 'baidu', query: 'overdue', signal: controller.signal, deadlineAt: performance.now() + 20 });
+  const until = performance.now() + 50;
+  while (performance.now() < until) { /* Delay timer delivery while the send stays queued. */ }
+  await first;
+  const result = await queued;
+  assert.equal(result.attempts[0].status, 'timeout');
+  assert.equal(calls.length, 1);
+  assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1);
+  assert.equal(controller.signal.aborted, false);
 });
 
 test('concurrent searches serialize provider sends and single-flight identical canonical dispatches', async t => {

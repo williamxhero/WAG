@@ -186,19 +186,21 @@ export function summarizeSourceEvidence(rawResults) {
   };
 }
 
-async function requestSearch({ baseUrl, input, fetchImpl, signal, deadlineSignal, cancelRecall, relaxed }) {
+async function requestSearch({ baseUrl, input, fetchImpl, signal, deadlineSignal, deadlineAt, cancelRecall, relaxed }) {
   const params = buildSearchParams(input, { relaxed });
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.aborted ? signal.reason : searchError('Search deadline exceeded', 'timeout'));
-    if (deadlineSignal.aborted) { abort(); return; }
+    if (deadlineSignal.aborted || performance.now() >= deadlineAt) { abort(); return; }
     deadlineSignal.addEventListener('abort', abort, { once: true });
     Promise.resolve().then(async () => {
-      if (deadlineSignal.aborted) { abort(); return; }
+      if (deadlineSignal.aborted || performance.now() >= deadlineAt) { abort(); return; }
       // Legacy retains exact caller signal identity. Opt-in policy/provider routing
       // also cancels transport I/O at the shared deadline without mutating the caller.
       const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal: cancelRecall ? deadlineSignal : signal });
       if (!response.ok) throw searchError(`SearXNG returned ${response.status}`, 'search_backend_status', { httpStatus: response.status });
-      return response.json();
+      const body = await response.json();
+      if (deadlineSignal.aborted || performance.now() >= deadlineAt) { abort(); return; }
+      return body;
     }).then(resolve, reject).finally(() => deadlineSignal.removeEventListener('abort', abort));
   });
 }
@@ -324,6 +326,7 @@ function readFailureEvidence(candidate, checkedAt, failure) {
 export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fetch, signal, qualityFilter, timeWindowStrict, newsMode, engineHealth = defaultEngineHealth, enginePools, now = Date.now, verifyPage, discoverGdelt, evidencePolicy = 'spec78_legacy', providerRouting, searchTimeoutMs = 30000 } = {}) {
   if (!Number.isInteger(searchTimeoutMs) || searchTimeoutMs < 1 || searchTimeoutMs > 30000) throw new TypeError('invalid search deadline');
   // Start once, before free recall. Routing and publisher reads inherit the remaining deadline.
+  const deadlineAt = performance.now() + searchTimeoutMs;
   const deadline = AbortSignal.timeout(searchTimeoutMs);
   const deadlineSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   signal ??= deadline;
@@ -341,7 +344,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     ? { ...input, engines: poolSelection.engines.join(',') }
     : input;
   const firstStarted = Date.now();
-  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, deadlineSignal, cancelRecall, relaxed: false });
+  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, deadlineSignal, deadlineAt, cancelRecall, relaxed: false });
   stages_ms.search_ms = Date.now() - firstStarted;
 
   const strictWindow = Boolean(timeWindowStrict);
@@ -360,6 +363,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
       fetchImpl,
       signal,
       deadlineSignal,
+      deadlineAt,
       cancelRecall,
       relaxed: true,
     });
@@ -532,7 +536,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const routed = evidencePolicy === 'spec82_page_only' || providerRouting?.active
     ? await (providerRouting ?? createProviderRouting({ now })).search({ input: verifiedParams ? { ...input, ...verifiedParams, news_mode: 'verified' } : input,
         results: evidencePolicy === 'spec82_page_only' ? routeCandidates : verifiedResults,
-        signal, verifyPage: routeReader, sourceFailures: routeSourceFailures, evidencePolicy, strict: evidencePolicy === 'spec82_page_only' && (strictWindow || normalizedNewsMode === 'verified') })
+        signal, deadlineAt, verifyPage: routeReader, sourceFailures: routeSourceFailures, evidencePolicy, strict: evidencePolicy === 'spec82_page_only' && (strictWindow || normalizedNewsMode === 'verified') })
     : null;
   if (routed && evidencePolicy === 'spec78_legacy' && (strictWindow || normalizedNewsMode === 'verified')) {
     // Enabling a provider must not make its API date satisfy the legacy verified contract.

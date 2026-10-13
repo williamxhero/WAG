@@ -1,0 +1,1562 @@
+{
+  "count": 91,
+  "duplicate_routes": [],
+  "group_counts": {
+    "T1 官方（22 个）": 22,
+    "T2 央媒与通讯社（11 个）": 11,
+    "财经（17 个）": 17,
+    "综合（13 个）": 13,
+    "科技（12 个）": 12,
+    "境外中文（3 个，走代理）": 3,
+    "平台热榜": 13
+  },
+  "rows": [
+    {
+      "name": "中国政府网 · 最新政策",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/zhengce/zuixin",
+      "note": "",
+      "source_line": 13,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国政府网 · 最新文件（国令、国发、国办发等）",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/zhengce/wenjian",
+      "note": "",
+      "source_line": 14,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国务院政策文件库 · 部门文件",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/zhengce/zhengceku/bmwj",
+      "note": "",
+      "source_line": 15,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国政府网 · 新闻要闻",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/cn/news/yw",
+      "note": "",
+      "source_line": 16,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国政府网 · 部门政务",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/cn/news/bm",
+      "note": "",
+      "source_line": 17,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "全国人大 · 权威发布",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/npc/c12435",
+      "note": "",
+      "source_line": 18,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国家发展改革委 · 新闻动态",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/ndrc/xwdt",
+      "note": "",
+      "source_line": 19,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国人民银行 · 沟通交流",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/pbc/goutongjiaoliu",
+      "note": "需 Chromium",
+      "source_line": 20,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国证监会 · 证监会要闻",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/csrc/news",
+      "note": "",
+      "source_line": 21,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国家金融监督管理总局 · 监管动态",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/nfra/915",
+      "note": "",
+      "source_line": 22,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国家统计局 · 最新发布",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/stats/sj/zxfb",
+      "note": "",
+      "source_line": 23,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "工业和信息化部 · 政策文件",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/miit/zcwj",
+      "note": "",
+      "source_line": 24,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "财政部 · 关税政策文件",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/mof/gss",
+      "note": "",
+      "source_line": 25,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "外交部 · 发言人表态",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/mfa/wjdt/fyrbt",
+      "note": "",
+      "source_line": 26,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国家税务总局 · 最新文件",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/chinatax/latest",
+      "note": "",
+      "source_line": 27,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国家网信办 · 网信发布",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/cac/wxzw/wxfb",
+      "note": "",
+      "source_line": 28,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "教育部 · 最新文件",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/moe/newest_file",
+      "note": "",
+      "source_line": 29,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "生态环境部 · 要闻动态",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/mee/ywdt/hjywnews",
+      "note": "",
+      "source_line": 30,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "住房和城乡建设部 · 政策发布",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/mohurd/policy",
+      "note": "",
+      "source_line": 31,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "国家药监局 · 公告通告",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/nmpa/xxgk/ggtg",
+      "note": "",
+      "source_line": 32,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中央纪委国家监委 · 要闻",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/gov/ccdi/yaowenn",
+      "note": "反爬较强",
+      "source_line": 33,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "深交所 · 上市公司公告",
+      "tier": "T1",
+      "group": "T1 官方（22 个）",
+      "route": "/szse/disclosure/listed/notice",
+      "note": "",
+      "source_line": 34,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "新华社新闻（新华网）",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/news/xhsxw",
+      "note": "",
+      "source_line": 42,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "人民网 · 首页头条",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/people",
+      "note": "",
+      "source_line": 43,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "人民日报 · 电子版",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/people/paper",
+      "note": "",
+      "source_line": 44,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "央视 · 新闻联播",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/cctv/tv/lm/xwlb",
+      "note": "",
+      "source_line": 45,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "央视网 · 国内",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/cctv/china",
+      "note": "",
+      "source_line": 46,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "央视网 · 国际",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/cctv/world",
+      "note": "",
+      "source_line": 47,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "央视网 · 科技",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/cctv/tech",
+      "note": "",
+      "source_line": 48,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国新闻网 · 最新",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/chinanews",
+      "note": "",
+      "source_line": 49,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "环球网 · 国内",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/huanqiu/news/china",
+      "note": "",
+      "source_line": 50,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "经济日报 · 地方经济",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/ce/district",
+      "note": "",
+      "source_line": 51,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国证券报 · 要闻",
+      "tier": "T2",
+      "group": "T2 央媒与通讯社（11 个）",
+      "route": "/cs",
+      "note": "",
+      "source_line": 52,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "财新 · 最新文章",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/caixin/latest",
+      "note": "",
+      "source_line": 62,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "财新 · 财新一线",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/caixin/k",
+      "note": "",
+      "source_line": 63,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "财新 · 金融监管",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/caixin/finance/regulation",
+      "note": "",
+      "source_line": 64,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "第一财经 · 最新",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/yicai/latest",
+      "note": "",
+      "source_line": 65,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "第一财经 · 正在（快讯）",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/yicai/brief",
+      "note": "",
+      "source_line": 66,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "界面新闻 · 财经",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/jiemian/lists/800",
+      "note": "",
+      "source_line": 67,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "21 世纪经济报道 · 热点",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/21caijing/channel/热点",
+      "note": "",
+      "source_line": 68,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "经济观察网 · 快讯",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/eeo/kuaixun",
+      "note": "",
+      "source_line": 69,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "每日经济新闻 · 重磅原创",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/nbd/daily",
+      "note": "",
+      "source_line": 70,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "华尔街见闻 · 资讯",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/wallstreetcn/news",
+      "note": "",
+      "source_line": 71,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "华尔街见闻 · 实时快讯",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/wallstreetcn/live",
+      "note": "",
+      "source_line": 72,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "财联社 · 电报",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/cls/telegraph",
+      "note": "",
+      "source_line": 73,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "财联社 · 深度",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/cls/depth/1000",
+      "note": "",
+      "source_line": 74,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "证券时报 · 要闻",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/stcn/article/list/yw",
+      "note": "",
+      "source_line": 75,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "证券时报 · 快讯",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/stcn/article/list/kx",
+      "note": "",
+      "source_line": 76,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "格隆汇 · 实时快讯",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/gelonghui/live",
+      "note": "",
+      "source_line": 77,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "新浪财经 · 国内",
+      "tier": "T3",
+      "group": "财经（17 个）",
+      "route": "/sina/finance/china",
+      "note": "",
+      "source_line": 78,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "澎湃新闻 · 首页头条",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/thepaper/featured",
+      "note": "",
+      "source_line": 84,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "澎湃新闻 · 时事",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/thepaper/channel/25950",
+      "note": "",
+      "source_line": 85,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "澎湃新闻 · 财经",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/thepaper/channel/25951",
+      "note": "",
+      "source_line": 86,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "澎湃新闻 · 明查（事实核查）",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/thepaper/factpaper",
+      "note": "",
+      "source_line": 87,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "界面新闻 · 新闻",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/jiemian/lists/801",
+      "note": "",
+      "source_line": 88,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "新京报 · 深度",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/bjnews/cat/depth",
+      "note": "",
+      "source_line": 89,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "南方周末 · 热门文章",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/infzm/hot",
+      "note": "",
+      "source_line": 90,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "中国新闻周刊 · 栏目",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/inewsweek/survey",
+      "note": "",
+      "source_line": 91,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "观察者网 · 头条",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/guancha/headline",
+      "note": "",
+      "source_line": 92,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "新浪 · 滚动新闻",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/sina/rollnews",
+      "note": "",
+      "source_line": 93,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "网易 · 今日关注",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/163/today",
+      "note": "",
+      "source_line": 94,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "凤凰网 · 资讯",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/ifeng/news",
+      "note": "",
+      "source_line": 95,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "腾讯较真 · 最新辟谣",
+      "tier": "T3",
+      "group": "综合（13 个）",
+      "route": "/qq/fact",
+      "note": "",
+      "source_line": 96,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "36氪 · 快讯",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/36kr/newsflashes",
+      "note": "",
+      "source_line": 102,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "界面新闻 · 科技",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/jiemian/lists/65",
+      "note": "",
+      "source_line": 103,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "澎湃新闻 · 科技",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/thepaper/channel/119908",
+      "note": "",
+      "source_line": 104,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "虎嗅 · 资讯",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/huxiu/article",
+      "note": "反爬较强",
+      "source_line": 105,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "钛媒体 · 最新",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/tmtpost/new",
+      "note": "",
+      "source_line": 106,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "IT 之家 · IT 资讯",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/ithome/it",
+      "note": "",
+      "source_line": 107,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "少数派 · 首页",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/sspai/index",
+      "note": "",
+      "source_line": 108,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "极客公园",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/geekpark",
+      "note": "",
+      "source_line": 109,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "爱范儿 · 快讯",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/ifanr/digest",
+      "note": "",
+      "source_line": 110,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "品玩 · 实时要闻",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/pingwest/status",
+      "note": "",
+      "source_line": 111,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "量子位 · 资讯",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/qbitai/category/资讯",
+      "note": "",
+      "source_line": 112,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "InfoQ 中文 · 推荐",
+      "tier": "T3",
+      "group": "科技（12 个）",
+      "route": "/infoq/recommend",
+      "note": "",
+      "source_line": 113,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "联合早报 · 中国即时新闻",
+      "tier": "T3",
+      "group": "境外中文（3 个，走代理）",
+      "route": "/zaobao/realtime/china",
+      "note": "走代理",
+      "source_line": 119,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "联合早报 · 中国新闻",
+      "tier": "T3",
+      "group": "境外中文（3 个，走代理）",
+      "route": "/zaobao/znews/china",
+      "note": "走代理",
+      "source_line": 120,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "纽约时报中文网 · 每日简报",
+      "tier": "T3",
+      "group": "境外中文（3 个，走代理）",
+      "route": "/nytimes/daily_briefing_chinese",
+      "note": "走代理",
+      "source_line": 121,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "百度热搜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/baidu/top",
+      "note": "",
+      "source_line": 129,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "微博热搜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/weibo/search/hot",
+      "note": "需 Chromium；可选 Cookie",
+      "source_line": 130,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "知乎热榜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/zhihu/hot",
+      "note": "反爬较强；可选 Cookie",
+      "source_line": 131,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "知乎日报",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/zhihu/daily",
+      "note": "",
+      "source_line": 132,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "今日头条 · 热点频道",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/toutiao/channel/news_hot",
+      "note": "反爬较强",
+      "source_line": 133,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "B 站 · 热搜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/bilibili/hot-search",
+      "note": "",
+      "source_line": 134,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "B 站 · 综合热门",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/bilibili/popular/all",
+      "note": "",
+      "source_line": 135,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "澎湃新闻 · 侧边栏热榜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/thepaper/sidebar",
+      "note": "",
+      "source_line": 136,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "网易新闻 · 点击排行（日）",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/163/news/rank/whole/click/day",
+      "note": "",
+      "source_line": 137,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "36氪 · 资讯热榜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/36kr/hot-list",
+      "note": "",
+      "source_line": 138,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "IT 之家 · 24 小时热榜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/ithome/ranking/24h",
+      "note": "",
+      "source_line": 139,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "证券时报 · 热榜",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/stcn/article/rank/yw",
+      "note": "",
+      "source_line": 140,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    },
+    {
+      "name": "雪球 · 热帖",
+      "tier": "platform",
+      "group": "平台热榜",
+      "route": "/xueqiu/hots",
+      "note": "",
+      "source_line": 141,
+      "route_discovery": {
+        "status": "unknown",
+        "probe_scope": "Not individually tested; one public RSSHub canary returned HTTP 403.",
+        "reason": "Route-specific response and RSS/sitemap alternatives were not established."
+      },
+      "date_evidence": {
+        "status": "not_checked",
+        "classification": null
+      }
+    }
+  ]
+}

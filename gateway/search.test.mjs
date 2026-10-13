@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createServer } from 'node:http';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { buildSearchParams, searchSearxng } from './search.mjs';
 
 async function searchFixture(bodies, input = { query: 'example' }) {
@@ -250,6 +252,72 @@ test('initial search and fallback share one caller deadline and cancellation', a
     },
   }), error => error === deadline);
   assert.deepEqual(signals, [controller.signal, controller.signal]);
+});
+
+test('opt-in deadline aborts free recall transport without aborting the caller', async () => {
+  for (const configuration of [{ evidencePolicy: 'spec82_page_only' }, { providerRouting: { active: true } }]) {
+    const controller = new AbortController();
+    let fetchSignal;
+    const keepAlive = sleep(80);
+    await assert.rejects(searchSearxng({
+      baseUrl: 'http://searxng.test', input: { query: 'example' },
+      ...configuration, signal: controller.signal, searchTimeoutMs: 30,
+      fetchImpl: async (_url, { signal }) => {
+        fetchSignal = signal;
+        return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      },
+    }), error => error.kind === 'timeout');
+    assert.equal(fetchSignal.aborted, true);
+    assert.equal(controller.signal.aborted, false);
+    await keepAlive;
+  }
+});
+
+test('opt-in recall and fallback retain observable caller cancellation and its reason', async () => {
+  const controller = new AbortController();
+  const reason = new Error('caller canceled search');
+  const signals = [];
+  await assert.rejects(searchSearxng({
+    baseUrl: 'http://searxng.test', input: { query: 'example' },
+    evidencePolicy: 'spec82_page_only', signal: controller.signal,
+    fetchImpl: async (_url, { signal }) => {
+      signals.push(signal);
+      if (signals.length === 1) return { ok: true, json: async () => ({ results: [] }) };
+      controller.abort(reason);
+      signal.throwIfAborted();
+    },
+  }), error => error === reason);
+  assert.equal(signals.length, 2);
+  assert.equal(signals[0], signals[1]);
+  assert.notEqual(signals[0], controller.signal);
+  assert.equal(signals.every(signal => signal.aborted && signal.reason === reason), true);
+});
+
+test('opt-in deadline closes a stalled native HTTP recall socket', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  let fetchSignal;
+  let observedRequest = false;
+  let closed;
+  const socketClosed = new Promise(resolve => { closed = resolve; });
+  const server = createServer(request => {
+    observedRequest = true;
+    request.socket.once('close', closed);
+    // Leave the actual HTTP response stalled until native fetch is canceled.
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  await assert.rejects(searchSearxng({
+    baseUrl: `http://127.0.0.1:${server.address().port}`, input: { query: 'example' },
+    evidencePolicy: 'spec82_page_only', signal: controller.signal, searchTimeoutMs: 1000,
+    fetchImpl: (url, options) => { fetchSignal = options.signal; return fetch(url, options); },
+  }), error => error.kind === 'timeout');
+  assert.equal(observedRequest, true);
+  assert.equal(fetchSignal.aborted, true);
+  assert.equal(controller.signal.aborted, false);
+  assert.equal(await Promise.race([socketClosed.then(() => true), sleep(1500).then(() => false)]), true);
 });
 
 test('garbage error-page results are filtered out and reported with reasons', async () => {

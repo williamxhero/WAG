@@ -186,7 +186,7 @@ export function summarizeSourceEvidence(rawResults) {
   };
 }
 
-async function requestSearch({ baseUrl, input, fetchImpl, signal, deadlineSignal, relaxed }) {
+async function requestSearch({ baseUrl, input, fetchImpl, signal, deadlineSignal, cancelRecall, relaxed }) {
   const params = buildSearchParams(input, { relaxed });
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.aborted ? signal.reason : searchError('Search deadline exceeded', 'timeout'));
@@ -194,9 +194,9 @@ async function requestSearch({ baseUrl, input, fetchImpl, signal, deadlineSignal
     deadlineSignal.addEventListener('abort', abort, { once: true });
     Promise.resolve().then(async () => {
       if (deadlineSignal.aborted) { abort(); return; }
-      // Preserve the original caller signal for both recall attempts. The separate
-      // race bounds recall/body parsing without replacing that public dependency.
-      const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal });
+      // Legacy retains exact caller signal identity. Opt-in policy/provider routing
+      // also cancels transport I/O at the shared deadline without mutating the caller.
+      const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal: cancelRecall ? deadlineSignal : signal });
       if (!response.ok) throw searchError(`SearXNG returned ${response.status}`, 'search_backend_status', { httpStatus: response.status });
       return response.json();
     }).then(resolve, reject).finally(() => deadlineSignal.removeEventListener('abort', abort));
@@ -327,6 +327,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
   const deadline = AbortSignal.timeout(searchTimeoutMs);
   const deadlineSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   signal ??= deadline;
+  const cancelRecall = evidencePolicy === 'spec82_page_only' || Boolean(providerRouting?.active);
   const stages_ms = {};
   // Engine-supply governance (SPEC #74): pick the layer, validate a strict pool, and never ask an
   // engine that is inside its local cooldown. With no pool configured for the layer this is a no-op
@@ -340,7 +341,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
     ? { ...input, engines: poolSelection.engines.join(',') }
     : input;
   const firstStarted = Date.now();
-  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, deadlineSignal, relaxed: false });
+  const firstBody = await requestSearch({ baseUrl, input: effectiveInput, fetchImpl, signal, deadlineSignal, cancelRecall, relaxed: false });
   stages_ms.search_ms = Date.now() - firstStarted;
 
   const strictWindow = Boolean(timeWindowStrict);
@@ -359,6 +360,7 @@ export async function searchSearxng({ baseUrl, input, fetchImpl = globalThis.fet
       fetchImpl,
       signal,
       deadlineSignal,
+      cancelRecall,
       relaxed: true,
     });
     stages_ms.search_retry_ms = Date.now() - retryStarted;

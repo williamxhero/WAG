@@ -109,6 +109,16 @@ function authorName(value) {
 // unaffected because it calls temporalValue without these options.
 const PAGE_TEMPORAL_OPTIONS = { month: true, unanchored: true };
 
+// Strict opt-in validation before the shared parser: Date.parse can roll an invalid civil day into
+// the next month or accept 24:00. Keep that permissive legacy behaviour out of SPEC82 page proof.
+export function normalizePagePublicationDate(value) {
+  const raw = text(value);
+  if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(raw)) return temporalValue(raw, PAGE_TEMPORAL_OPTIONS);
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(raw);
+  if (!match || !civilDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4] ?? 0) > 59) return null;
+  return temporalValue(raw, PAGE_TEMPORAL_OPTIONS);
+}
+
 const PUBLISHED_AT_SELECTORS = [
   ['meta[property="article:published_time" i]'],
   ['meta[property="og:published_time" i]'],
@@ -133,6 +143,18 @@ const PUBLISHED_AT_SELECTORS = [
   ['time[pubdate]', 'datetime'],
   ['article time[datetime]', 'datetime'],
 ];
+// SPEC82 is narrower than the legacy extractor: creation/upload and generic page dates are not
+// publication proof. Reuse the actual selector vocabulary, never promote an arbitrary html.* label.
+export function pagePublicationEvidenceLevel(source) {
+  if (/^html\.jsonld\[\d+\]\.datePublished$/.test(source ?? '')) return 'E1';
+  if (['html.chinese.publication_label', 'html.chinese.source_adjacent'].includes(source)) return 'E2';
+  for (const [selector] of PUBLISHED_AT_SELECTORS) {
+    if (['meta[name="DC.date" i]', 'meta[name="dc.date" i]', 'meta[name="dcterms.date" i]', 'article time[datetime]'].includes(selector)) continue;
+    if (source === `html.${selector.replace(/ i\]$/, ']')}`) return selector.startsWith('meta') ? 'E1' : 'E2';
+  }
+  return null;
+}
+
 const MODIFIED_AT_SELECTORS = [
   ['meta[property="article:modified_time" i]'],
   ['meta[property="og:updated_time" i]'],
@@ -149,23 +171,61 @@ const MODIFIED_AT_JSONLD = ['dateModified'];
 // Every publisher-declared date for one kind, in trust order. Keeping the whole list (instead of only
 // the first hit) lets the caller record conflicting declarations and lets a lower-priority source win
 // when a higher-priority element is present but unparseable.
-function declaredCandidates(document, jsonLd, kind) {
+function contextualPublicationTimeSource(node) {
+  const block = node.parentElement?.closest(PUBLICATION_BLOCKS);
+  if (!block?.closest('article, main')) return null;
+  const before = node.ownerDocument.createRange();
+  before.setStart(block, 0);
+  before.setEndBefore(node);
+  const after = node.ownerDocument.createRange();
+  after.setStartAfter(node);
+  after.setEnd(block, block.childNodes.length);
+  if (/(?:发布时间|发布日期)\s*[：:]\s*$/.test(before.toString())) return 'html.chinese.publication_label';
+  if (/^\s*来源\s*[：:]/.test(after.toString()) || /来源\s*[：:]\s*[^\s：:]{1,40}\s+$/.test(before.toString())) return 'html.chinese.source_adjacent';
+  return null;
+}
+
+function articleJsonLdType(value) {
+  if (value == null) return true; // Untyped datePublished remains supported; no entity claim to contradict.
+  const types = Array.isArray(value) ? value : [value];
+  return types.length > 0 && types.every(type => typeof type === 'string' && ['Article', 'NewsArticle', 'BlogPosting'].includes(type.replace(/^https?:\/\/schema\.org\//, '')));
+}
+
+function declaredCandidates(document, jsonLd, kind, { all = false } = {}) {
   const published = kind === 'published_at';
   const selectors = published ? PUBLISHED_AT_SELECTORS : MODIFIED_AT_SELECTORS;
   const properties = published ? PUBLISHED_AT_JSONLD : MODIFIED_AT_JSONLD;
   const candidates = [];
+  const seenNodes = new Set();
   for (const [selector, attribute = 'content'] of selectors) {
-    const value = text(document.querySelector(selector)?.getAttribute(attribute));
-    if (!value) continue;
-    const normalized = temporalValue(value, PAGE_TEMPORAL_OPTIONS);
-    // The provenance label keeps the plain selector text (the `i` case-insensitive flag is dropped)
-    // so evidence sources stay stable across builds.
-    if (normalized) candidates.push({ ...normalized, source: `html.${selector.replace(/ i\]$/, ']')}` });
+    const nodes = all ? document.querySelectorAll(selector) : [document.querySelector(selector)];
+    for (const node of nodes) {
+      if (all && seenNodes.has(node)) continue;
+      if (all && published && node?.matches('time[itemprop="dateModified" i]')) continue;
+      let source = `html.${selector.replace(/ i\]$/, ']')}`;
+      if (all && published && selector === 'article time[datetime]') {
+        source = contextualPublicationTimeSource(node);
+        if (!source) continue;
+      }
+      const value = text(node?.getAttribute(attribute));
+      if (!value) continue;
+      const normalized = all ? normalizePagePublicationDate(value) : temporalValue(value, PAGE_TEMPORAL_OPTIONS);
+      // Keep legacy source labels stable. Opt-in scanning records every declaration, but does not
+      // count the same <time> twice when two selectors match it.
+      if (normalized) {
+        candidates.push({ ...normalized, source, ...(all ? { raw: value } : {}) });
+        seenNodes.add(node);
+      }
+    }
   }
   for (let index = 0; index < jsonLd.length; index++) {
+    if (all && published && !articleJsonLdType(jsonLd[index]?.['@type'])) continue;
     for (const property of properties) {
-      const normalized = temporalValue(jsonLd[index]?.[property], PAGE_TEMPORAL_OPTIONS);
-      if (normalized) { candidates.push({ ...normalized, source: `html.jsonld[${index}].${property}` }); break; }
+      const normalized = all ? normalizePagePublicationDate(jsonLd[index]?.[property]) : temporalValue(jsonLd[index]?.[property], PAGE_TEMPORAL_OPTIONS);
+      if (normalized) {
+        candidates.push({ ...normalized, source: `html.jsonld[${index}].${property}`, ...(all ? { raw: text(jsonLd[index][property]) } : {}) });
+        break;
+      }
     }
   }
   return candidates;
@@ -175,23 +235,64 @@ function declaredCandidates(document, jsonLd, kind) {
 // evidence, never merged into the primary date and never silently discarded.
 function declaredConflicts(candidates) {
   const primary = candidates[0] ?? null;
-  const primaryKey = primary ? primary.value ?? primary.on : null;
+  const keyFor = candidate => candidate.value ?? (candidate.precision === 'unknown-timezone' && candidate.raw ? candidate.raw : candidate.on);
+  const primaryKey = primary ? keyFor(primary) : null;
   const conflicts = [];
   const seen = new Set();
   for (const candidate of candidates) {
-    const key = candidate.value ?? candidate.on;
+    const key = keyFor(candidate);
     if (key === primaryKey || seen.has(key)) continue;
     seen.add(key);
-    conflicts.push({ kind: 'published_at', value: candidate.value ?? null, on: candidate.on, precision: candidate.precision, source: candidate.source });
+    conflicts.push({ kind: 'published_at', ...candidate });
   }
   return conflicts;
 }
 
-export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = new Date().toISOString()) {
+// Opt-in only: do not let clocks or dates in peripheral page regions become article evidence.
+function removePublicationNoise(document) {
+  for (const node of document.querySelectorAll('aside, footer, nav, [hidden], [aria-hidden="true"], script:not([type="application/ld+json"]), style, template')) node.remove();
+  for (const node of document.querySelectorAll('[class], [id], [role]')) {
+    const hook = `${node.id} ${node.className} ${node.getAttribute('role') ?? ''}`;
+    if (/sidebar|comment|recommend|related|today|侧栏|评论|推荐|今日/i.test(hook)) node.remove();
+  }
+  for (const heading of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    if (/今日|今天|相关推荐|评论/.test(heading.textContent)) heading.closest('section, aside, div')?.remove();
+  }
+}
+
+const PUBLICATION_BLOCKS = 'p, div, li, header, section, article, main';
+const CHINESE_DATE = String.raw`(?:\d{4}年\s*\d{1,2}月\s*\d{1,2}日|\d{4}-\d{2}-\d{2})(?:[T\s]+\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:Z|[+-]\d{2}:?\d{2}))?)?(?![\dA-Za-z:+.\-]|\s+\d)`;
+
+function chinesePublicationCandidates(document) {
+  const candidates = [];
+  for (const node of document.querySelectorAll(PUBLICATION_BLOCKS)) {
+    if (!node.closest('article, main') || node.querySelector(PUBLICATION_BLOCKS)) continue;
+    // Inline markup is transparent; block boundaries are not, so another column's source label
+    // cannot lend provenance to an unrelated date. Broad date-only body scans are deliberately absent.
+    const content = text(node.textContent).replace(/\s+/g, ' ');
+    const patterns = [
+      ['publication_label', new RegExp(`(?:发布时间|发布日期)\\s*[：:]\\s*(${CHINESE_DATE})`, 'g')],
+      ['source_adjacent', new RegExp(`(${CHINESE_DATE})\\s*[|｜]?\\s*来源\\s*[：:]`, 'g')],
+      ['source_adjacent', new RegExp(`来源\\s*[：:]\\s*[^\\s：:]{1,40}\\s+(${CHINESE_DATE})`, 'g')],
+    ];
+    for (const [rule, pattern] of patterns) {
+      for (const match of content.matchAll(pattern)) {
+        const raw = match[1].replace(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/, (_, year, month, day) => `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`).replace(/\s+(Z|[+-]\d{2}:?\d{2})$/i, '$1');
+        const normalized = normalizePagePublicationDate(raw);
+        if (normalized) candidates.push({ ...normalized, source: `html.chinese.${rule}`, raw });
+      }
+    }
+  }
+  return candidates;
+}
+
+export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = new Date().toISOString(), { chinesePublicationDates = false } = {}) {
   const dom = new JSDOM(html, { url: finalUrl });
   const document = dom.window.document;
+  if (chinesePublicationDates) removePublicationNoise(document);
   const jsonLd = jsonLdValues(document);
-  const publishedCandidates = declaredCandidates(document, jsonLd, 'published_at');
+  const publishedCandidates = declaredCandidates(document, jsonLd, 'published_at', { all: chinesePublicationDates });
+  if (chinesePublicationDates) publishedCandidates.push(...chinesePublicationCandidates(document));
   const published = publishedCandidates[0] ?? null;
   const conflicts = declaredConflicts(publishedCandidates);
   const declaredModified = declaredCandidates(document, jsonLd, 'modified_at')[0] ?? null;
@@ -215,6 +316,7 @@ export function extractPageEvidence(html, finalUrl, headers = {}, retrievedAt = 
     modified_at: modified?.value ?? null,
     // Other dates the page declares besides the primary one. Recorded, never silently overwritten.
     conflicts,
+    ...(chinesePublicationDates ? { publication_candidates: publishedCandidates.map(candidate => ({ kind: 'published_at', ...candidate })) } : {}),
     retrieved_at: retrievedAt,
     source: {
       url: finalUrl,

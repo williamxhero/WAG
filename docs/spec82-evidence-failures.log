@@ -1,0 +1,297 @@
+SPEC82 #87 retained failing-output excerpts, Windows Node v26.7.0.
+Not complete transcripts: passing-test lines and repetitive node:test stack frames omitted.
+ANSI stripped; absolute worktree paths replaced with <worktree>/.
+Assertion actual/expected fields are authoritative; color-only inline diffs may concatenate words.
+
+===== red1.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 670.1331
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:10:1
+✖ Chinese publication labels retain civil-day precision across inline markup, opt-in only (56.6571ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - '2026-10-13'
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:14:12)
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: '2026-10-13',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== red2.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 560.0256
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:10:1
+✖ source-adjacent Chinese dates retain explicit zones or unknown-timezone without assumptions (47.7885ms)
+  AssertionError [ERR_ASSERTION]: <div>2026年10月13日 <span>来源：</span>合成来源</div>
+  + actual - expected
+
+  + null
+  - '2026-10-13'
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:20:12)
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: '2026-10-13',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at gateway\spec82-evidence.test.mjs:26:1
+✖ publication extraction ignores sidebar, footer, comments, recommendations and today sections (7.5696ms)
+  AssertionError [ERR_ASSERTION]: <aside><p>发布时间：2026年10月13日</p></aside>
+  + actual - expected
+
+  + '2026-10-13'
+  - null
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:41:12)
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '2026-10-13',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== red3.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 79.3313
+node:internal/modules/esm/resolve:272
+    throw new ERR_MODULE_NOT_FOUND(
+          ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<worktree>/gateway/spec82-evidence.mjs' imported from <worktree>/gateway/spec82-evidence.test.mjs
+    at finalizeResolution (node:internal/modules/esm/resolve:272:11)
+    at moduleResolve (node:internal/modules/esm/resolve:879:10)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///<worktree>/gateway/spec82-evidence.mjs'
+}
+
+Node.js v26.7.0
+✖ gateway\spec82-evidence.test.mjs (69.7417ms)
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:1:1
+✖ gateway\spec82-evidence.test.mjs (69.7417ms)
+  'test failed'
+
+===== red4.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 633.9971
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:12:1
+✖ all publication declarations and E3 conflicts are auditable and fail closed, E4 stays diagnostic (50.5538ms)
+  AssertionError [ERR_ASSERTION]: <meta property="article:published_time" content="2026-10-13T03:30Z"><meta property="article:published_time" content="2024-01-01T00:00Z">
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:22:12)
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== red5.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 734.8164
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:34:1
+✖ invalid civil dates, clocks, zones and forged instant precision cannot become page proof (10.4715ms)
+  AssertionError [ERR_ASSERTION]: 2026-02-30T03:30Z
+  + actual - expected
+
+  + '2026-03-02'
+  - null
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:38:12)
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '2026-03-02',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== red6.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 9
+ℹ suites 0
+ℹ pass 8
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 815.3977
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:12:1
+✖ modified article times and untrusted html provenance cannot substitute for publication (68.321ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '2026-10-13T03:30:00.000Z'
+  - null
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:14:10)
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '2026-10-13T03:30:00.000Z',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== red7.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 973.7131
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:12:1
+✖ auxiliary records cannot declare page proof and E3/E4 remain diagnostic when no page exists (4.5632ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  actual expected
+
+  'verifiedunknown'
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:15:10)
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'verified',
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== red8.log; exit1 =====
+node --test --test-concurrency=1 gateway/spec82-evidence.test.mjs
+ℹ tests 12
+ℹ suites 0
+ℹ pass 10
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1608.5007
+✖ failing tests:
+
+test at gateway\spec82-evidence.test.mjs:12:1
+✖ SPEC82 never promotes an event time to publication; explicit publication hooks and context still work (213.7311ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  actual expected
+
+  'verifiedunknown'
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:15:10)
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'verified',
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at gateway\spec82-evidence.test.mjs:33:1
+✖ JSON-LD explicitly non-article entities never provide publication proof, legacy extraction stays unchanged (13.8035ms)
+  AssertionError [ERR_ASSERTION]: "Event"
+  actual expected
+
+  'verifiedunknown'
+
+      at TestContext.<anonymous> (file:///<worktree>/gateway/spec82-evidence.test.mjs:37:12)
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'verified',
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+===== gateway-full.log; exit1 =====
+node --test --test-concurrency=1 gateway/*.test.mjs
+ℹ tests 462
+ℹ suites 0
+ℹ pass 460
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 355217.3676
+✖ failing tests:
+
+test at gateway\read-pinning.test.mjs:164:1
+✖ redirects retain protocol, credential, port, public-address and count protections (989.1861ms)
+  [TypeError: fetch failed] {
+    [cause]: Error: bad port
+        at makeNetworkError (node:internal/deps/undici/undici:12443:35)
+        at mainFetch (node:internal/deps/undici/undici:13880:22)
+        at fetching (node:internal/deps/undici/undici:13867:7)
+        at fetch (node:internal/deps/undici/undici:13728:20)
+        at fetch (node:internal/deps/undici/undici:18606:10)
+        at fetch (node:internal/bootstrap/web/exposed-window-or-worker:83:12)
+        at StreamableHTTPClientTransport.send (file:///<worktree>/gateway/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js:307:58)
+  }
+
+Final post-blocker full rerun (separate actual execution): 464 tests,463 pass,0 fail,0 cancelled,1 skip; exit0;352041.6408ms.
+No read-pinning assertion/setup changes. The first full failure root cause is not established.

@@ -1,0 +1,3661 @@
+{
+ "startedAt": "2026-10-12T23:59:21.637Z",
+ "completedAt": "2026-10-13T00:02:42.627Z",
+ "pairsPerCategory": 20,
+ "serial": true,
+ "interleaved": true,
+ "summary": {
+  "general": {
+   "baseline": {
+    "n": 20,
+    "errors": 0,
+    "zero": 18,
+    "multiEngine": 2,
+    "p50": 629,
+    "p95": 3007,
+    "max": 3007,
+    "sourceCounts": {
+     "yandex": 2
+    },
+    "failureCounts": {
+     "quark: 暂停服务: 验证码": 20,
+     "yandex: 暂停服务: 超时": 10,
+     "yandex: 超时": 8
+    }
+   },
+   "pool": {
+    "n": 20,
+    "errors": 0,
+    "zero": 17,
+    "multiEngine": 3,
+    "p50": 187,
+    "p95": 3007,
+    "max": 3008,
+    "sourceCounts": {
+     "yandex": 3
+    },
+    "failureCounts": {
+     "quark: 验证码": 2,
+     "quark: 暂停服务: 验证码": 18,
+     "yandex: 超时": 5,
+     "yandex: 暂停服务: 超时": 12
+    }
+   }
+  },
+  "news": {
+   "baseline": {
+    "n": 20,
+    "errors": 0,
+    "zero": 20,
+    "multiEngine": 0,
+    "p50": 298,
+    "p95": 443,
+    "max": 3005,
+    "sourceCounts": {},
+    "failureCounts": {
+     "chinaso news: 超时": 1,
+     "quark: 暂停服务: 验证码": 20,
+     "yandex: 暂停服务: 超时": 20
+    }
+   },
+   "pool": {
+    "n": 20,
+    "errors": 0,
+    "zero": 14,
+    "multiEngine": 6,
+    "p50": 496,
+    "p95": 3006,
+    "max": 3007,
+    "sourceCounts": {
+     "yandex": 6
+    },
+    "failureCounts": {
+     "quark: 暂停服务: 验证码": 20,
+     "yandex: 超时": 10,
+     "yandex: 暂停服务: 超时": 10
+    }
+   }
+  },
+  "strict": {
+   "baseline": {
+    "n": 20,
+    "errors": 0,
+    "zero": 20,
+    "multiEngine": 0,
+    "p50": 3,
+    "p95": 4,
+    "max": 4,
+    "sourceCounts": {},
+    "failureCounts": {
+     "quark: 暂停服务: 验证码": 20,
+     "yandex: 暂停服务: 超时": 1
+    }
+   },
+   "pool": {
+    "n": 20,
+    "errors": 0,
+    "zero": 20,
+    "multiEngine": 0,
+    "p50": 3,
+    "p95": 4,
+    "max": 4,
+    "sourceCounts": {},
+    "failureCounts": {
+     "quark: 暂停服务: 验证码": 20
+    }
+   }
+  }
+ },
+ "raw": [
+  {
+   "category": "general",
+   "pair": 0,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:21.637Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 1442,
+   "resultCount": 15,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 0,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:23.982Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 1477,
+   "resultCount": 15,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "验证码"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 1,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:26.361Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3008,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 1,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:30.270Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 241,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 2,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:31.413Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 237,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 2,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:32.552Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3007,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 3,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:36.461Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 180,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 3,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:37.543Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 182,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 4,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:38.627Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 249,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 4,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:39.777Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 1436,
+   "resultCount": 15,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 5,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:42.114Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 1440,
+   "resultCount": 15,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 5,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:44.455Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 6,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:48.362Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3007,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 6,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:52.269Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 187,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 7,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:53.357Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 172,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 7,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-12T23:59:54.431Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 241,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 8,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:55.572Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 181,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 8,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-12T23:59:56.656Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3004,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 9,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:00.561Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 179,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 9,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:01.641Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 10,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:05.548Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3007,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 10,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:09.456Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 358,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 11,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:10.714Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 184,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 11,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:11.800Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 231,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 12,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:12.932Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 12,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:16.838Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 186,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 13,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:17.924Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 181,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 13,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:19.006Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 1412,
+   "resultCount": 15,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 14,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:21.319Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3007,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 14,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:25.228Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3005,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 15,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:29.134Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 171,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 15,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:30.205Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 629,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 16,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:31.737Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 16,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:35.644Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 240,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 17,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:36.786Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 176,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 17,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:37.863Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 174,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 18,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:38.936Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 18,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:42.843Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 187,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 19,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:43.931Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN",
+    "engines": "yandex,quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "general",
+   "pair": 19,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:47.838Z",
+   "params": {
+    "q": "中国 经济 政策",
+    "format": "json",
+    "categories": "general",
+    "language": "zh-CN"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 181,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 0,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:48.919Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3005,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "chinaso news",
+     "reason": "超时"
+    },
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 0,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:52.825Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3007,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 1,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:56.732Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 281,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 1,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:00:57.914Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 364,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 2,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:00:59.179Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 304,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 2,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:00.385Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3005,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 3,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:04.291Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 295,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 3,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:05.488Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 319,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 4,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:06.708Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 298,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 4,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:07.907Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3005,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 5,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:11.814Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 278,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 5,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:12.993Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 306,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 6,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:14.201Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 299,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 6,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:15.401Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3005,
+   "resultCount": 10,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 7,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:19.309Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 267,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 7,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:20.478Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 304,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 8,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:21.682Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 296,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 8,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:22.879Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3006,
+   "resultCount": 10,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 9,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:26.785Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 304,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 9,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:27.990Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 282,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 10,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:29.173Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 443,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 10,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:30.517Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3004,
+   "resultCount": 10,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 11,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:34.422Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 308,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 11,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:35.630Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 283,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 12,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:36.814Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 286,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 12,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:38.001Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3004,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 13,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:41.907Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 276,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 13,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:43.084Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 296,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 14,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:44.280Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 288,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 14,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:45.469Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3005,
+   "resultCount": 10,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 15,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:49.373Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 404,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 15,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:50.678Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 294,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 16,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:51.874Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 284,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 16,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:53.059Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3004,
+   "resultCount": 10,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 17,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:56.964Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 400,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 17,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:01:58.265Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 401,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 18,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:01:59.567Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 405,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 18,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:00.873Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3004,
+   "resultCount": 10,
+   "producingEngines": [
+    "yandex"
+   ],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 19,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:04.777Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en",
+    "engines": "yandex,quark,chinaso news"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 496,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "news",
+   "pair": 19,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:06.174Z",
+   "params": {
+    "q": "SearXNG documentation",
+    "format": "json",
+    "categories": "news",
+    "language": "en"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 298,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 0,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:07.373Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    },
+    {
+     "engine": "yandex",
+     "reason": "暂停服务: 超时"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 0,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:08.277Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 1,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:09.180Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 1,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:10.085Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 2,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:10.989Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 2,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:11.894Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 3,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:12.798Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 3,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:13.702Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 4,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:14.606Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 4,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:15.511Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 5,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:16.415Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 5,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:17.318Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 6,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:18.221Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 6,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:19.124Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 7,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:20.027Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 7,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:20.932Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 8,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:21.836Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 8,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:22.740Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 9,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:23.644Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 9,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:24.548Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 10,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:25.452Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 10,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:26.356Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 11,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:27.259Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 11,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:28.163Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 12,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:29.068Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 12,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:29.972Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 13,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:30.876Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 13,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:31.779Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 14,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:32.683Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 14,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:33.586Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 15,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:34.491Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 15,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:35.395Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 16,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:36.299Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 16,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:37.203Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 17,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:38.108Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 17,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:39.011Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 18,
+   "arm": "baseline",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:39.916Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 18,
+   "arm": "pool",
+   "order": [
+    "baseline",
+    "pool"
+   ],
+   "startedAt": "2026-10-13T00:02:40.819Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 4,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 19,
+   "arm": "pool",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:41.723Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day",
+    "engines": "quark"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  },
+  {
+   "category": "strict",
+   "pair": 19,
+   "arm": "baseline",
+   "order": [
+    "pool",
+    "baseline"
+   ],
+   "startedAt": "2026-10-13T00:02:42.627Z",
+   "params": {
+    "q": "Federal Reserve interest rate decision",
+    "format": "json",
+    "categories": "general",
+    "language": "en",
+    "time_range": "day"
+   },
+   "httpStatus": 200,
+   "elapsedMs": 3,
+   "resultCount": 0,
+   "producingEngines": [],
+   "unresponsiveEngines": [
+    {
+     "engine": "quark",
+     "reason": "暂停服务: 验证码"
+    }
+   ]
+  }
+ ]
+}

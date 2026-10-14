@@ -315,6 +315,198 @@ test('long E4-only free recall leaves bounded publisher-read shares for real pro
   assert.deepEqual(result.results.find(item => item.url.endsWith('/paid/a')).providers, ['baidu', 'aliyun']);
 });
 
+function pageWorkFixture(t) {
+  let clock = performance.now();
+  const timers = [];
+  const pageWork = {
+    now: () => clock,
+    setTimeout(callback, delayMs) {
+      const timer = { callback, delayMs, at: clock, canceled: false, fired: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) { timer.canceled = true; },
+  };
+  t.after(() => { for (const timer of timers) pageWork.clearTimeout(timer); });
+  return { pageWork, timers, advanceTo: value => { clock = value; }, fire(timer) {
+    assert.equal(timer.canceled || timer.fired, false, 'only a pending PAGE timer can fire');
+    timer.fired = true;
+    timer.callback();
+  } };
+}
+
+async function pendingPageFixture(t) {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const timing = pageWorkFixture(t);
+  const router = createProviderRouting({ now: () => NOW, budget, pageTimeoutMs: 30,
+    estimateCostCents: name => name === 'baidu' ? 0 : 1,
+    providers: [providerFixture('baidu', budget, calls, ['https://publisher.example/paid/a']),
+      providerFixture('aliyun', budget, calls, ['https://publisher.example/paid/b'])] }, { pageWork: timing.pageWork });
+  const before = budget.snapshot();
+  const urls = [];
+  const release = [];
+  let active = 0;
+  let maximum = 0;
+  let aborted = 0;
+  let entered;
+  const twoEntered = new Promise(resolve => { entered = resolve; });
+  const operation = router.search({ input: { query: 'controlled report', time_range: 'day' }, strict: true,
+    signal: new AbortController().signal, deadlineAt: performance.now() + 30000,
+    results: Array.from({ length: 6 }, (_, index) => ({ ...recall[0], url: `https://publisher.example/pending/${index}` })),
+    verifyPage: (candidate, { signal }) => {
+      urls.push(candidate.url);
+      active++;
+      maximum = Math.max(maximum, active);
+      // Erroneously admitted fallback completes immediately so the RED cannot hang.
+      if (candidate.url.includes('/paid/')) { active--; return publisherPage(candidate); }
+      return new Promise((resolve, reject) => {
+        const abort = () => { active--; aborted++; reject(new Error('offline abort')); };
+        signal.addEventListener('abort', abort, { once: true });
+        release.push(() => { signal.removeEventListener('abort', abort); active--; resolve(publisherPage(candidate)); });
+        if (urls.length === 2) entered();
+      });
+    } });
+  await twoEntered;
+  return { router, budget, before, calls, timing, operation, release, observation: () => ({
+    reads: urls.length, urls, active, maximum, aborted, provider_calls: calls.length,
+    sends: calls, before_budget: before, after_budget: budget.snapshot(),
+    page_timers: timing.timers.map(({ delayMs, canceled, fired }) => ({ delayMs, canceled, fired })),
+  }) };
+}
+
+async function timerStopControl(t, elapsedMs) {
+  const fixture = await pendingPageFixture(t);
+  const { timing, operation, before } = fixture;
+  assert.equal(timing.timers[0].delayMs, 30);
+  timing.advanceTo(timing.timers[0].at + elapsedMs);
+  timing.fire(timing.timers[0]);
+  const result = await operation;
+  const observed = fixture.observation();
+  t.diagnostic(JSON.stringify({ control_elapsed_ms: elapsedMs, ...observed, page_verification: result.page_verification,
+    attempts: result.provider_attempts, results: result.results }));
+  assert.deepEqual({ reads: observed.reads, provider_calls: observed.provider_calls, budget: observed.after_budget },
+    { reads: 2, provider_calls: 0, budget: before }, 'PAGE stop forbids new reads, sends and reservations');
+  assert.equal(observed.maximum, 2);
+  assert.equal(observed.active, 0);
+  assert.equal(observed.aborted, 2);
+  assert.equal(result.page_verification.read_attempts, 2);
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(result.provider_attempts, [{ provider: 'baidu', status: 'verification_budget_exhausted' },
+    { provider: 'aliyun', status: 'verification_budget_exhausted' }]);
+  assert.equal(timing.timers.length, 1, 'stopped search never begins another PAGE batch');
+  assert.ok(timing.timers.every(timer => timer.canceled));
+  return fixture;
+}
+
+test('PAGE timer stop is sticky with residual elapsed budget', async t => {
+  await timerStopControl(t, 29);
+});
+
+test('PAGE timer stop with elapsed budget exhausted remains closed', async t => {
+  await timerStopControl(t, 31);
+});
+
+test('PAGE deadline polling stops pending work without timer delivery', async t => {
+  const fixture = await pendingPageFixture(t);
+  const { timing, release, operation, before } = fixture;
+  timing.advanceTo(timing.timers[0].at + 31);
+  release[0]();
+  const result = await operation;
+  const observed = fixture.observation();
+  t.diagnostic(JSON.stringify({ deadline_polling: true, ...observed, page_verification: result.page_verification }));
+  assert.equal(observed.reads, 2);
+  assert.equal(observed.maximum, 2);
+  assert.equal(observed.active, 0);
+  assert.equal(observed.aborted, 1);
+  assert.equal(observed.provider_calls, 0);
+  assert.deepEqual(observed.after_budget, before);
+  assert.deepEqual(result.results, [], 'late publisher proof is unusable');
+  assert.equal(result.page_verification.read_attempts, 2);
+  assert.ok(result.page_verification.read_failures.every(item => item.error_kind === 'timeout'));
+  assert.deepEqual(result.provider_attempts, [{ provider: 'baidu', status: 'verification_budget_exhausted' },
+    { provider: 'aliyun', status: 'verification_budget_exhausted' }]);
+  assert.equal(timing.timers.length, 1);
+  assert.equal(timing.timers[0].fired, false);
+  assert.equal(timing.timers[0].canceled, true);
+});
+
+test('ordinary PAGE completion leaves fallback and current publisher proof available', async t => {
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const timing = pageWorkFixture(t);
+  const router = createProviderRouting({ now: () => NOW, budget, pageTimeoutMs: 30,
+    estimateCostCents: name => name === 'baidu' ? 0 : 1,
+    providers: [providerFixture('baidu', budget, calls, ['https://publisher.example/paid/a']),
+      providerFixture('aliyun', budget, calls, ['https://publisher.example/paid/b'])] }, { pageWork: timing.pageWork });
+  let reads = 0;
+  const candidates = [recall[0], ...['mismatch', 'stale', 'undated'].map(name => ({ ...recall[0], url: `https://publisher.example/${name}` }))];
+  const search = () => router.search({ input: { query: 'ordinary report', time_range: 'day' }, strict: true,
+    deadlineAt: performance.now() + 30000, results: candidates, verifyPage: candidate => {
+      reads++;
+      if (candidate.url.endsWith('/mismatch')) return publisherPage(candidate, 'https://other.example/unrelated');
+      if (candidate.url.endsWith('/stale')) return extractPageEvidence('<meta property="article:published_time" content="2026-10-10T10:00:00Z">',
+        candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true });
+      if (candidate.url.endsWith('/undated')) return extractPageEvidence('<article>Undated report</article>',
+        candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true });
+      if (candidate.url.endsWith('/paid/a')) return extractPageEvidence('<time itemprop="datePublished" datetime="2026-10-13T10:00:00Z">Published</time>',
+        candidate.url, {}, new Date(NOW).toISOString(), { chinesePublicationDates: true });
+      return publisherPage(candidate);
+    } });
+  const result = await search();
+  assert.deepEqual(calls.map(item => item.name), ['baidu', 'aliyun']);
+  assert.equal(calls[0].usage.providers.baidu.dailyCalls, 1);
+  assert.equal(calls[1].usage.providers.aliyun.monthlyCents, 1);
+  assert.deepEqual(result.results.map(item => item.url), [recall[0].url, 'https://publisher.example/paid/a', 'https://publisher.example/paid/b']);
+  assert.deepEqual(result.results.map(item => item.date_level), ['E1', 'E2', 'E1']);
+  assert.ok(result.results.every(item => item.state === 'verified' && item.published_at === '2026-10-13T10:00:00.000Z' &&
+    item.spec82_evidence.evidence_url === item.url));
+  assert.equal(result.page_verification.binding_failures[0].code, 'page_identity_mismatch');
+  assert.equal(result.page_verification.read_attempts, 6);
+  assert.equal(timing.timers.length, 3, 'ordinary completion permits subsequent PAGE batches');
+  const beforeCache = budget.snapshot();
+  const cached = await search();
+  assert.equal(reads, 7, 'only the rejected identity is reread; bound PAGE evidence uses cache');
+  assert.equal(cached.page_verification.read_attempts, 1);
+  assert.equal(calls.length, 2, 'canonical cache hit does not resend');
+  assert.deepEqual(cached.provider_attempts.map(item => item.status), ['cache_hit', 'cache_hit']);
+  assert.deepEqual(budget.snapshot(), beforeCache);
+  assert.ok(timing.timers.every(timer => timer.canceled && !timer.fired));
+});
+
+test('PAGE exhaustion does not stop a later search on the same router', async t => {
+  const fixture = await timerStopControl(t, 29);
+  const { router, calls, budget } = fixture;
+  const result = await router.search({ input: { query: 'later report', time_range: 'day' }, strict: true,
+    deadlineAt: performance.now() + 30000, results: recall, verifyPage: publisherPage });
+  assert.equal(result.results.length, 3);
+  assert.equal(result.page_verification.read_attempts, 3);
+  assert.ok(result.results.every(item => item.state === 'verified' && ['E1', 'E2'].includes(item.date_level)));
+  assert.deepEqual(calls.map(item => item.name), ['baidu', 'aliyun']);
+  assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1);
+  assert.equal(budget.snapshot().providers.aliyun.monthlyCents, 1);
+});
+
+test('PAGE construction dependencies require a complete trio and never control provider dispatch clocks', async t => {
+  assert.equal(typeof createProviderRouting().search, 'function');
+  assert.equal(typeof createProviderRouting({}, {}).search, 'function');
+  for (const pageWork of [undefined, null, {}, { now: () => 0 }, { now: () => 0, setTimeout },
+    { now: 0, setTimeout, clearTimeout }, { now: () => 0, setTimeout: null, clearTimeout },
+    { now: () => 0, setTimeout, clearTimeout: false }]) {
+    assert.throws(() => createProviderRouting({}, { pageWork }), TypeError);
+  }
+  const { budget } = await ledgerFixture(t);
+  const calls = [];
+  const unexpected = () => { throw new Error('PAGE seam must not run during provider dispatch'); };
+  const router = createProviderRouting({ now: () => NOW, budget, estimateCostCents: () => 0,
+    providers: [providerFixture('baidu', budget, calls, [recall[0].url])] },
+  { pageWork: { now: unexpected, setTimeout: unexpected, clearTimeout: unexpected } });
+  assert.equal((await router.dispatch({ provider: 'baidu', query: 'native clock' })).attempts[0].status, 'success');
+  assert.equal((await router.dispatch({ provider: 'baidu', query: 'overdue', deadlineAt: performance.now() - 1 })).attempts[0].status, 'timeout');
+  assert.equal(calls.length, 1);
+  assert.equal(budget.snapshot().providers.baidu.dailyCalls, 1);
+});
+
 test('overdue PAGE deadline stops microtask-queued reads before delayed abort timers run', async t => {
   const { budget } = await ledgerFixture(t);
   const calls = [];

@@ -35,9 +35,10 @@ async function fixture(t, { listenOptions = {}, launch = spawn } = {}) {
   const diagnostics = error => {
     if (error) {
       connectionCause = 'unknown'; connectionCode = 'unknown';
-      for (let depth = 0; error && depth <= 2; depth++, error = error.cause) {
+      for (let depth = 0; error && depth <= 2; depth++) {
         if (error.message === 'bad port') connectionCause = 'bad_port';
         if (codes.has(error.code)) connectionCode = error.code;
+        if (depth < 2) error = error.cause;
       }
     }
     return JSON.stringify({ ports, connection_cause: connectionCause, connection_code: connectionCode, mcp_tool_attempts: toolAttempts, origin_requests: received.length });

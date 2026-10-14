@@ -138,7 +138,12 @@ export function createSearchProviderRuntime({ env = process.env, databasePath = 
 }
 
 export function createProviderRouting({ now = Date.now, providers = [], budget, estimateCostCents, unavailable = {},
-  maxCandidates = 20, pageTimeoutMs = 10000 } = {}) {
+  maxCandidates = 20, pageTimeoutMs = 10000 } = {}, dependencies = {}) {
+  // Construction-only PAGE dependencies; caller/provider deadlines keep their native clock.
+  const pageWork = Object.hasOwn(dependencies, 'pageWork') ? dependencies.pageWork : {
+    now: () => performance.now(), setTimeout: (callback, delay) => setTimeout(callback, delay), clearTimeout: timer => clearTimeout(timer),
+  };
+  if (!pageWork || ['now', 'setTimeout', 'clearTimeout'].some(key => typeof pageWork[key] !== 'function')) throw new TypeError('invalid page work dependencies');
   if (!Number.isInteger(maxCandidates) || maxCandidates < 10 || maxCandidates > 20 ||
       !Number.isInteger(pageTimeoutMs) || pageTimeoutMs < 1 || pageTimeoutMs > 10000) throw new TypeError('invalid page limits');
   const costs = Object.fromEntries(providers.map(provider => {
@@ -241,6 +246,7 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
       const attempts = [];
       let reads = 0;
       let pageRemainingMs = pageTimeoutMs;
+      let pageStopped = false;
       const pageLimit = strict ? Math.min(maxCandidates, input.news_max_reads ?? maxCandidates) : 20;
       const readFailures = [];
       const bindingFailures = [];
@@ -258,6 +264,7 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
         }
       }
       async function evaluate() {
+        if (strict && pageStopped) return;
         const pending = [...candidates].filter(([key]) => !evaluated.has(key));
         const controller = new AbortController();
         const pageSignal = AbortSignal.any([signal, controller.signal]);
@@ -286,13 +293,19 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
           }
           return { page, finalUrl };
         }
-        const started = performance.now();
+        const started = pageWork.now();
         const pageDeadline = Math.min(deadlineAt, started + pageRemainingMs);
+        const stopPageWork = () => {
+          // Timer delivery is terminal even if the elapsed debit would leave a residue.
+          pageStopped = true;
+          pageRemainingMs = 0;
+          controller.abort();
+        };
         const pageExpired = () => {
-          if (performance.now() >= pageDeadline) controller.abort();
+          if (pageStopped || pageWork.now() >= pageDeadline || performance.now() >= deadlineAt) stopPageWork();
           return pageSignal.aborted;
         };
-        const timer = setTimeout(() => controller.abort(), Math.max(1, pageDeadline - started));
+        const timer = pageWork.setTimeout(stopPageWork, Math.max(1, pageDeadline - started));
         let index = 0;
         async function worker() {
           while (index < pending.length) {
@@ -349,7 +362,13 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
           }
         }
         try { await Promise.all([worker(), worker()]); }
-        finally { clearTimeout(timer); if (strict) pageRemainingMs = Math.max(0, pageRemainingMs - (performance.now() - started)); }
+        finally {
+          pageWork.clearTimeout(timer);
+          if (strict) {
+            pageRemainingMs = pageStopped ? 0 : Math.max(0, pageRemainingMs - (pageWork.now() - started));
+            if (pageRemainingMs === 0) stopPageWork();
+          }
+        }
       }
       function fusedResults() {
         const unique = new Map();
@@ -380,7 +399,7 @@ export function createProviderRouting({ now = Date.now, providers = [], budget, 
         if (signal?.aborted || performance.now() >= deadlineAt) { attempts.push({ provider: name, status: 'timeout' }); return; }
         const dispatcher = dispatchers.get(name);
         if (!dispatcher) { attempts.push({ provider: name, status: unavailable[name] ?? 'provider_unconfigured' }); return; }
-        if (candidates.size >= pageLimit || (strict && (pageRemainingMs <= 0 || typeof verifyPage !== 'function'))) {
+        if (candidates.size >= pageLimit || (strict && (pageStopped || pageRemainingMs <= 0 || typeof verifyPage !== 'function'))) {
           attempts.push({ provider: name, status: 'verification_budget_exhausted' }); return;
         }
         const response = await dispatchOne({ provider: name, query: input.query,

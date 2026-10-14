@@ -11,6 +11,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { evaluateCase } from './eval-case.mjs';
 import { DEADLINE_KINDS, summarizeCases } from './eval-core.mjs';
+import { listenHttp } from './fixtures/safe-listen.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const fixtureUrl = 'http://deadline.fixture.test';
@@ -21,10 +22,7 @@ const timeoutDefinition = {
 };
 
 async function listen(server, options = {}) {
-  const listening = once(server, 'listening');
-  (options.listen ?? ((server, options) => server.listen(options)))(server, { port: 0, host: '127.0.0.1' });
-  await listening;
-  return server.address().port;
+  return (await listenHttp(server, options)).port;
 }
 
 async function fixture(t, { listenOptions = {} } = {}) {
@@ -67,89 +65,89 @@ async function fixture(t, { listenOptions = {} } = {}) {
   })();
   t.after(cleanup);
   try {
-  origin = http.createServer((req, res) => {
-    received.push({ path: req.url, host: req.headers.host });
-    if (req.url === '/stall') {
-      stalls++;
-      res.writeHead(200, { 'content-type': 'text/html' });
-      res.write('<html><body>');
-      // Keep sending data so only the absolute read deadline can end the read.
-      const interval = setInterval(() => res.write('still waiting '), 40);
-      res.once('close', () => { clearInterval(interval); stalls--; });
-      return;
-    }
-    if (req.url === '/refused') { req.socket.destroy(); return; }
-    if (req.url === '/redirect-private') {
-      res.writeHead(302, { location: 'http://127.0.0.1/' }); res.end(); return;
-    }
-    res.writeHead(200, { 'content-type': req.url === '/json' ? 'application/json' : req.url === '/unsupported' ? 'image/png' : 'text/html' });
-    res.end(req.url === '/json' ? '{"ok":true}' : req.url === '/unsupported' ? 'not html' : '<html><head><title>Fixture ready</title></head><body><h1>Gateway recovered</h1><p>A valid offline page after the stalled read.</p></body></html>');
-  });
-  origin.on('connection', track);
-  const originPort = ports.origin = await listen(origin, listenOptions.origin);
-  proxy = http.createServer();
-  proxy.on('connection', track);
-  proxy.on('connect', (req, downstream, head) => {
-    assert.ok(['deadline.fixture.test:80', '93.184.216.34:80'].includes(req.url), diagnostics());
-    const upstream = net.connect(originPort, '127.0.0.1');
-    track(upstream);
-    upstream.once('connect', () => {
-      downstream.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-      if (head.length) upstream.write(head);
-      downstream.pipe(upstream); upstream.pipe(downstream);
+    origin = http.createServer((req, res) => {
+      received.push({ path: req.url, host: req.headers.host });
+      if (req.url === '/stall') {
+        stalls++;
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.write('<html><body>');
+        // Keep sending data so only the absolute read deadline can end the read.
+        const interval = setInterval(() => res.write('still waiting '), 40);
+        res.once('close', () => { clearInterval(interval); stalls--; });
+        return;
+      }
+      if (req.url === '/refused') { req.socket.destroy(); return; }
+      if (req.url === '/redirect-private') {
+        res.writeHead(302, { location: 'http://127.0.0.1/' }); res.end(); return;
+      }
+      res.writeHead(200, { 'content-type': req.url === '/json' ? 'application/json' : req.url === '/unsupported' ? 'image/png' : 'text/html' });
+      res.end(req.url === '/json' ? '{"ok":true}' : req.url === '/unsupported' ? 'not html' : '<html><head><title>Fixture ready</title></head><body><h1>Gateway recovered</h1><p>A valid offline page after the stalled read.</p></body></html>');
     });
-    downstream.on('error', () => upstream.destroy());
-    upstream.on('error', () => downstream.destroy());
-    downstream.once('close', () => upstream.destroy());
-    upstream.once('close', () => downstream.destroy());
-  });
-  const proxyPort = ports.proxy = await listen(proxy, listenOptions.proxy);
-  reservation = net.createServer();
-  const gatewayPort = ports.gateway = await listen(reservation, listenOptions.gateway);
-  await close(reservation);
-  // Synthetic fixture authentication only; never read live credentials.
-  const authentication = 'offline-fixture-only-not-a-live-credential-0000000000';
-  child = spawn(process.execPath, ['--import', new URL('./test-fixtures/read-deadline-import.mjs', import.meta.url).href, path.join(directory, 'server.mjs')], {
-    cwd: directory,
-    env: {
-      PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
-      GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1',
-      GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(gatewayPort),
-      GATEWAY_TOKEN: authentication, EGRESS_PROXY: `http://127.0.0.1:${proxyPort}`,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  exited = new Promise(resolve => child.once('close', resolve));
-  let ready = false; let markerTail = '';
-  const marker = 'web-access-gateway listening';
-  child.stdout.on('data', chunk => {
-    // Retain only the matching marker prefix, never child logs or credentials.
-    for (const character of chunk.toString()) {
-      markerTail += character;
-      while (markerTail && !marker.startsWith(markerTail)) markerTail = markerTail.slice(1);
-      if (markerTail === marker) { ready = true; markerTail = ''; }
+    origin.on('connection', track);
+    const originPort = ports.origin = await listen(origin, listenOptions.origin);
+    proxy = http.createServer();
+    proxy.on('connection', track);
+    proxy.on('connect', (req, downstream, head) => {
+      assert.ok(['deadline.fixture.test:80', '93.184.216.34:80'].includes(req.url), diagnostics());
+      const upstream = net.connect(originPort, '127.0.0.1');
+      track(upstream);
+      upstream.once('connect', () => {
+        downstream.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (head.length) upstream.write(head);
+        downstream.pipe(upstream); upstream.pipe(downstream);
+      });
+      downstream.on('error', error => { diagnostics(error); upstream.destroy(); });
+      upstream.on('error', error => { diagnostics(error); downstream.destroy(); });
+      downstream.once('close', () => upstream.destroy());
+      upstream.once('close', () => downstream.destroy());
+    });
+    const proxyPort = ports.proxy = await listen(proxy, listenOptions.proxy);
+    reservation = net.createServer();
+    const gatewayPort = ports.gateway = await listen(reservation, listenOptions.gateway);
+    await close(reservation);
+    // Synthetic fixture authentication only; never read live credentials.
+    const authentication = 'offline-fixture-only-not-a-live-credential-0000000000';
+    child = spawn(process.execPath, ['--import', new URL('./test-fixtures/read-deadline-import.mjs', import.meta.url).href, path.join(directory, 'server.mjs')], {
+      cwd: directory,
+      env: {
+        PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+        GATEWAY_HOST: '127.0.0.1', GATEWAY_BIND_HOST: '127.0.0.1',
+        GATEWAY_ALLOWED_HOSTS: '127.0.0.1', GATEWAY_PORT: String(gatewayPort),
+        GATEWAY_TOKEN: authentication, EGRESS_PROXY: `http://127.0.0.1:${proxyPort}`,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    exited = new Promise(resolve => child.once('close', resolve));
+    let ready = false; let markerTail = '';
+    const marker = 'web-access-gateway listening';
+    child.stdout.on('data', chunk => {
+      // Retain only the matching marker prefix, never child logs or credentials.
+      for (const character of chunk.toString()) {
+        markerTail += character;
+        while (markerTail && !marker.startsWith(markerTail)) markerTail = markerTail.slice(1);
+        if (markerTail === marker) { ready = true; markerTail = ''; }
+      }
+    });
+    child.stderr.on('data', () => {});
+    child.on('error', error => diagnostics(error));
+    const startup = performance.now();
+    while (!ready) {
+      assert.equal(child.exitCode, null, diagnostics());
+      assert.ok(performance.now() - startup < 5000, diagnostics());
+      await delay(20);
     }
-  });
-  child.stderr.on('data', () => {});
-  child.on('error', error => diagnostics(error));
-  const startup = performance.now();
-  while (!ready) {
-    assert.equal(child.exitCode, null, diagnostics());
-    assert.ok(performance.now() - startup < 5000, diagnostics());
-    await delay(20);
-  }
-  client = new Client({ name: 'offline-timeout-fixture', version: '1.0.0' });
-  transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${gatewayPort}/mcp`), { requestInit: { headers: { authorization: `Bearer ${authentication}` } } });
-  await client.connect(transport);
-  const read = async url => {
-    const started = performance.now();
-    toolAttempts++;
-    try {
-      const result = await client.callTool({ name: 'web_read', arguments: { url, render: 'never', output: 'markdown' } }, undefined, { timeout: 3000 });
-      return { payload: result.structuredContent ?? JSON.parse(result.content[0].text), isError: result.isError, total_ms: Math.round(performance.now() - started) };
-    } catch (error) { throw failure(error); }
-  };
-  return { read, received, ports, cleanup, activeStalls: () => stalls, logs: diagnostics };
+    client = new Client({ name: 'offline-timeout-fixture', version: '1.0.0' });
+    transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${gatewayPort}/mcp`), { requestInit: { headers: { authorization: `Bearer ${authentication}` } } });
+    await client.connect(transport);
+    const read = async url => {
+      const started = performance.now();
+      toolAttempts++;
+      try {
+        const result = await client.callTool({ name: 'web_read', arguments: { url, render: 'never', output: 'markdown' } }, undefined, { timeout: 3000 });
+        return { payload: result.structuredContent ?? JSON.parse(result.content[0].text), isError: result.isError, total_ms: Math.round(performance.now() - started) };
+      } catch (error) { throw failure(error); }
+    };
+    return { read, received, ports, cleanup, activeStalls: () => stalls, logs: diagnostics };
   } catch (error) {
     await cleanup();
     throw failure(error);

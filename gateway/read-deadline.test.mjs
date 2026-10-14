@@ -392,3 +392,35 @@ test('fixture MCP connect rejection reaches real POST and redacts dependency dat
   assert.equal(child.stderr.destroyed, true);
   await checkFixturePort(gatewayPort);
 });
+
+test('fixture diagnostics stop after two causes without reading deeper getters', { timeout: 15000 }, async () => {
+  for (const { codes, expected } of [
+    { codes: ['EPIPE', 'EACCES', 'ECONNRESET'], expected: 'ECONNRESET' },
+    { codes: [sentinel, sentinel, sentinel], expected: 'unknown' },
+  ]) {
+    const reads = []; const hooks = []; const servers = [];
+    const chain = codes.map(code => Object.assign(new Error(sentinel), { code }));
+    const hidden = Object.assign(new Error('bad port'), { code: 'ETIMEDOUT' });
+    for (let level = 0; level < chain.length; level++) {
+      Object.defineProperty(chain[level], 'cause', { get() {
+        reads.push(level + 1);
+        return chain[level + 1] ?? hidden;
+      } });
+    }
+    try {
+      await assert.rejects(fixture({ after: hook => hooks.push(hook) }, { listenOptions: {
+        origin: { listen: server => { servers.push(server); throw chain[0]; } },
+      } }), error => {
+        safeFailure(error, expected, 0, 0);
+        assert.equal(JSON.parse(error.message).connection_cause, 'unknown');
+        return true;
+      });
+    } finally {
+      for (const hook of hooks) await hook();
+    }
+    assert.deepEqual(reads, [1, 2], 'diagnostics must not access the third cause getter');
+    assert.equal(hooks.length, 1);
+    assert.equal(servers.length, 1);
+    assert.equal(servers[0].listening, false);
+  }
+});

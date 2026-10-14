@@ -20,18 +20,54 @@ const timeoutDefinition = {
   expected_outcome: { kinds: DEADLINE_KINDS },
 };
 
-async function listen(server) {
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+async function listen(server, options = {}) {
+  const listening = once(server, 'listening');
+  (options.listen ?? ((server, options) => server.listen(options)))(server, { port: 0, host: '127.0.0.1' });
+  await listening;
   return server.address().port;
 }
 
-async function fixture(t) {
+async function fixture(t, { listenOptions = {} } = {}) {
   const sockets = new Set();
   const track = socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); };
   const received = [];
+  const ports = { origin: null, proxy: null, gateway: null };
+  let toolAttempts = 0; let connectionCause = 'unknown'; let connectionCode = 'unknown';
+  const codes = new Set(['EADDRINUSE', 'EADDRNOTAVAIL', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ENOENT', 'EACCES', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'WAG_TEST_SAFE_LISTEN_INVALID_OPTIONS', 'WAG_TEST_SAFE_LISTEN_EXHAUSTED']);
+  const diagnostics = error => {
+    if (error) {
+      connectionCause = 'unknown'; connectionCode = 'unknown';
+      for (let depth = 0; error && depth <= 2; depth++, error = error.cause) {
+        if (error.message === 'bad port') connectionCause = 'bad_port';
+        if (codes.has(error.code)) connectionCode = error.code;
+      }
+    }
+    return JSON.stringify({ ports, connection_cause: connectionCause, connection_code: connectionCode, mcp_tool_attempts: toolAttempts, origin_requests: received.length });
+  };
+  const failure = error => {
+    const safe = new Error(diagnostics(error));
+    safe.stack = `Error: ${safe.message}`;
+    return safe;
+  };
   let stalls = 0;
-  const origin = http.createServer((req, res) => {
+  let origin; let proxy; let reservation; let child; let exited; let client; let transport; let closing;
+  const close = server => !server?.listening ? Promise.resolve() : new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  const cleanup = () => closing ??= (async () => {
+    let error;
+    const attempt = async action => { try { await action(); } catch (cause) { error ??= cause; } };
+    await attempt(() => client?.close());
+    await attempt(() => transport?.close());
+    await attempt(async () => {
+      if (child && child.exitCode === null && child.signalCode === null) child.kill();
+      await exited;
+    });
+    for (const socket of sockets) socket.destroy();
+    await Promise.all([origin, proxy, reservation].map(server => attempt(() => close(server))));
+    if (error) throw failure(error);
+  })();
+  t.after(cleanup);
+  try {
+  origin = http.createServer((req, res) => {
     received.push({ path: req.url, host: req.headers.host });
     if (req.url === '/stall') {
       stalls++;
@@ -50,11 +86,11 @@ async function fixture(t) {
     res.end(req.url === '/json' ? '{"ok":true}' : req.url === '/unsupported' ? 'not html' : '<html><head><title>Fixture ready</title></head><body><h1>Gateway recovered</h1><p>A valid offline page after the stalled read.</p></body></html>');
   });
   origin.on('connection', track);
-  const originPort = await listen(origin);
-  const proxy = http.createServer();
+  const originPort = ports.origin = await listen(origin, listenOptions.origin);
+  proxy = http.createServer();
   proxy.on('connection', track);
   proxy.on('connect', (req, downstream, head) => {
-    assert.ok(['deadline.fixture.test:80', '93.184.216.34:80'].includes(req.url), `unexpected fixture authority ${req.url}`);
+    assert.ok(['deadline.fixture.test:80', '93.184.216.34:80'].includes(req.url), diagnostics());
     const upstream = net.connect(originPort, '127.0.0.1');
     track(upstream);
     upstream.once('connect', () => {
@@ -67,13 +103,13 @@ async function fixture(t) {
     downstream.once('close', () => upstream.destroy());
     upstream.once('close', () => downstream.destroy());
   });
-  const proxyPort = await listen(proxy);
-  const reservation = net.createServer();
-  const gatewayPort = await listen(reservation);
-  await new Promise(resolve => reservation.close(resolve));
+  const proxyPort = ports.proxy = await listen(proxy, listenOptions.proxy);
+  reservation = net.createServer();
+  const gatewayPort = ports.gateway = await listen(reservation, listenOptions.gateway);
+  await close(reservation);
   // Synthetic fixture authentication only; never read live credentials.
   const authentication = 'offline-fixture-only-not-a-live-credential-0000000000';
-  const child = spawn(process.execPath, ['--import', new URL('./test-fixtures/read-deadline-import.mjs', import.meta.url).href, path.join(directory, 'server.mjs')], {
+  child = spawn(process.execPath, ['--import', new URL('./test-fixtures/read-deadline-import.mjs', import.meta.url).href, path.join(directory, 'server.mjs')], {
     cwd: directory,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
@@ -83,22 +119,23 @@ async function fixture(t) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let logs = '';
-  child.stdout.on('data', chunk => { logs += chunk; });
-  child.stderr.on('data', chunk => { logs += chunk; });
-  let client; let transport;
-  t.after(async () => {
-    await client?.close().catch(() => {});
-    await transport?.close().catch(() => {});
-    const exited = once(child, 'exit');
-    if (child.exitCode === null) { child.kill(); await exited; }
-    for (const socket of sockets) socket.destroy();
-    await Promise.all([origin, proxy].map(server => new Promise(resolve => server.close(resolve))));
+  exited = new Promise(resolve => child.once('close', resolve));
+  let ready = false; let markerTail = '';
+  const marker = 'web-access-gateway listening';
+  child.stdout.on('data', chunk => {
+    // Retain only the matching marker prefix, never child logs or credentials.
+    for (const character of chunk.toString()) {
+      markerTail += character;
+      while (markerTail && !marker.startsWith(markerTail)) markerTail = markerTail.slice(1);
+      if (markerTail === marker) { ready = true; markerTail = ''; }
+    }
   });
+  child.stderr.on('data', () => {});
+  child.on('error', error => diagnostics(error));
   const startup = performance.now();
-  while (!logs.includes('web-access-gateway listening')) {
-    assert.equal(child.exitCode, null, logs);
-    assert.ok(performance.now() - startup < 5000, `gateway fixture startup exceeded bound: ${logs}`);
+  while (!ready) {
+    assert.equal(child.exitCode, null, diagnostics());
+    assert.ok(performance.now() - startup < 5000, diagnostics());
     await delay(20);
   }
   client = new Client({ name: 'offline-timeout-fixture', version: '1.0.0' });
@@ -106,10 +143,17 @@ async function fixture(t) {
   await client.connect(transport);
   const read = async url => {
     const started = performance.now();
-    const result = await client.callTool({ name: 'web_read', arguments: { url, render: 'never', output: 'markdown' } }, undefined, { timeout: 3000 });
-    return { payload: result.structuredContent ?? JSON.parse(result.content[0].text), isError: result.isError, total_ms: Math.round(performance.now() - started) };
+    toolAttempts++;
+    try {
+      const result = await client.callTool({ name: 'web_read', arguments: { url, render: 'never', output: 'markdown' } }, undefined, { timeout: 3000 });
+      return { payload: result.structuredContent ?? JSON.parse(result.content[0].text), isError: result.isError, total_ms: Math.round(performance.now() - started) };
+    } catch (error) { throw failure(error); }
   };
-  return { read, received, activeStalls: () => stalls, logs: () => logs };
+  return { read, received, ports, cleanup, activeStalls: () => stalls, logs: diagnostics };
+  } catch (error) {
+    await cleanup();
+    throw failure(error);
+  }
 }
 
 test('real gateway deadline reaches a stalled origin, tears down, and allows a subsequent read', { timeout: 15000 }, async t => {
@@ -117,7 +161,7 @@ test('real gateway deadline reaches a stalled origin, tears down, and allows a s
   const record = await evaluateCase({ ...timeoutDefinition, run: () => gateway.read(`${fixtureUrl}/stall`) });
   assert.equal(gateway.received.filter(item => item.path === '/stall').length, 1, gateway.logs());
   assert.equal(gateway.received[0].host, 'deadline.fixture.test');
-  assert.equal(record.status, 'passed', JSON.stringify(record));
+  assert.equal(record.status, 'passed', gateway.logs());
   assert.equal(record.quality.passed, true);
   assert.equal(record.error.kind, 'egress_timeout');
   assert.ok(record.total_ms >= 300 && record.total_ms < 2000, `elapsed ${record.total_ms}ms`);
@@ -125,7 +169,7 @@ test('real gateway deadline reaches a stalled origin, tears down, and allows a s
   while (gateway.activeStalls() && performance.now() - teardown < 1000) await delay(20);
   assert.equal(gateway.activeStalls(), 0, 'gateway must close the stalled origin connection');
   const valid = await evaluateCase({ id: 'recovered-read', tool: 'web_read', run: () => gateway.read(`${fixtureUrl}/valid`), quality: payload => ({ passed: payload.title === 'Fixture ready' && payload.markdown.includes('Gateway recovered') }) });
-  assert.equal(valid.status, 'passed', JSON.stringify(valid));
+  assert.equal(valid.status, 'passed', gateway.logs());
   const summary = summarizeCases([record, valid]);
   assert.equal(summary.success_rate_pct, 100);
   assert.equal(summary.quality_rate_pct, 100);
@@ -155,7 +199,46 @@ test('isolated fixture leaves gateway protocol, credential, port, private and re
     [`${fixtureUrl}/redirect-private`, 'non_public_address'],
   ]) {
     const record = await evaluateCase({ id: 'security', expectation: 'expected_security', expected_outcome: { kinds: ['ssrf_blocked'], blocked_reason: reason }, run: () => gateway.read(url) });
-    assert.equal(record.status, 'passed', JSON.stringify(record));
+    assert.equal(record.status, 'passed', gateway.logs());
   }
   assert.deepEqual(gateway.received.map(item => item.path), ['/redirect-private']);
 });
+
+for (const role of ['origin', 'proxy', 'gateway']) {
+  test(`fixture rejects a forbidden ${role} binding before real MCP deadline and recovery`, { timeout: 15000 }, async t => {
+    const availability = net.createServer();
+    try {
+      const listening = once(availability, 'listening');
+      availability.listen(1719, '127.0.0.1');
+      await listening;
+    } catch {
+      throw new Error('SETUP BLOCKED: fixed fixture port 1719 unavailable');
+    } finally {
+      if (availability.listening) await new Promise(resolve => availability.close(resolve));
+    }
+    let attempts = 0; let forbiddenClosed = false;
+    const gateway = await fixture(t, { listenOptions: { [role]: { listen: (server, options) => {
+      if (attempts === 0) server.once('close', () => { forbiddenClosed = true; });
+      else assert.equal(forbiddenClosed, true, 'forbidden listener must close before rebind');
+      server.listen({ ...options, port: attempts++ === 0 ? 1719 : 0 });
+    } } } });
+    const valid = await gateway.read(`${fixtureUrl}/valid`);
+    assert.equal(valid.payload.title, 'Fixture ready', gateway.logs());
+    const record = await evaluateCase({ ...timeoutDefinition, run: () => gateway.read(`${fixtureUrl}/stall`) });
+    assert.equal(record.status, 'passed', gateway.logs());
+    assert.equal(record.error.kind, 'egress_timeout', gateway.logs());
+    assert.ok(record.total_ms >= 300 && record.total_ms < 2000, gateway.logs());
+    const teardown = performance.now();
+    while (gateway.activeStalls() && performance.now() - teardown < 1000) await delay(20);
+    assert.equal(gateway.activeStalls(), 0, gateway.logs());
+    const recovered = await gateway.read(`${fixtureUrl}/valid`);
+    assert.equal(recovered.payload.title, 'Fixture ready', gateway.logs());
+    assert.deepEqual(gateway.received.map(item => item.path), ['/valid', '/stall', '/valid'], gateway.logs());
+    assert.equal(JSON.parse(gateway.logs()).mcp_tool_attempts, 3, gateway.logs());
+    assert.equal(JSON.parse(gateway.logs()).origin_requests, 3, gateway.logs());
+    t.diagnostic(gateway.logs());
+    assert.notEqual(gateway.ports[role], 1719, gateway.logs());
+    assert.ok(attempts >= 2 && attempts <= 25, gateway.logs());
+    assert.equal(forbiddenClosed, true, gateway.logs());
+  });
+}

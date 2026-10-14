@@ -345,3 +345,50 @@ test('fixture cleanup failure is redacted after all owned listeners close', { ti
     for (const hook of hooks) await hook().catch(() => {});
   }
 });
+
+test('fixture MCP connect rejection reaches real POST and redacts dependency data', { timeout: 15000 }, async () => {
+  const hooks = []; const servers = []; const requests = [];
+  let child; let gatewayPort;
+  const capture = (server, options) => { if (!servers.includes(server)) servers.push(server); server.listen(options); };
+  try {
+    await assert.rejects(fixture({ after: hook => hooks.push(hook) }, {
+      listenOptions: { origin: { listen: capture }, proxy: { listen: capture }, gateway: { listen: capture } },
+      launch: (executable, _args, options) => {
+        gatewayPort = Number(options.env.GATEWAY_PORT);
+        // Observe a real rejected MCP POST over IPC, never retain headers or body.
+        const source = `
+          import http from 'node:http';
+          const sentinel = ${JSON.stringify(sentinel)};
+          const server = http.createServer((req, res) => {
+            process.send({ mcpPost: req.method === 'POST' && req.url === '/mcp', status: 503 }, () => {
+              res.writeHead(503, { 'content-type': 'text/plain', 'x-fixture-private': sentinel });
+              res.end(sentinel);
+            });
+          });
+          server.listen(Number(process.env.GATEWAY_PORT), '127.0.0.1', () => {
+            process.stderr.write(sentinel);
+            process.stdout.write('web-access-gateway listening\\n');
+          });
+        `;
+        child = spawn(executable, ['--input-type=module', '--eval', source], { ...options, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+        child.on('message', message => requests.push(message));
+        return child;
+      },
+    }), error => {
+      safeFailure(error, 'unknown', 0, 0);
+      assert.equal(JSON.parse(error.message).connection_cause, 'unknown');
+      return true;
+    });
+  } finally {
+    for (const hook of hooks) await hook();
+  }
+  assert.deepEqual(requests, [{ mcpPost: true, status: 503 }]);
+  assert.equal(hooks.length, 1);
+  assert.equal(servers.length, 3);
+  for (const server of servers) assert.equal(server.listening, false);
+  assert.ok(child.exitCode !== null || child.signalCode !== null, 'rejected MCP child must terminate');
+  assert.equal(child.connected, false);
+  assert.equal(child.stdout.destroyed, true);
+  assert.equal(child.stderr.destroyed, true);
+  await checkFixturePort(gatewayPort);
+});

@@ -25,7 +25,7 @@ async function listen(server, options = {}) {
   return (await listenHttp(server, options)).port;
 }
 
-async function fixture(t, { listenOptions = {} } = {}) {
+async function fixture(t, { listenOptions = {}, launch = spawn } = {}) {
   const sockets = new Set();
   const track = socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); };
   const received = [];
@@ -107,7 +107,7 @@ async function fixture(t, { listenOptions = {} } = {}) {
     await close(reservation);
     // Synthetic fixture authentication only; never read live credentials.
     const authentication = 'offline-fixture-only-not-a-live-credential-0000000000';
-    child = spawn(process.execPath, ['--import', new URL('./test-fixtures/read-deadline-import.mjs', import.meta.url).href, path.join(directory, 'server.mjs')], {
+    child = launch(process.execPath, ['--import', new URL('./test-fixtures/read-deadline-import.mjs', import.meta.url).href, path.join(directory, 'server.mjs')], {
       cwd: directory,
       env: {
         PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
@@ -162,7 +162,7 @@ test('real gateway deadline reaches a stalled origin, tears down, and allows a s
   assert.equal(record.status, 'passed', gateway.logs());
   assert.equal(record.quality.passed, true);
   assert.equal(record.error.kind, 'egress_timeout');
-  assert.ok(record.total_ms >= 300 && record.total_ms < 2000, `elapsed ${record.total_ms}ms`);
+  assert.ok(record.total_ms >= 300 && record.total_ms < 2000, gateway.logs());
   const teardown = performance.now();
   while (gateway.activeStalls() && performance.now() - teardown < 1000) await delay(20);
   assert.equal(gateway.activeStalls(), 0, 'gateway must close the stalled origin connection');
@@ -202,18 +202,22 @@ test('isolated fixture leaves gateway protocol, credential, port, private and re
   assert.deepEqual(gateway.received.map(item => item.path), ['/redirect-private']);
 });
 
+async function checkFixturePort(port) {
+  const availability = net.createServer();
+  try {
+    const listening = once(availability, 'listening');
+    availability.listen(port, '127.0.0.1');
+    await listening;
+  } catch {
+    throw new Error(`SETUP BLOCKED: fixed fixture port ${port} unavailable`);
+  } finally {
+    if (availability.listening) await new Promise(resolve => availability.close(resolve));
+  }
+}
+
 for (const role of ['origin', 'proxy', 'gateway']) {
   test(`fixture rejects a forbidden ${role} binding before real MCP deadline and recovery`, { timeout: 15000 }, async t => {
-    const availability = net.createServer();
-    try {
-      const listening = once(availability, 'listening');
-      availability.listen(1719, '127.0.0.1');
-      await listening;
-    } catch {
-      throw new Error('SETUP BLOCKED: fixed fixture port 1719 unavailable');
-    } finally {
-      if (availability.listening) await new Promise(resolve => availability.close(resolve));
-    }
+    await checkFixturePort(1719);
     let attempts = 0; let forbiddenClosed = false;
     const gateway = await fixture(t, { listenOptions: { [role]: { listen: (server, options) => {
       if (attempts === 0) server.once('close', () => { forbiddenClosed = true; });
@@ -240,3 +244,104 @@ for (const role of ['origin', 'proxy', 'gateway']) {
     assert.equal(forbiddenClosed, true, gateway.logs());
   });
 }
+
+const sentinel = 'synthetic-private-header-body-environment-token-credential-path';
+
+function safeFailure(error, code, toolAttempts = 0, originRequests = 0) {
+  assert.ok(!error.message.includes(sentinel), 'diagnostics must discard synthetic private data');
+  assert.ok(!error.stack.includes(sentinel), 'stack must discard synthetic private data');
+  assert.ok(error.cause === undefined, 'raw causes must not escape the fixture');
+  assert.ok(Buffer.byteLength(error.message) <= 512, 'diagnostics must fit the fixed byte bound');
+  let facts;
+  try { facts = JSON.parse(error.message); } catch { assert.fail('failure must be a safe operational snapshot'); }
+  assert.deepEqual(Object.keys(facts).sort(), ['connection_cause', 'connection_code', 'mcp_tool_attempts', 'origin_requests', 'ports']);
+  assert.deepEqual(Object.keys(facts.ports).sort(), ['gateway', 'origin', 'proxy']);
+  for (const port of Object.values(facts.ports)) assert.ok(port === null || Number.isInteger(port) && port > 0 && port <= 65535);
+  for (const value of [facts.connection_cause, facts.connection_code]) assert.ok(/^[a-zA-Z0-9_]{1,64}$/.test(value));
+  assert.equal(facts.connection_code, code);
+  assert.equal(facts.mcp_tool_attempts, toolAttempts);
+  assert.equal(facts.origin_requests, originRequests);
+  assert.equal(error.stack, `Error: ${error.message}`);
+  return true;
+}
+
+for (const failedRole of ['origin', 'proxy', 'gateway']) {
+  test(`fixture cleans partial initialization and redacts ${failedRole} bind failure`, { timeout: 15000 }, async () => {
+    const hooks = []; const servers = [];
+    const cause = Object.assign(new Error(sentinel), { code: 'EADDRNOTAVAIL', cause: new Error(sentinel) });
+    const listenOptions = Object.fromEntries(['origin', 'proxy', 'gateway'].map(role => [role, { listen: (server, options) => {
+      if (!servers.includes(server)) servers.push(server);
+      if (role === failedRole) throw cause;
+      server.listen(options);
+    } }]));
+    try {
+      await assert.rejects(fixture({ after: hook => hooks.push(hook) }, { listenOptions }), error => safeFailure(error, 'EADDRNOTAVAIL'));
+    } finally {
+      for (const hook of hooks) await hook();
+    }
+    assert.equal(hooks.length, 1);
+    assert.equal(servers.length, ['origin', 'proxy', 'gateway'].indexOf(failedRole) + 1);
+    for (const server of servers) assert.equal(server.listening, false);
+  });
+}
+
+test('fixture closes every forbidden attempt and partial setup on helper exhaustion', { timeout: 15000 }, async () => {
+  await checkFixturePort(1719);
+  const hooks = []; const servers = [];
+  let attempts = 0; let closes = 0;
+  const listenOptions = {
+    origin: { listen: (server, options) => { if (!servers.includes(server)) servers.push(server); server.listen(options); } },
+    proxy: { maxAttempts: 3, listen: (server, options) => {
+      if (attempts === 0) { if (!servers.includes(server)) servers.push(server); server.on('close', () => { closes++; }); }
+      assert.equal(closes, attempts);
+      attempts++;
+      server.listen({ ...options, port: 1719 });
+    } },
+  };
+  try {
+    await assert.rejects(fixture({ after: hook => hooks.push(hook) }, { listenOptions }), error => safeFailure(error, 'WAG_TEST_SAFE_LISTEN_EXHAUSTED'));
+  } finally {
+    for (const hook of hooks) await hook();
+  }
+  assert.equal(attempts, 3);
+  assert.equal(closes, 3);
+  for (const server of servers) assert.equal(server.listening, false);
+});
+
+test('fixture startup failure discards child stderr and closes allocated listeners', { timeout: 15000 }, async t => {
+  const servers = []; let child;
+  const capture = (server, options) => { if (!servers.includes(server)) servers.push(server); server.listen(options); };
+  await assert.rejects(fixture(t, {
+    listenOptions: { origin: { listen: capture }, proxy: { listen: capture }, gateway: { listen: capture } },
+    // A real child fails before readiness; no occupied-port race or production patch.
+    launch: (executable, _args, options) => child = spawn(executable, ['--input-type=module', '--eval', `process.stdout.write(${JSON.stringify(sentinel)}); process.stderr.write(${JSON.stringify(sentinel)}); process.exitCode = 2;`], options),
+  }), error => safeFailure(error, 'unknown'));
+  assert.equal(child.exitCode, 2);
+  for (const server of servers) assert.equal(server.listening, false);
+});
+
+test('fixture tool failure reports attempts without exposing arguments after cleanup', { timeout: 15000 }, async t => {
+  const gateway = await fixture(t);
+  await gateway.cleanup();
+  await assert.rejects(gateway.read(`http://${sentinel}:${sentinel}@deadline.fixture.test/${sentinel}`), error => safeFailure(error, 'unknown', 1, 0));
+  assert.equal(gateway.received.length, 0);
+});
+
+test('fixture cleanup failure is redacted after all owned listeners close', { timeout: 15000 }, async () => {
+  const hooks = []; const servers = [];
+  const capture = (server, options) => { if (!servers.includes(server)) servers.push(server); server.listen(options); };
+  try {
+    const gateway = await fixture({ after: hook => hooks.push(hook) }, { listenOptions: {
+      origin: { listen: capture }, proxy: { listen: capture }, gateway: { listen: capture },
+    } });
+    const valid = await gateway.read(`${fixtureUrl}/valid`);
+    assert.equal(valid.payload.title, 'Fixture ready');
+    const close = servers[0].close.bind(servers[0]);
+    servers[0].close = callback => close(() => callback(Object.assign(new Error(sentinel), { code: 'EACCES' })));
+    await assert.rejects(gateway.cleanup(), error => safeFailure(error, 'EACCES', 1, 1));
+    for (const server of servers) assert.equal(server.listening, false);
+  } finally {
+    // The injected, already-verified cleanup failure remains in the idempotent promise.
+    for (const hook of hooks) await hook().catch(() => {});
+  }
+});

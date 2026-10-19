@@ -115,6 +115,51 @@ SearXNG 返回有效标准化结果即可证明搜索能力，但不能将已报
 
 每个搜索结果还返回 `retrieved_at`、`source.url`、`source.host` 和 `temporal_evidence`。如果 SearXNG 提供可信的发布时间，网关会将其作为 `published_at` 保留，并在摘要前标明发布时间的元数据来源。
 
+#### 查询语法与边界
+
+以下是可尝试的检索表达，不是 WAG 保证的硬过滤或安全过滤条件；实际语义取决于 SearXNG 与最终上游引擎，不构成当前引擎支持/可用性矩阵。
+
+| 写法 | 检索意图 | 普通 query 示例 | 后端/引擎限制 |
+| --- | --- | --- | --- |
+| `site:` | 优先发现指定站点的内容 | `site:docs.python.org asyncio` | 是否限定域名取决于实际后端/引擎，须核对结果域名和最终 URL。 |
+| `filetype:` | 发现指定文件类型的候选 | `climate report filetype:pdf` | 后端/引擎可能忽略或按索引识别类型，不证明实际内容为 PDF。 |
+| `inurl:` | 尝试匹配 URL 中的词 | `python inurl:release` | 后端/引擎对 URL 词匹配的支持与分词方式可能不同。 |
+| `intitle:` | 尝试匹配标题中的词 | `asyncio intitle:documentation` | 后端/引擎可能忽略或采用不同的标题匹配规则。 |
+| 引号短语 | 尝试精确短语匹配 | `"structured concurrency" python` | 后端/引擎的短语匹配、分词及归一化规则可能不同，不保证逐字匹配。 |
+
+下面分别是站点限定、PDF 发现、精确短语的可复制 MCP **参数 JSON 对象**（不是完整 RPC 请求）：
+
+```json
+{
+  "query": "site:docs.python.org asyncio",
+  "language": "en"
+}
+```
+
+```json
+{
+  "query": "climate report filetype:pdf",
+  "categories": "general"
+}
+```
+
+```json
+{
+  "query": "\"structured concurrency\" python",
+  "language": "en"
+}
+```
+
+`query` 使用普通空格，短语内的双引号按 JSON 写为 `\"`；不要把浏览器搜索 URL 的加号当作空格复制进来，也不要手工 URL 编码。WAG 在现有 SearXNG 查询边界用 `URLSearchParams` 编码，将 query 作为 `q` 传递；编码/字符串透传不等于 WAG 强制执行操作符语义，也不保证 SearXNG 或上游如何解析。若启用 provider fallback，也不承诺不同 provider 的操作符语义相同。
+
+**时间范围：**当前公开 `time_range` 仅接受 `day`、`month`、`year`，不接受 `week`；Google 的 `tbs` URL 参数不是 WAG 参数，不应拼入 MCP 参数。时间范围是上游发现提示，受后端/引擎能力限制。非严格模式（未设置 `time_window_strict: true`）在首次空结果时可重试并移除时间过滤；设置 `time_window_strict: true` 且指定 `time_range` 时不会因空结果放宽该过滤，但这仍不是所有结果都有窗内发布时间证据的保证。查看 `time_range_applied`、`time_range_enforced`、`time_range_note` 及逐项 `time_range_status` 等既有诊断；移除时间过滤的重试会报告未应用、结果未证明在窗内。上游发现提示、摘要或 `time_range` 本身都不能证明发布者日期，`retrieved_at` 也不是发布时间；严格/非严格行为和既有时间证据规则不因查询写法而改变。
+
+**路由边界：**DuckDuckGo bangs（如 `!gh`）不属于 WAG 的路由支持承诺，不建议依赖；这不表示网关已拒绝/禁用 bangs，也不保证它们只按字面处理或不会影响上游选择。优先使用普通 query 与现有 `engines` 参数；不承诺任意引擎名称有效或某引擎在部署中可用，显式选择仍受部署配置与出站保护限制，不应据此启用被阻止的引擎。
+
+**结果核验：**检查实际域名、重定向后的最终 URL、内容类型和时间敏感结论；`filetype:pdf` 只是发现候选，不证明实际响应是 PDF。关键结论继续通过 `web_read` 核验正文与发布者时间证据，不能把检索条件或摘要当成结论。检索仍使用 `web_search`，不要改为直接抓取 Google/DuckDuckGo 搜索 HTML 来替代它。
+
+README 是本项目查询语法的规范参考；仓库外 `wag-search` skill 的同步仅作为后续单独授权、由其维护上下文负责的事项，本次不修改外部 skill。
+
 ### `web_read`
 
 读取公开 URL 并返回干净 Markdown。默认先以轻量 HTML 提取读取；正文过短或要求渲染时，自动改用 Crawl4AI。

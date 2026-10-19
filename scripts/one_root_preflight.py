@@ -36,7 +36,7 @@ class Budget:
         return value
 
 
-def run_state(factory, clock=time.monotonic):
+def run_state(factory, clock=time.monotonic, *, diagnostics=False):
     """factory(budget) permits pure fake testing without constructing Native."""
     budget = Budget(clock)
     report = {
@@ -49,6 +49,16 @@ def run_state(factory, clock=time.monotonic):
         "evidence_complete": False,
         "creation_filetime": 0, "created_pid": 0, "created_tid": 0,
     }
+    observation = None
+    if diagnostics:
+        observation = {
+            "stage": "not_observed", "reason": "not_observed",
+            "snapshot": {
+                "root_wait_result": None, "job_total": None,
+                "job_active": None, "job_assigned": None, "job_listed": None,
+            },
+        }
+        report["observation_diagnostics"] = observation
     backend = None
     completed = False
 
@@ -58,9 +68,24 @@ def run_state(factory, clock=time.monotonic):
         budget.check()
         return value
 
+    def observe(name, *, reserve=0.0):
+        if observation is not None and name == "reset_ready":
+            observation["stage"] = "reset_ready"
+        try:
+            return step(name, reserve=reserve)
+        except Deadline:
+            # Expiry is not an API failure, even though Deadline is a Fault.
+            raise
+        except Fault:
+            if observation is not None:
+                observation["reason"] = "api_failure"
+            raise
+
     try:
         budget.check(6.0)
         backend = factory(budget)
+        if observation is not None:
+            backend.observation_diagnostics = observation
         budget.check()
         step("prepare", reserve=6.0)
         report["phase"] = "CREATE"
@@ -93,8 +118,8 @@ def run_state(factory, clock=time.monotonic):
             raise Fault()
         report["natural_exit"] = True
         report["phase"] = "OBSERVE"
-        step("reset_ready", reserve=6.0)
-        if not step("sample"):
+        observe("reset_ready", reserve=6.0)
+        if not observe("sample"):
             raise Fault()
         # Query time before the first valid sample is not resource observation.
         observation_start = clock()
@@ -108,7 +133,7 @@ def run_state(factory, clock=time.monotonic):
                 raise Fault()
             if clock() <= before:
                 raise Fault()
-            if not step("sample"):
+            if not observe("sample"):
                 raise Fault()
             report["samplecount"] += 1
             report["resource_seconds"] = clock() - observation_start
@@ -128,6 +153,8 @@ def run_state(factory, clock=time.monotonic):
     except Exception:
         # Never persist arbitrary exception text, command lines, or paths.
         report["winerror"] = 0
+        if observation is not None and report["phase"] == "OBSERVE":
+            observation["reason"] = "unclassified_exception"
     finally:
         if backend is not None:
             try:
@@ -419,11 +446,50 @@ class Native:
         return value.value
 
     def sample(self):
+        observation = getattr(self, "observation_diagnostics", None)
+        if observation is not None:
+            # A later failed sample must not reuse an earlier sample's values.
+            observation["snapshot"] = {
+                "root_wait_result": None, "job_total": None,
+                "job_active": None, "job_assigned": None, "job_listed": None,
+            }
+            observation["stage"] = "query_accounting"
+            observation["reason"] = "not_observed"
         accounting, inventory = self.Accounting(), self.PidList()
         for kind, value in ((1, accounting), (3, inventory)):
+            if observation is not None:
+                observation["stage"] = ("query_accounting" if kind == 1
+                                        else "query_inventory")
             self.call("QueryInformationJobObject", self.job, kind,
                       self.c.byref(value), self.c.sizeof(value), None)
-        return (self.wait_root(0) == 0 and accounting.total == 1
+            if observation is not None:
+                snapshot = observation["snapshot"]
+                if kind == 1:
+                    snapshot["job_total"] = accounting.total
+                    snapshot["job_active"] = accounting.active
+                else:
+                    snapshot["job_assigned"] = inventory.assigned
+                    snapshot["job_listed"] = inventory.listed
+        if observation is not None:
+            observation["stage"] = "wait_root"
+        waited = self.wait_root(0)
+        if observation is not None:
+            observation["snapshot"]["root_wait_result"] = waited
+            observation["stage"] = "predicate"
+            if waited != 0:
+                reason = "root_not_signaled"
+            elif accounting.total != 1:
+                reason = "job_total_not_one"
+            elif accounting.active != 0:
+                reason = "job_active_not_zero"
+            elif inventory.assigned != 0:
+                reason = "job_assigned_not_zero"
+            elif inventory.listed != 0:
+                reason = "job_listed_not_zero"
+            else:
+                reason = "ok"
+            observation["reason"] = reason
+        return (waited == 0 and accounting.total == 1
                 and accounting.active == 0 and inventory.assigned == 0
                 and inventory.listed == 0)
 
@@ -519,6 +585,7 @@ def main(arguments=None):
     parser.add_argument("--execute-one-root", action="store_true")
     parser.add_argument("--preparation-reviewed", action="store_true")
     parser.add_argument("--execution-authorization")
+    parser.add_argument("--observe-diagnostics", action="store_true")
     args = parser.parse_args(arguments)
     if not args.execute_one_root:
         print('{"result":"NOT_RUN","candidate":false,"evidence_complete":false}')
@@ -528,7 +595,7 @@ def main(arguments=None):
         print('{"result":"NOT_RUN","candidate":false,"evidence_complete":false}')
         return 2
     # Flags are manual gates, not authenticated authorization. Never log text.
-    report, budget = run_state(Native)
+    report, budget = run_state(Native, diagnostics=args.observe_diagnostics)
     try:
         if budget.clock() >= budget.deadline:
             report["result"], report["candidate"] = "TIMEOUT", False

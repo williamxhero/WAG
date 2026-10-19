@@ -325,6 +325,162 @@ class StaticTests(unittest.TestCase):
         allowed={'result','phase','winerror','candidate','ownership','actual_exit','natural_exit','terminate_requested','terminate_succeeded','resource_seconds','samplecount','handle_close_failures','cleanup_failures','deadline_overrun','evidence_complete','creation_filetime','created_pid','created_tid'}
         self.assertEqual(set(r),allowed)
 
+class ObserveDiagnosticsTests(unittest.TestCase):
+    def snapshot(self,root=None,total=None,active=None,assigned=None,listed=None):
+        return dict(root_wait_result=root,job_total=total,job_active=active,
+                    job_assigned=assigned,job_listed=listed)
+
+    def run_case(self,*,diagnostics=True,values=(0,1,0,0,0),failure=None,
+                 generic=False,fail_sample=1,deadline=False):
+        clock=Clock();holder=[];calls=[];samples=[0]
+        def factory(budget):
+            fake=Fake(budget,clock);holder.append(fake)
+            native=module.Native.__new__(module.Native)
+            native.budget=budget;native.job=99;native.ready=100;native.process=101
+            native.Accounting=lambda:types.SimpleNamespace(total=0,active=0)
+            native.PidList=lambda:types.SimpleNamespace(assigned=0,listed=0)
+            native.c=types.SimpleNamespace(byref=lambda x:x,sizeof=lambda x:1,
+                                          get_last_error=lambda:87)
+            def effect(stage):
+                calls.append(stage)
+                if stage==failure and (stage=='reset_ready' or samples[0]>=fail_sample):
+                    if deadline: raise module.Deadline()
+                    if generic: raise RuntimeError('secret path credential command')
+                    return False
+                return True
+            def query(job,kind,value,*unused):
+                stage='query_accounting' if kind==1 else 'query_inventory'
+                ok=effect(stage)
+                # A failed API may have dirtied its output: never report that.
+                if kind==1: value.total,value.active=values[1:3]
+                else: value.assigned,value.listed=values[3:5]
+                return int(ok)
+            def wait(*unused):
+                return values[0] if effect('wait_root') else 0xFFFFFFFF
+            native.k=types.SimpleNamespace(
+                QueryInformationJobObject=query,WaitForSingleObject=wait,
+                ResetEvent=lambda *unused:int(effect('reset_ready')))
+            fake.reset_ready=native.reset_ready
+            def sample():
+                samples[0]+=1
+                native.observation_diagnostics=getattr(fake,'observation_diagnostics',None)
+                return native.sample()
+            fake.sample=sample
+            if failure=='pace':
+                def pace(ms):
+                    effect('pace')
+                    return 258
+                fake.pace=pace
+            return fake
+        report,_=module.run_state(factory,clock,diagnostics=diagnostics)
+        self.assertTrue(holder[0].closed)
+        self.assertFalse(report['evidence_complete'])
+        self.assertNotIn(report['result'],('PASS','SINGLE_ROOT_PASS'))
+        return report,calls
+
+    def test_each_predicate_reason(self):
+        reasons=('root_not_signaled','job_total_not_one','job_active_not_zero',
+                 'job_assigned_not_zero','job_listed_not_zero')
+        good=[0,1,0,0,0]
+        for index,reason in enumerate(reasons):
+            for multiple in (False,True):
+                values=good.copy()
+                for position in range(index,5) if multiple else (index,):
+                    values[position]=258 if position==0 else 2
+                with self.subTest(reason=reason,multiple=multiple):
+                    r,calls=self.run_case(values=values)
+                    self.assertFalse(r['candidate'])
+                    self.assertEqual(r['result'],'UNKNOWN')
+                    self.assertEqual(r['winerror'],0)
+                    self.assertEqual(r['observation_diagnostics'],{
+                        'stage':'predicate','reason':reason,
+                        'snapshot':self.snapshot(*values)})
+                    self.assertEqual(calls,['reset_ready','query_accounting',
+                                            'query_inventory','wait_root'])
+        r,_=self.run_case()
+        self.assertTrue(r['candidate'])
+        self.assertGreaterEqual(r['resource_seconds'],6)
+        self.assertGreaterEqual(r['samplecount'],3)
+        self.assertEqual(r['observation_diagnostics'],{
+            'stage':'predicate','reason':'ok','snapshot':self.snapshot(0,1,0,0,0)})
+
+    def test_api_failures_and_partial_snapshot(self):
+        expected={
+            'reset_ready':self.snapshot(),
+            'query_accounting':self.snapshot(),
+            'query_inventory':self.snapshot(total=1,active=0),
+            'wait_root':self.snapshot(total=1,active=0,assigned=0,listed=0),
+        }
+        order=['reset_ready','query_accounting','query_inventory','wait_root']
+        for stage,snapshot in expected.items():
+            for sample in (1,2):
+                with self.subTest(stage=stage,sample=sample):
+                    r,calls=self.run_case(failure=stage,fail_sample=sample)
+                    self.assertFalse(r['candidate'])
+                    self.assertEqual(r['result'],'UNKNOWN')
+                    self.assertEqual(r['winerror'],87)
+                    self.assertEqual(r['observation_diagnostics'],{
+                        'stage':stage,'reason':'api_failure','snapshot':snapshot})
+                    prefix=order[:order.index(stage)+1]
+                    if sample==2 and stage!='reset_ready': prefix=order+prefix[1:]
+                    self.assertEqual(calls,prefix)
+        r,_=self.run_case(failure='query_inventory',deadline=True)
+        self.assertEqual(r['result'],'TIMEOUT')
+        self.assertFalse(r['candidate'])
+        self.assertNotEqual(r['observation_diagnostics']['reason'],'api_failure')
+        self.assertEqual(r['observation_diagnostics']['snapshot'],
+                         self.snapshot(total=1,active=0))
+        clock=Clock()
+        r,_=module.run_state(lambda b:Fake(b,clock,fail='prepare'),clock,diagnostics=True)
+        self.assertEqual(r['observation_diagnostics'],{
+            'stage':'not_observed','reason':'not_observed','snapshot':self.snapshot()})
+
+    def test_generic_exception_is_sanitized(self):
+        expected={
+            'reset_ready':self.snapshot(),
+            'query_accounting':self.snapshot(),
+            'query_inventory':self.snapshot(total=1,active=0),
+            'wait_root':self.snapshot(total=1,active=0,assigned=0,listed=0),
+            'pace':self.snapshot(0,1,0,0,0),
+        }
+        for stage,snapshot in expected.items():
+            with self.subTest(stage=stage):
+                r,_=self.run_case(failure=stage,generic=True)
+                self.assertFalse(r['candidate'])
+                self.assertEqual(r['result'],'UNKNOWN')
+                self.assertEqual(r['winerror'],0)
+                self.assertEqual(r['observation_diagnostics'],{
+                    'stage':'predicate' if stage=='pace' else stage,
+                    'reason':'unclassified_exception','snapshot':snapshot})
+                for text in ('RuntimeError','secret','credential','command'):
+                    self.assertNotIn(text,str(r))
+
+    def test_default_report_is_unchanged(self):
+        allowed={'result','phase','winerror','candidate','ownership','actual_exit',
+                 'natural_exit','terminate_requested','terminate_succeeded',
+                 'resource_seconds','samplecount','handle_close_failures',
+                 'cleanup_failures','deadline_overrun','evidence_complete',
+                 'creation_filetime','created_pid','created_tid'}
+        for options in ({},{'values':(258,2,1,1,1)},
+                        {'failure':'reset_ready'},{'failure':'query_accounting'},
+                        {'failure':'query_inventory'},{'failure':'wait_root'},
+                        {'failure':'wait_root','generic':True}):
+            with self.subTest(options=options):
+                plain,plain_calls=self.run_case(diagnostics=False,**options)
+                enabled,enabled_calls=self.run_case(**options)
+                self.assertEqual(set(plain),allowed)
+                self.assertEqual(set(enabled),allowed|{'observation_diagnostics'})
+                self.assertEqual(plain,{k:v for k,v in enabled.items()
+                                        if k!='observation_diagnostics'})
+                self.assertEqual(plain_calls,enabled_calls)
+        import io
+        output=io.StringIO()
+        with patch.object(module,'Native',side_effect=AssertionError('Native forbidden')):
+            with patch.object(sys,'stdout',output):
+                self.assertEqual(module.main(['--observe-diagnostics']),0)
+        self.assertEqual(output.getvalue(),
+                         '{"result":"NOT_RUN","candidate":false,"evidence_complete":false}\n')
+
 if __name__=='__main__':
     with patch.object(ctypes,'WinDLL',side_effect=AssertionError('Native DLL forbidden'),create=True):
         unittest.main(verbosity=2)

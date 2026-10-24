@@ -245,7 +245,7 @@ class StaticTests(unittest.TestCase):
         self.assertIn('0x2000D',SOURCE);self.assertIn('0x20002',SOURCE)
         self.assertNotIn('AssignProcessToJobObject',SOURCE)
         self.assertNotIn('OpenProcess',SOURCE)
-        self.assertIn('0x00080000 | 0x00000004 | 0x00000400 | 0x08000000',SOURCE)
+        self.assertIn('0x00080000 | 0x00000004 | 0x00000400 | 0x00000008',SOURCE)
         self.assertIn('self.process, self.job',methods['identity'])
         self.assertIn('self.process',methods['identity'])
         self.assertIn('self.job_array',methods['prepare'])
@@ -301,6 +301,36 @@ class StaticTests(unittest.TestCase):
                 return 1
             n.call=call
             self.assertEqual(n.sample(),bad=='none')
+    def test_native_child_has_no_console_and_preserves_ownership_flags(self):
+        n,_=self.bind_fake()
+        n.handles=[]
+        n.attribute_buffer=ctypes.create_string_buffer(128)
+        n.inherit_array=(n.HANDLE*2)(201,202)
+        calls=[]
+        def create(name,*args,register=None):
+            self.assertEqual(name,'CreateProcessW')
+            calls.append(name)
+            flags=args[5]
+            self.assertEqual(flags,0x00080000 | 0x00000004 | 0x00000400 | 0x00000008)
+            self.assertFalse(flags & (0x08000000 | 0x00000010 | 0x01000000))
+            self.assertTrue(args[4])
+            startup=args[8]._obj
+            self.assertEqual(startup.attributes,ctypes.addressof(n.attribute_buffer))
+            self.assertEqual(startup.startup.flags,0x100)
+            for handle in ('stdin','stdout','stderr'):
+                self.assertIsNone(getattr(startup.startup,handle))
+            info=args[9]._obj
+            info.process,info.thread,info.pid,info.tid=101,102,10,11
+            register(1)
+            return 1
+        n.call=create
+        with patch.object(sys,'executable',str(Path(sys.executable).resolve())):
+            with patch.dict(module.os.environ,{'SystemRoot':str(ROOT.resolve())}):
+                n.create(1000)
+        self.assertEqual(calls,['CreateProcessW'])
+        self.assertEqual(n.handles,[101,102])
+        self.assertEqual((n.process,n.thread),(101,102))
+
     def test_native_late_create_registration(self):
         clock=Clock();n=module.Native.__new__(module.Native);n.budget=module.Budget(clock)
         n.c=types.SimpleNamespace(get_last_error=lambda:0)
@@ -348,7 +378,7 @@ class ObserveDiagnosticsTests(unittest.TestCase):
         listed=snapshot['job_listed'] or 0
         return {
             'stage':stage,'reason':reason,'snapshot':snapshot,
-            'root_pid':None,'root_in_job':None,'launcher_pid':None,
+            'root_pid':None,'root_in_job_at_identity':None,'launcher_pid':None,
             'job_ids':[] if inventory else None,
             'job_ids_capacity':0 if inventory else None,
             'job_ids_truncated':bool(listed) if inventory else None,
@@ -484,11 +514,11 @@ class ObserveDiagnosticsTests(unittest.TestCase):
         n,_=self.bind_fake()
         n.job=99
         n.info=types.SimpleNamespace(pid=4242)
-        n.root_in_job=True
+        n.root_in_job_at_identity=True
         n.launcher_pid=4343
         n.observation_diagnostics={
             'stage':'not_observed','reason':'not_observed','snapshot':{},
-            'root_pid':None,'root_in_job':None,'launcher_pid':None,
+            'root_pid':None,'root_in_job_at_identity':None,'launcher_pid':None,
             'job_ids':None,'job_ids_capacity':None,'job_ids_truncated':None,
             'root_pid_in_job_ids':None,'launcher_pid_in_job_ids':None,
         }
@@ -509,7 +539,7 @@ class ObserveDiagnosticsTests(unittest.TestCase):
         self.assertEqual(n.observation_diagnostics,{
             'stage':'predicate','reason':'job_total_not_one',
             'snapshot':self.snapshot(0,2,1,1,1),
-            'root_pid':4242,'root_in_job':True,'launcher_pid':4343,
+            'root_pid':4242,'root_in_job_at_identity':True,'launcher_pid':4343,
             'job_ids':[4242],'job_ids_capacity':1,
             'job_ids_truncated':False,'root_pid_in_job_ids':True,
             'launcher_pid_in_job_ids':False,

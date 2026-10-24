@@ -57,7 +57,7 @@ def run_state(factory, clock=time.monotonic, *, diagnostics=False):
                 "root_wait_result": None, "job_total": None,
                 "job_active": None, "job_assigned": None, "job_listed": None,
             },
-            "root_pid": None, "root_in_job": None,
+            "root_pid": None, "root_in_job_at_identity": None,
             "launcher_pid": None,
             "job_ids": None, "job_ids_capacity": None,
             "job_ids_truncated": None,
@@ -188,7 +188,7 @@ class Native:
         self.attributes_initialized = False
         self.attribute_buffer = self.job_array = self.inherit_array = None
         self.process = self.thread = self.job = None
-        self.root_in_job = None
+        self.root_in_job_at_identity = None
         self.launcher_pid = os.getpid()
         budget.check()
         if os.name != "nt":
@@ -392,8 +392,9 @@ class Native:
             self.process, self.thread = info.process, info.thread
             self.handles.extend((info.process, info.thread))
 
+        # No console attachment: hiding its window can still create a host process.
         self.call("CreateProcessW", executable, command, None, None, True,
-                  0x00080000 | 0x00000004 | 0x00000400 | 0x08000000,
+                  0x00080000 | 0x00000004 | 0x00000400 | 0x00000008,
                   environment, None, c.byref(startup), c.byref(info),
                   register=register)
 
@@ -414,8 +415,8 @@ class Native:
             births.append((times[0].high << 32) | times[0].low)
             member = c.c_int32()
             self.call("IsProcessInJob", self.process, self.job, c.byref(member))
-            self.root_in_job = bool(member.value)
-            if not self.root_in_job or not self.alive():
+            self.root_in_job_at_identity = bool(member.value)
+            if not self.root_in_job_at_identity or not self.alive():
                 return False
         valid = births[0] != 0 and births[0] == births[1]
         if valid:
@@ -463,7 +464,7 @@ class Native:
                 "job_active": None, "job_assigned": None, "job_listed": None,
             }
             observation["root_pid"] = None
-            observation["root_in_job"] = getattr(self, "root_in_job", None)
+            observation["root_in_job_at_identity"] = getattr(self, "root_in_job_at_identity", None)
             observation["launcher_pid"] = getattr(self, "launcher_pid", None)
             observation["job_ids"] = None
             observation["job_ids_capacity"] = None

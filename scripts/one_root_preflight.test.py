@@ -326,9 +326,34 @@ class StaticTests(unittest.TestCase):
         self.assertEqual(set(r),allowed)
 
 class ObserveDiagnosticsTests(unittest.TestCase):
-    def snapshot(self,root=None,total=None,active=None,assigned=None,listed=None):
-        return dict(root_wait_result=root,job_total=total,job_active=active,
-                    job_assigned=assigned,job_listed=listed)
+    def snapshot(self,root_wait_result=None,total=None,active=None,
+                 assigned=None,listed=None):
+        return {
+            'root_wait_result':root_wait_result,'job_total':total,
+            'job_active':active,'job_assigned':assigned,'job_listed':listed,
+        }
+
+    def bind_fake(self):
+        class Function:
+            def __call__(self,*args): raise AssertionError('No API call in binding test')
+        class Kernel:
+            def __init__(self):self.functions={}
+            def __getattr__(self,name):return self.functions.setdefault(name,Function())
+        n=module.Native.__new__(module.Native)
+        kernel=Kernel()
+        with patch.object(ctypes,'WinDLL',return_value=kernel,create=True):n._bind()
+        return n,kernel
+
+    def observation(self,stage,reason,snapshot,inventory=False):
+        listed=snapshot['job_listed'] or 0
+        return {
+            'stage':stage,'reason':reason,'snapshot':snapshot,
+            'root_pid':None,'root_in_job':None,
+            'job_ids':[] if inventory else None,
+            'job_ids_capacity':0 if inventory else None,
+            'job_ids_truncated':bool(listed) if inventory else None,
+            'root_pid_in_job_ids':None,
+        }
 
     def run_case(self,*,diagnostics=True,values=(0,1,0,0,0),failure=None,
                  generic=False,fail_sample=1,deadline=False):
@@ -392,17 +417,16 @@ class ObserveDiagnosticsTests(unittest.TestCase):
                     self.assertFalse(r['candidate'])
                     self.assertEqual(r['result'],'UNKNOWN')
                     self.assertEqual(r['winerror'],0)
-                    self.assertEqual(r['observation_diagnostics'],{
-                        'stage':'predicate','reason':reason,
-                        'snapshot':self.snapshot(*values)})
+                    self.assertEqual(r['observation_diagnostics'],self.observation(
+                        'predicate',reason,self.snapshot(*values),inventory=True))
                     self.assertEqual(calls,['reset_ready','query_accounting',
                                             'query_inventory','wait_root'])
         r,_=self.run_case()
         self.assertTrue(r['candidate'])
         self.assertGreaterEqual(r['resource_seconds'],6)
         self.assertGreaterEqual(r['samplecount'],3)
-        self.assertEqual(r['observation_diagnostics'],{
-            'stage':'predicate','reason':'ok','snapshot':self.snapshot(0,1,0,0,0)})
+        self.assertEqual(r['observation_diagnostics'],self.observation(
+            'predicate','ok',self.snapshot(0,1,0,0,0),inventory=True))
 
     def test_api_failures_and_partial_snapshot(self):
         expected={
@@ -419,8 +443,8 @@ class ObserveDiagnosticsTests(unittest.TestCase):
                     self.assertFalse(r['candidate'])
                     self.assertEqual(r['result'],'UNKNOWN')
                     self.assertEqual(r['winerror'],87)
-                    self.assertEqual(r['observation_diagnostics'],{
-                        'stage':stage,'reason':'api_failure','snapshot':snapshot})
+                    self.assertEqual(r['observation_diagnostics'],self.observation(
+                        stage,'api_failure',snapshot,inventory=stage=='wait_root'))
                     prefix=order[:order.index(stage)+1]
                     if sample==2 and stage!='reset_ready': prefix=order+prefix[1:]
                     self.assertEqual(calls,prefix)
@@ -432,8 +456,8 @@ class ObserveDiagnosticsTests(unittest.TestCase):
                          self.snapshot(total=1,active=0))
         clock=Clock()
         r,_=module.run_state(lambda b:Fake(b,clock,fail='prepare'),clock,diagnostics=True)
-        self.assertEqual(r['observation_diagnostics'],{
-            'stage':'not_observed','reason':'not_observed','snapshot':self.snapshot()})
+        self.assertEqual(r['observation_diagnostics'],self.observation(
+            'not_observed','not_observed',self.snapshot()))
 
     def test_generic_exception_is_sanitized(self):
         expected={
@@ -449,11 +473,45 @@ class ObserveDiagnosticsTests(unittest.TestCase):
                 self.assertFalse(r['candidate'])
                 self.assertEqual(r['result'],'UNKNOWN')
                 self.assertEqual(r['winerror'],0)
-                self.assertEqual(r['observation_diagnostics'],{
-                    'stage':'predicate' if stage=='pace' else stage,
-                    'reason':'unclassified_exception','snapshot':snapshot})
+                self.assertEqual(r['observation_diagnostics'],self.observation(
+                    'predicate' if stage=='pace' else stage,
+                    'unclassified_exception',snapshot,
+                    inventory=stage in ('wait_root','pace')))
                 for text in ('RuntimeError','secret','credential','command'):
                     self.assertNotIn(text,str(r))
+
+    def test_sample_diagnostics_distinguish_current_root_from_accounting(self):
+        n,_=self.bind_fake()
+        n.job=99
+        n.info=types.SimpleNamespace(pid=4242)
+        n.root_in_job=True
+        n.observation_diagnostics={
+            'stage':'not_observed','reason':'not_observed','snapshot':{},
+            'root_pid':None,'root_in_job':None,'job_ids':None,
+            'job_ids_capacity':None,'job_ids_truncated':None,
+            'root_pid_in_job_ids':None,
+        }
+        n.wait_root=lambda unused:0
+        def query(name,job,kind,pointer,*unused):
+            self.assertEqual(name,'QueryInformationJobObject')
+            self.assertEqual(job,99)
+            value=pointer._obj
+            if kind==1:
+                value.total,value.active=2,1
+            else:
+                value.assigned,value.listed=1,1
+                value.ids[0]=4242
+            return 1
+        n.call=query
+
+        self.assertFalse(n.sample())
+        self.assertEqual(n.observation_diagnostics,{
+            'stage':'predicate','reason':'job_total_not_one',
+            'snapshot':self.snapshot(0,2,1,1,1),
+            'root_pid':4242,'root_in_job':True,
+            'job_ids':[4242],'job_ids_capacity':1,
+            'job_ids_truncated':False,'root_pid_in_job_ids':True,
+        })
 
     def test_default_report_is_unchanged(self):
         allowed={'result','phase','winerror','candidate','ownership','actual_exit',

@@ -57,6 +57,10 @@ def run_state(factory, clock=time.monotonic, *, diagnostics=False):
                 "root_wait_result": None, "job_total": None,
                 "job_active": None, "job_assigned": None, "job_listed": None,
             },
+            "root_pid": None, "root_in_job": None,
+            "job_ids": None, "job_ids_capacity": None,
+            "job_ids_truncated": None,
+            "root_pid_in_job_ids": None,
         }
         report["observation_diagnostics"] = observation
     backend = None
@@ -182,6 +186,7 @@ class Native:
         self.attributes_initialized = False
         self.attribute_buffer = self.job_array = self.inherit_array = None
         self.process = self.thread = self.job = None
+        self.root_in_job = None
         budget.check()
         if os.name != "nt":
             raise Fault()
@@ -406,7 +411,8 @@ class Native:
             births.append((times[0].high << 32) | times[0].low)
             member = c.c_int32()
             self.call("IsProcessInJob", self.process, self.job, c.byref(member))
-            if not member.value or not self.alive():
+            self.root_in_job = bool(member.value)
+            if not self.root_in_job or not self.alive():
                 return False
         valid = births[0] != 0 and births[0] == births[1]
         if valid:
@@ -453,6 +459,15 @@ class Native:
                 "root_wait_result": None, "job_total": None,
                 "job_active": None, "job_assigned": None, "job_listed": None,
             }
+            observation["root_pid"] = None
+            observation["root_in_job"] = getattr(self, "root_in_job", None)
+            observation["job_ids"] = None
+            observation["job_ids_capacity"] = None
+            observation["job_ids_truncated"] = None
+            observation["root_pid_in_job_ids"] = None
+            info = getattr(self, "info", None)
+            if info is not None:
+                observation["root_pid"] = int(info.pid)
             observation["stage"] = "query_accounting"
             observation["reason"] = "not_observed"
         accounting, inventory = self.Accounting(), self.PidList()
@@ -470,6 +485,16 @@ class Native:
                 else:
                     snapshot["job_assigned"] = inventory.assigned
                     snapshot["job_listed"] = inventory.listed
+                    ids = getattr(inventory, "ids", ())
+                    capacity = len(ids)
+                    listed = max(0, min(int(inventory.listed), capacity))
+                    observation["job_ids_capacity"] = capacity
+                    observation["job_ids_truncated"] = int(inventory.listed) > capacity
+                    observation["job_ids"] = [int(ids[index]) for index in range(listed)]
+                    root_pid = observation["root_pid"]
+                    if root_pid is not None:
+                        observation["root_pid_in_job_ids"] = (
+                            root_pid in observation["job_ids"])
         if observation is not None:
             observation["stage"] = "wait_root"
         waited = self.wait_root(0)

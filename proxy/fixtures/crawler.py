@@ -6,6 +6,7 @@ stand-in passes its configured proxy to real Chromium, never bypassing egress.
 """
 import importlib.util
 import ipaddress
+import json
 import os
 from pathlib import Path
 import socket

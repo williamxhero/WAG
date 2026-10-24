@@ -1,9 +1,14 @@
 import asyncio
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 from pathlib import Path
-from types import SimpleNamespace
+import socket
+import sys
+from types import ModuleType, SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 renderer_spec = importlib.util.spec_from_file_location(
     "fixture_renderer", Path(__file__).parents[1] / "proxy" / "fixtures" / "renderer.py"
@@ -198,6 +203,40 @@ class RendererLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(process.kill_calls, 1)
         self.assertEqual(process.wait_calls, 1)
         self.assertFalse(self.renderer._active)
+
+
+class CrawlerFixtureStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_startup_emits_listening_json(self):
+        class Server:
+            def __init__(self, config):
+                self.config = config
+
+            async def startup(self, sockets=None):
+                pass
+
+        uvicorn = ModuleType("uvicorn")
+        uvicorn.Server = Server
+        renderer = ModuleType("renderer")
+        renderer.Renderer = Renderer
+        app = ModuleType("owned_crawler")
+        app.app = object()
+        app_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module: None))
+        fixture_spec = importlib.util.spec_from_file_location(
+            "fixture_crawler", Path(__file__).parents[1] / "proxy" / "fixtures" / "crawler.py"
+        )
+        fixture = importlib.util.module_from_spec(fixture_spec)
+        output = io.StringIO()
+        with patch.dict(sys.modules, {"uvicorn": uvicorn, "renderer": renderer}):
+            with patch.object(socket, "getaddrinfo", side_effect=AssertionError("network forbidden")):
+                with patch.object(importlib.util, "spec_from_file_location", return_value=app_spec):
+                    with patch.object(importlib.util, "module_from_spec", return_value=app):
+                        fixture_spec.loader.exec_module(fixture)
+                        with redirect_stdout(output):
+                            await fixture.Server(SimpleNamespace(port=12345)).startup()
+
+        self.assertEqual(json.loads(output.getvalue()), {
+            "event": "crawler_fixture_listening", "port": 12345,
+        })
 
 
 if __name__ == "__main__":

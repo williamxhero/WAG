@@ -4,10 +4,8 @@ The heavyweight Crawl4AI SDK is replaced, but BrowserConfig, app lifespan,
 authentication, URL validation and /crawl handling execute the owned app. The
 stand-in passes its configured proxy to real Chromium, never bypassing egress.
 """
-import asyncio
 import importlib.util
 import ipaddress
-import json
 import os
 from pathlib import Path
 import socket
@@ -16,36 +14,14 @@ import types
 
 import uvicorn
 
+from renderer import Renderer
+
 root = Path(__file__).resolve().parents[2]
 
 
 class Config:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
-
-
-class Renderer:
-    def __init__(self, config, **kwargs):
-        self.config = config
-
-    async def start(self):
-        pass
-
-    async def close(self):
-        pass
-
-    async def arun(self, url, config):
-        process = await asyncio.create_subprocess_exec(
-            os.environ["WAG_FIXTURE_NODE"], str(Path(__file__).with_name("render.mjs")),
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        payload = {"url": url, "proxy": self.config.proxy_config["server"], "args": self.config.extra_args}
-        output, error = await process.communicate(json.dumps(payload).encode())
-        if process.returncode:
-            raise RuntimeError(error.decode())
-        return types.SimpleNamespace(**json.loads(output))
-
 
 sdk = types.ModuleType("crawl4ai")
 sdk.AsyncWebCrawler = Renderer

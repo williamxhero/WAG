@@ -348,11 +348,11 @@ class ObserveDiagnosticsTests(unittest.TestCase):
         listed=snapshot['job_listed'] or 0
         return {
             'stage':stage,'reason':reason,'snapshot':snapshot,
-            'root_pid':None,'root_in_job':None,
+            'root_pid':None,'root_in_job':None,'launcher_pid':None,
             'job_ids':[] if inventory else None,
             'job_ids_capacity':0 if inventory else None,
             'job_ids_truncated':bool(listed) if inventory else None,
-            'root_pid_in_job_ids':None,
+            'root_pid_in_job_ids':None,'launcher_pid_in_job_ids':None,
         }
 
     def run_case(self,*,diagnostics=True,values=(0,1,0,0,0),failure=None,
@@ -485,11 +485,12 @@ class ObserveDiagnosticsTests(unittest.TestCase):
         n.job=99
         n.info=types.SimpleNamespace(pid=4242)
         n.root_in_job=True
+        n.launcher_pid=4343
         n.observation_diagnostics={
             'stage':'not_observed','reason':'not_observed','snapshot':{},
-            'root_pid':None,'root_in_job':None,'job_ids':None,
-            'job_ids_capacity':None,'job_ids_truncated':None,
-            'root_pid_in_job_ids':None,
+            'root_pid':None,'root_in_job':None,'launcher_pid':None,
+            'job_ids':None,'job_ids_capacity':None,'job_ids_truncated':None,
+            'root_pid_in_job_ids':None,'launcher_pid_in_job_ids':None,
         }
         n.wait_root=lambda unused:0
         def query(name,job,kind,pointer,*unused):
@@ -508,9 +509,10 @@ class ObserveDiagnosticsTests(unittest.TestCase):
         self.assertEqual(n.observation_diagnostics,{
             'stage':'predicate','reason':'job_total_not_one',
             'snapshot':self.snapshot(0,2,1,1,1),
-            'root_pid':4242,'root_in_job':True,
+            'root_pid':4242,'root_in_job':True,'launcher_pid':4343,
             'job_ids':[4242],'job_ids_capacity':1,
             'job_ids_truncated':False,'root_pid_in_job_ids':True,
+            'launcher_pid_in_job_ids':False,
         })
 
     def test_default_report_is_unchanged(self):

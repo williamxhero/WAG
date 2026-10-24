@@ -58,9 +58,11 @@ def run_state(factory, clock=time.monotonic, *, diagnostics=False):
                 "job_active": None, "job_assigned": None, "job_listed": None,
             },
             "root_pid": None, "root_in_job": None,
+            "launcher_pid": None,
             "job_ids": None, "job_ids_capacity": None,
             "job_ids_truncated": None,
             "root_pid_in_job_ids": None,
+            "launcher_pid_in_job_ids": None,
         }
         report["observation_diagnostics"] = observation
     backend = None
@@ -187,6 +189,7 @@ class Native:
         self.attribute_buffer = self.job_array = self.inherit_array = None
         self.process = self.thread = self.job = None
         self.root_in_job = None
+        self.launcher_pid = os.getpid()
         budget.check()
         if os.name != "nt":
             raise Fault()
@@ -461,10 +464,12 @@ class Native:
             }
             observation["root_pid"] = None
             observation["root_in_job"] = getattr(self, "root_in_job", None)
+            observation["launcher_pid"] = getattr(self, "launcher_pid", None)
             observation["job_ids"] = None
             observation["job_ids_capacity"] = None
             observation["job_ids_truncated"] = None
             observation["root_pid_in_job_ids"] = None
+            observation["launcher_pid_in_job_ids"] = None
             info = getattr(self, "info", None)
             if info is not None:
                 observation["root_pid"] = int(info.pid)
@@ -495,6 +500,10 @@ class Native:
                     if root_pid is not None:
                         observation["root_pid_in_job_ids"] = (
                             root_pid in observation["job_ids"])
+                    launcher_pid = observation["launcher_pid"]
+                    if launcher_pid is not None:
+                        observation["launcher_pid_in_job_ids"] = (
+                            launcher_pid in observation["job_ids"])
         if observation is not None:
             observation["stage"] = "wait_root"
         waited = self.wait_root(0)

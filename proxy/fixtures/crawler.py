@@ -14,7 +14,10 @@ import types
 
 import uvicorn
 
-from renderer import Renderer
+if __package__:
+    from .renderer import Renderer
+else:
+    from renderer import Renderer
 
 root = Path(__file__).resolve().parents[2]
 

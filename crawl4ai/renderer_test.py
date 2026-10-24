@@ -118,6 +118,29 @@ class RendererLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(process.wait_calls, 1)
         self.assertNotIn(process, self.renderer._active)
 
+    async def test_cancellation_during_process_creation_reaps_after_handle_arrives(self):
+        process = FakeProcess()
+        creating = asyncio.Event()
+        release = asyncio.Event()
+
+        async def create_process():
+            creating.set()
+            await release.wait()
+            return process
+
+        self.renderer._create_process = create_process
+        task = asyncio.create_task(self.renderer.arun("https://example.test", None))
+        await creating.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        release.set()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(process.kill_calls, 1)
+        self.assertEqual(process.wait_calls, 1)
+        self.assertNotIn(process, self.renderer._active)
+
     async def test_close_drains_active_renderer_processes(self):
         process = FakeProcess()
         created = await self.install(process)

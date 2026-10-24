@@ -24,6 +24,16 @@ class Renderer:
             stderr=asyncio.subprocess.PIPE,
         )
 
+    async def _create_owned_process(self):
+        creation = asyncio.create_task(self._create_process())
+        try:
+            return await asyncio.shield(creation)
+        except asyncio.CancelledError:
+            process = await asyncio.shield(creation)
+            self._active.add(process)
+            await self._reap(process)
+            raise
+
     async def _terminate_and_wait(self, process):
         if process.returncode is None:
             process.kill()
@@ -62,7 +72,7 @@ class Renderer:
         async with self._state_lock:
             if self._closing:
                 raise RuntimeError("renderer is closed")
-            process = await self._create_process()
+            process = await self._create_owned_process()
             self._active.add(process)
         try:
             payload = {"url": url, "proxy": self.config.proxy_config["server"], "args": self.config.extra_args}

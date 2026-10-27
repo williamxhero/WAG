@@ -65,7 +65,8 @@ jobs:
             esac
             python3 "$test"
           done
-          python3 scripts/wag119-receipt/run_tests.py
+          python3 -I -S -B scripts/wag119-receipt/run_tests.py
+          python3 -I -S -B scripts/wag119-receipt/alias_mutant.py
       - name: Deterministic crawler lifecycle and readiness acceptance
         run: python3 -m unittest discover --start-directory crawl4ai --pattern '*_test.py'
       - name: Retain sanitized offline release evidence (not live acceptance)

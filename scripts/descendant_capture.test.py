@@ -226,7 +226,10 @@ class CaptureTests(unittest.TestCase):
         self.parent = Path('C:/CaptureParent')
         self.directory = self.parent / 'new-capture'
         self.fs.dirs.add(self.parent)
-        self.executable = str(Path('C:/Frozen/python.exe'))
+        # valid_binding checks paths using the test host's pathlib semantics.
+        # Keep the fake interpreter absolute on both Windows and POSIX CI.
+        self.executable = ('C:/Frozen/python.exe' if os.name == 'nt'
+                           else '/frozen/python.exe')
         for name in module.SOURCES:
             self.fs.data[self.root / 'scripts' / name] = ('reviewed ' + name).encode()
         self.fs.data[Path(self.executable)] = b'frozen interpreter image'
@@ -237,7 +240,8 @@ class CaptureTests(unittest.TestCase):
             'internal_seconds': 60, 'external_seconds': 90,
             'sources': {name: {'sha256': hashlib.sha256(self.fs.data[self.root / 'scripts' / name]).hexdigest(),
                                'blob': self.git.blobs[name]} for name in module.SOURCES},
-            'interpreter': {'path': self.executable, 'physical_path': self.executable,
+            'interpreter': {'path': self.executable,
+                            'physical_path': str(Path(self.executable)),
                             'sha256': hashlib.sha256(b'frozen interpreter image').hexdigest()},
         }
         stack = ExitStack()

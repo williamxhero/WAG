@@ -59,7 +59,13 @@ jobs:
           WAG_OFFLINE_EVIDENCE_DIR: ${{ github.workspace }}/reports/offline-release
         run: |
           set -euo pipefail
-          for test in scripts/*.test.py; do python3 "$test"; done
+          for test in scripts/*.test.py; do
+            case "$test" in
+              scripts/descendant_preflight.test.py) continue ;;
+            esac
+            python3 "$test"
+          done
+          python3 scripts/wag119-receipt/run_tests.py
       - name: Deterministic crawler lifecycle and readiness acceptance
         run: python3 -m unittest discover --start-directory crawl4ai --pattern '*_test.py'
       - name: Retain sanitized offline release evidence (not live acceptance)
@@ -70,3 +76,13 @@ jobs:
           path: reports/offline-release
           if-no-files-found: error
           retention-days: 30
+
+  windows-preflight:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deterministic Windows ABI tests with fake kernel
+        run: python scripts/descendant_preflight.test.py

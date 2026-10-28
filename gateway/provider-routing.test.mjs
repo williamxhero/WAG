@@ -315,8 +315,8 @@ test('long E4-only free recall leaves bounded publisher-read shares for real pro
   assert.deepEqual(result.results.find(item => item.url.endsWith('/paid/a')).providers, ['baidu', 'aliyun']);
 });
 
-function pageWorkFixture(t) {
-  let clock = performance.now();
+function pageWorkFixture(t, startMs = 0) {
+  let clock = startMs;
   const timers = [];
   const pageWork = {
     now: () => clock,
@@ -335,10 +335,12 @@ function pageWorkFixture(t) {
   } };
 }
 
-async function pendingPageFixture(t) {
-  const { budget } = await ledgerFixture(t);
+async function pendingPageFixture(t, startMs) {
+  let closeLedger;
+  // Pending work must settle before the ledger closes, including on assertion failure.
+  const { budget } = await ledgerFixture({ after: cleanup => { closeLedger = cleanup; } });
   const calls = [];
-  const timing = pageWorkFixture(t);
+  const timing = pageWorkFixture(t, startMs);
   const router = createProviderRouting({ now: () => NOW, budget, pageTimeoutMs: 30,
     estimateCostCents: name => name === 'baidu' ? 0 : 1,
     providers: [providerFixture('baidu', budget, calls, ['https://publisher.example/paid/a']),
@@ -351,8 +353,9 @@ async function pendingPageFixture(t) {
   let aborted = 0;
   let entered;
   const twoEntered = new Promise(resolve => { entered = resolve; });
+  const controller = new AbortController();
   const operation = router.search({ input: { query: 'controlled report', time_range: 'day' }, strict: true,
-    signal: new AbortController().signal, deadlineAt: performance.now() + 30000,
+    signal: controller.signal, deadlineAt: performance.now() + 30000,
     results: Array.from({ length: 6 }, (_, index) => ({ ...recall[0], url: `https://publisher.example/pending/${index}` })),
     verifyPage: (candidate, { signal }) => {
       urls.push(candidate.url);
@@ -367,7 +370,21 @@ async function pendingPageFixture(t) {
         if (urls.length === 2) entered();
       });
     } });
+  t.after(async () => {
+    try {
+      controller.abort();
+      await operation;
+      t.diagnostic(JSON.stringify({ fixture_cleanup: true, reads: urls.length, active, maximum, aborted,
+        provider_calls: calls.length, budget_equal: JSON.stringify(budget.snapshot()) === JSON.stringify(before),
+        timers: timing.timers.length, canceled_timers: timing.timers.filter(timer => timer.canceled).length }));
+    } finally {
+      await closeLedger();
+      t.diagnostic(JSON.stringify({ ledger_closed: true, temp_resources_removed: true }));
+    }
+  });
   await twoEntered;
+  t.diagnostic(JSON.stringify({ clock_start: timing.timers[0].at, delay_ms: timing.timers[0].delayMs,
+    reads: urls.length, active, maximum, aborted, provider_calls: calls.length }));
   return { router, budget, before, calls, timing, operation, release, observation: () => ({
     reads: urls.length, urls, active, maximum, aborted, provider_calls: calls.length,
     sends: calls, before_budget: before, after_budget: budget.snapshot(),
@@ -375,8 +392,8 @@ async function pendingPageFixture(t) {
   }) };
 }
 
-async function timerStopControl(t, elapsedMs) {
-  const fixture = await pendingPageFixture(t);
+async function timerStopControl(t, elapsedMs, startMs) {
+  const fixture = await pendingPageFixture(t, startMs);
   const { timing, operation, before } = fixture;
   assert.equal(timing.timers[0].delayMs, 30);
   timing.advanceTo(timing.timers[0].at + elapsedMs);

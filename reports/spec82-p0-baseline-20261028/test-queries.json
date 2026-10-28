@@ -1,0 +1,312 @@
+{
+  "meta": {
+    "total": 50,
+    "by_type": {
+      "general": 25,
+      "news": 15,
+      "strict_day": 10
+    }
+  },
+  "queries": [
+    {
+      "id": "q001",
+      "type": "general",
+      "query": "Claude AI",
+      "note": "实体查询-品牌名"
+    },
+    {
+      "id": "q002",
+      "type": "general",
+      "query": "人工智能",
+      "note": "概念查询-抽象词汇"
+    },
+    {
+      "id": "q003",
+      "type": "general",
+      "query": "北京天气",
+      "note": "实体查询-地名+属性"
+    },
+    {
+      "id": "q004",
+      "type": "general",
+      "query": "Python 教程",
+      "note": "实体查询-技术名+需求"
+    },
+    {
+      "id": "q005",
+      "type": "general",
+      "query": "量子计算",
+      "note": "概念查询-专业术语"
+    },
+    {
+      "id": "q006",
+      "type": "general",
+      "query": "如何学习编程",
+      "note": "长尾查询-疑问句"
+    },
+    {
+      "id": "q007",
+      "type": "general",
+      "query": "大语言模型训练方法",
+      "note": "长尾查询-多词组合"
+    },
+    {
+      "id": "q008",
+      "type": "general",
+      "query": "OpenAI",
+      "note": "实体查询-公司名"
+    },
+    {
+      "id": "q009",
+      "type": "general",
+      "query": "机器学习框架对比",
+      "note": "长尾查询-比较类"
+    },
+    {
+      "id": "q010",
+      "type": "general",
+      "query": "深度学习",
+      "note": "概念查询-领域名词"
+    },
+    {
+      "id": "q011",
+      "type": "general",
+      "query": "特斯拉",
+      "note": "实体查询-品牌名(中文)"
+    },
+    {
+      "id": "q012",
+      "type": "general",
+      "query": "区块链技术",
+      "note": "概念查询-技术领域"
+    },
+    {
+      "id": "q013",
+      "type": "general",
+      "query": "上海旅游攻略",
+      "note": "长尾查询-地点+需求"
+    },
+    {
+      "id": "q014",
+      "type": "general",
+      "query": "神经网络",
+      "note": "概念查询-专业术语"
+    },
+    {
+      "id": "q015",
+      "type": "general",
+      "query": "微软",
+      "note": "实体查询-公司名(中文)"
+    },
+    {
+      "id": "q016",
+      "type": "general",
+      "query": "JavaScript 异步编程",
+      "note": "长尾查询-技术细分"
+    },
+    {
+      "id": "q017",
+      "type": "general",
+      "query": "云计算",
+      "note": "概念查询-行业术语"
+    },
+    {
+      "id": "q018",
+      "type": "general",
+      "query": "React 框架",
+      "note": "实体查询-技术栈"
+    },
+    {
+      "id": "q019",
+      "type": "general",
+      "query": "如何选择数据库",
+      "note": "长尾查询-决策类"
+    },
+    {
+      "id": "q020",
+      "type": "general",
+      "query": "自然语言处理",
+      "note": "概念查询-技术方向"
+    },
+    {
+      "id": "q021",
+      "type": "general",
+      "query": "Docker 容器化部署",
+      "note": "长尾查询-技术实践"
+    },
+    {
+      "id": "q022",
+      "type": "general",
+      "query": "苹果公司",
+      "note": "实体查询-企业名"
+    },
+    {
+      "id": "q023",
+      "type": "general",
+      "query": "分布式系统设计",
+      "note": "长尾查询-架构类"
+    },
+    {
+      "id": "q024",
+      "type": "general",
+      "query": "Git 版本控制",
+      "note": "实体查询-工具+用途"
+    },
+    {
+      "id": "q025",
+      "type": "general",
+      "query": "数据科学",
+      "note": "概念查询-领域名"
+    },
+    {
+      "id": "q026",
+      "type": "news",
+      "query": "最新科技新闻",
+      "note": "新闻查询-时效性强"
+    },
+    {
+      "id": "q027",
+      "type": "news",
+      "query": "今日热点",
+      "note": "新闻查询-当日事件"
+    },
+    {
+      "id": "q028",
+      "type": "news",
+      "query": "本周人工智能进展",
+      "note": "新闻查询-时间范围"
+    },
+    {
+      "id": "q029",
+      "type": "news",
+      "query": "近期科技新闻",
+      "note": "新闻查询-相对时间"
+    },
+    {
+      "id": "q030",
+      "type": "news",
+      "query": "北京最新消息",
+      "note": "新闻查询-地域+时效"
+    },
+    {
+      "id": "q031",
+      "type": "news",
+      "query": "今日财经新闻",
+      "note": "新闻查询-垂直领域"
+    },
+    {
+      "id": "q032",
+      "type": "news",
+      "query": "最新 AI 动态",
+      "note": "新闻查询-行业动态"
+    },
+    {
+      "id": "q033",
+      "type": "news",
+      "query": "本周科技事件",
+      "note": "新闻查询-周范围"
+    },
+    {
+      "id": "q034",
+      "type": "news",
+      "query": "今天发生的重大新闻",
+      "note": "新闻查询-当天总结"
+    },
+    {
+      "id": "q035",
+      "type": "news",
+      "query": "近期互联网新闻",
+      "note": "新闻查询-行业近况"
+    },
+    {
+      "id": "q036",
+      "type": "news",
+      "query": "上海今日新闻",
+      "note": "新闻查询-城市当日"
+    },
+    {
+      "id": "q037",
+      "type": "news",
+      "query": "最新教育政策",
+      "note": "新闻查询-政策动态"
+    },
+    {
+      "id": "q038",
+      "type": "news",
+      "query": "本周体育新闻",
+      "note": "新闻查询-垂直时间"
+    },
+    {
+      "id": "q039",
+      "type": "news",
+      "query": "今日国际新闻",
+      "note": "新闻查询-地域范围"
+    },
+    {
+      "id": "q040",
+      "type": "news",
+      "query": "近期经济形势",
+      "note": "新闻查询-宏观概览"
+    },
+    {
+      "id": "q041",
+      "type": "strict_day",
+      "query": "site:github.com 2026-10-28",
+      "note": "严格日期-指定站点"
+    },
+    {
+      "id": "q042",
+      "type": "strict_day",
+      "query": "人工智能 2026-10-28",
+      "note": "严格日期-关键词"
+    },
+    {
+      "id": "q043",
+      "type": "strict_day",
+      "query": "site:arxiv.org 2026-10-27",
+      "note": "严格日期-学术站点"
+    },
+    {
+      "id": "q044",
+      "type": "strict_day",
+      "query": "北京新闻 2026-10-28",
+      "note": "严格日期-地域新闻"
+    },
+    {
+      "id": "q045",
+      "type": "strict_day",
+      "query": "site:news.ycombinator.com 2026-10-28",
+      "note": "严格日期-社区站点"
+    },
+    {
+      "id": "q046",
+      "type": "strict_day",
+      "query": "Python 教程 2026-10-26",
+      "note": "严格日期-技术内容"
+    },
+    {
+      "id": "q047",
+      "type": "strict_day",
+      "query": "site:medium.com 2026-10-28",
+      "note": "严格日期-博客平台"
+    },
+    {
+      "id": "q048",
+      "type": "strict_day",
+      "query": "深度学习 2026-10-27",
+      "note": "严格日期-技术话题"
+    },
+    {
+      "id": "q049",
+      "type": "strict_day",
+      "query": "site:reddit.com 2026-10-28",
+      "note": "严格日期-论坛"
+    },
+    {
+      "id": "q050",
+      "type": "strict_day",
+      "query": "科技新闻 2026-10-28",
+      "note": "严格日期-新闻类"
+    }
+  ]
+}

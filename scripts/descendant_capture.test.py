@@ -223,10 +223,14 @@ class CaptureTests(unittest.TestCase):
         self.clock = Clock()
         self.fs = MemoryFS(self.clock)
         self.root = Path(module.__file__).parents[1]
-        self.parent = Path('C:/CaptureParent')
+        self.parent = Path('C:/CaptureParent' if os.name == 'nt' else '/capture-parent')
+        self.system_root = 'C:/Windows' if os.name == 'nt' else '/windows'
         self.directory = self.parent / 'new-capture'
         self.fs.dirs.add(self.parent)
-        self.executable = str(Path('C:/Frozen/python.exe'))
+        # valid_binding checks paths using the test host's pathlib semantics.
+        # Keep the fake interpreter absolute on both Windows and POSIX CI.
+        self.executable = ('C:/Frozen/python.exe' if os.name == 'nt'
+                           else '/frozen/python.exe')
         for name in module.SOURCES:
             self.fs.data[self.root / 'scripts' / name] = ('reviewed ' + name).encode()
         self.fs.data[Path(self.executable)] = b'frozen interpreter image'
@@ -237,7 +241,8 @@ class CaptureTests(unittest.TestCase):
             'internal_seconds': 60, 'external_seconds': 90,
             'sources': {name: {'sha256': hashlib.sha256(self.fs.data[self.root / 'scripts' / name]).hexdigest(),
                                'blob': self.git.blobs[name]} for name in module.SOURCES},
-            'interpreter': {'path': self.executable, 'physical_path': self.executable,
+            'interpreter': {'path': self.executable,
+                            'physical_path': str(Path(self.executable)),
                             'sha256': hashlib.sha256(b'frozen interpreter image').hexdigest()},
         }
         stack = ExitStack()
@@ -253,7 +258,7 @@ class CaptureTests(unittest.TestCase):
                 ('exists', lambda path: path in fs.data or path in fs.dirs)):
             stack.enter_context(patch.object(Path, name, function))
         stack.enter_context(patch.object(sys, 'executable', self.executable))
-        stack.enter_context(patch.dict(os.environ, {'SystemRoot': 'C:/Windows', 'PRIVATE_CREDENTIAL': 'never pass'}, clear=True))
+        stack.enter_context(patch.dict(os.environ, {'SystemRoot': self.system_root, 'PRIVATE_CREDENTIAL': 'never pass'}, clear=True))
 
     def run_capture(self):
         answer, code = module.capture(self.binding, self.parent, 'new-capture', runner=self.child,
@@ -294,7 +299,7 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(command, [self.executable, '-I', '-S', '-B', str(self.root / 'scripts' / 'descendant_preflight.py'),
                                    '--execute-descendant', '--preparation-reviewed', '--execution-authorization', 'capture-manual-gate'])
         self.assertEqual(options['cwd'], str(self.directory))
-        self.assertEqual(options['env'], {'SystemRoot': 'C:/Windows'})
+        self.assertEqual(options['env'], {'SystemRoot': self.system_root})
         self.assertEqual(options['timeout'], 90)
         self.assertEqual(options['stdin'], subprocess.DEVNULL)
         self.assertIs(options['check'], False)
@@ -334,7 +339,8 @@ class CaptureTests(unittest.TestCase):
                     self.binding['sources']['descendant_capture.py']['blob'] = 'f' * 40
                 else:
                     key = 'physical_path' if target == 'physical_path' else 'sha256'
-                    self.binding['interpreter'][key] = 'C:/different/python.exe' if key == 'physical_path' else 'f' * 64
+                    self.binding['interpreter'][key] = (str(Path(self.executable).parent / 'different.exe')
+                                                        if key == 'physical_path' else 'f' * 64)
                 answer, code = self.run_capture()
                 self.assertEqual((answer['reason'], code), ('BINDING', 2))
                 self.assertFalse(self.child.calls)
@@ -510,7 +516,7 @@ class CaptureTests(unittest.TestCase):
                     if kind in module.SOURCES:
                         self.fs.data[self.root / 'scripts' / kind] += b' changed'
                     elif kind == 'interpreter': self.fs.data[Path(self.executable)] += b' changed'
-                    elif kind == 'physical_path': sys.executable = 'C:/Different/python.exe'
+                    elif kind == 'physical_path': sys.executable = str(Path(self.executable).parent / 'Different.exe')
                     elif kind == 'blob': self.git.blobs['descendant_capture.py'] = 'f' * 40
                     elif kind in ('commit', 'tree'): setattr(self.git, kind, 'f' * 40)
                     else: self.git.dirty = b' M scripts/one_root_preflight.py\n'

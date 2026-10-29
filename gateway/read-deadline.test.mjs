@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -49,7 +50,7 @@ async function fixture(t, { listenOptions = {}, launch = spawn } = {}) {
     return safe;
   };
   let stalls = 0;
-  let origin; let proxy; let reservation; let child; let exited; let client; let transport; let closing;
+  let origin; let proxy; let reservation; let child; let exited; let client; let transport; let closing; let startupFailure;
   const close = server => !server?.listening ? Promise.resolve() : new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   const cleanup = () => closing ??= (async () => {
     let error;
@@ -130,7 +131,7 @@ async function fixture(t, { listenOptions = {}, launch = spawn } = {}) {
       }
     });
     child.stderr.on('data', () => {});
-    child.on('error', error => diagnostics(error));
+    child.on('error', error => { startupFailure = failure(error); });
     const startup = performance.now();
     while (!ready) {
       assert.equal(child.exitCode, null, diagnostics());
@@ -151,7 +152,7 @@ async function fixture(t, { listenOptions = {}, launch = spawn } = {}) {
     return { read, received, ports, cleanup, activeStalls: () => stalls, logs: diagnostics };
   } catch (error) {
     await cleanup();
-    throw failure(error);
+    throw startupFailure ?? failure(error);
   }
 }
 
@@ -425,3 +426,50 @@ test('fixture diagnostics stop after two causes without reading deeper getters',
     assert.equal(servers[0].listening, false);
   }
 });
+
+for (const [code, expected] of [['ENOENT', 'ENOENT'], ['EACCES', 'EACCES'], [sentinel, 'unknown']]) {
+  test(`fixture synthetic startup error preserves ${expected} without leaking child data`, { timeout: 15000 }, async () => {
+    const hooks = []; const servers = []; const reads = [];
+    const chain = [code, sentinel, sentinel].map(code => Object.assign(new Error(sentinel), { code }));
+    const hidden = Object.assign(new Error('bad port'), { code: 'ETIMEDOUT' });
+    for (let level = 0; level < chain.length; level++) {
+      Object.defineProperty(chain[level], 'cause', { get() {
+        reads.push(level + 1);
+        return chain[level + 1] ?? hidden;
+      } });
+    }
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null,
+    });
+    const capture = (server, options) => { if (!servers.includes(server)) servers.push(server); server.listen(options); };
+    try {
+      await assert.rejects(fixture({ after: hook => hooks.push(hook) }, {
+        listenOptions: { origin: { listen: capture }, proxy: { listen: capture }, gateway: { listen: capture } },
+        // Exercise the existing launch boundary without creating an OS child process.
+        launch: () => {
+          queueMicrotask(() => {
+            child.stdout.write(sentinel); child.stderr.write(sentinel);
+            child.emit('error', chain[0]);
+            child.exitCode = -2;
+            child.stdout.destroy(); child.stderr.destroy();
+            child.emit('close', -2, null);
+          });
+          return child;
+        },
+      }), error => {
+        safeFailure(error, expected, 0, 0);
+        assert.equal(JSON.parse(error.message).connection_cause, 'unknown');
+        return true;
+      });
+    } finally {
+      for (const hook of hooks) await hook();
+    }
+    assert.deepEqual(reads, [1, 2], 'startup diagnostics must stop before the third cause getter');
+    assert.equal(hooks.length, 1);
+    assert.equal(servers.length, 3);
+    for (const server of servers) assert.equal(server.listening, false);
+    assert.equal(child.exitCode, -2);
+    assert.equal(child.stdout.destroyed, true);
+    assert.equal(child.stderr.destroyed, true);
+  });
+}

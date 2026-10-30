@@ -26,6 +26,7 @@ import { discoverGdeltCandidates, GDELT_ORIGIN } from './news-gdelt.mjs';
 import { enginePoolConfig, validateStrictPool } from './engine-health.mjs';
 import { createArtifactStore } from './artifact-store.mjs';
 import { createReadiness, DEFAULT_PROBE_TIMEOUT_MS } from './readiness.mjs';
+import { createOutboundProtectionState } from './outbound-protection.mjs';
 import { isPublicAddress as classifyPublicAddress } from '../proxy/public-address.mjs';
 import { isEvaluationReportFileName, normalizeReport, publicRunSummary, safeArtifactId } from './eval-core.mjs';
 
@@ -87,9 +88,14 @@ const hostSlots = new Map();
 const tokenRequests = new Map();
 const artifactStore = createArtifactStore({ root: cfg.artifactDir,
   maxBytes: cfg.artifactMaxBytes, quotaBytes: cfg.artifactQuotaBytes });
+const protectionState = createOutboundProtectionState({
+  searxngBin: process.env.SEARXNG_PYTHON ?? 'python3',
+  storeRoot: process.env.SEARXNG_PROTECTION_STORE ?? '/data/searxng-protection',
+});
 const getReadiness = createReadiness({
   searxUrl: cfg.searxUrl, crawlUrl: cfg.crawlUrl, crawlToken: cfg.crawlToken, playwrightUrl: cfg.playwrightUrl,
   probeTimeoutMs: cfg.probeTimeoutMs,
+  protectionState,
   secrets: Object.entries(process.env).filter(([key]) => /token|secret|password|api[_-]?key|authorization|credential|private[_-]?key|access[_-]?key/i.test(key)).map(([, value]) => value),
   egressProbe: async signal => {
     const { url, records } = await resolvePublicUrl('https://example.com/');

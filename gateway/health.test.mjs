@@ -30,6 +30,7 @@ test('gateway fixture cleans partial setup after reservation allocation fails', 
 
 const token = 'offline-gateway-token-'.repeat(3);
 const crawlToken = 'offline-crawler-secret-'.repeat(3);
+const validSearch = { results: [{ title: 'Example', url: 'https://example.com/', content: 'An example result' }] };
 const validConfig = { categories: { general: {} }, engines: [{ name: 'bing', categories: ['general'] }] };
 
 async function listen(server, options) {
@@ -435,3 +436,4 @@ test('readiness bounds oversized dependency responses and preserves transport ca
   assert.equal(readiness.dependencies[3].error.kind, 'egress_connect');
   assert.equal(readiness.dependencies[3].error.code, 'ECONNREFUSED');
 });
+

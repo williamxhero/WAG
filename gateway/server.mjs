@@ -89,8 +89,9 @@ const tokenRequests = new Map();
 const artifactStore = createArtifactStore({ root: cfg.artifactDir,
   maxBytes: cfg.artifactMaxBytes, quotaBytes: cfg.artifactQuotaBytes });
 const protectionState = createOutboundProtectionState({
-  searxngBin: process.env.SEARXNG_PYTHON ?? 'python3',
-  storeRoot: process.env.SEARXNG_PROTECTION_STORE ?? '/data/searxng-protection',
+  root: process.env.SEARXNG_PROTECTION_STORE ?? '/data/searxng-protection',
+  manifestPath: process.env.ARTIFACT_MANIFEST_PATH ?? '/data/wag-artifact/manifest.json',
+  pythonPath: process.env.SEARXNG_PYTHON ?? 'python3',
 });
 const getReadiness = createReadiness({
   searxUrl: cfg.searxUrl, crawlUrl: cfg.crawlUrl, crawlToken: cfg.crawlToken, playwrightUrl: cfg.playwrightUrl,

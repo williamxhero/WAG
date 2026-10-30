@@ -90,7 +90,7 @@ const artifactStore = createArtifactStore({ root: cfg.artifactDir,
   maxBytes: cfg.artifactMaxBytes, quotaBytes: cfg.artifactQuotaBytes });
 const protectionState = createOutboundProtectionState({
   root: process.env.SEARXNG_PROTECTION_STORE ?? '/data/searxng-protection',
-  manifestPath: process.env.ARTIFACT_MANIFEST_PATH ?? '/data/wag-artifact/manifest.json',
+  manifestPath: process.env.WAG_PROTECTION_MANIFEST ?? process.env.ARTIFACT_MANIFEST_PATH ?? undefined,
   pythonPath: process.env.SEARXNG_PYTHON ?? 'python3',
 });
 const getReadiness = createReadiness({

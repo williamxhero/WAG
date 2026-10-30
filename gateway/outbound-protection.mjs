@@ -154,9 +154,7 @@ export function createOutboundProtectionState(config) {
   if (!config.root) {
     throw new TypeError('config.root is required');
   }
-  if (!config.manifestPath) {
-    throw new TypeError('config.manifestPath is required');
-  }
+  // B3: manifestPath is optional for off mode
   return new OutboundProtectionState(config);
 }
 

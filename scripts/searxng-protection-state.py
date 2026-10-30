@@ -31,12 +31,12 @@ def main():
     # snapshot command
     snapshot_parser = subparsers.add_parser('snapshot', help='Read protection snapshot')
     snapshot_parser.add_argument('--root', required=True, help='Protection store root path')
-    snapshot_parser.add_argument('--manifest', required=True, help='Artifact manifest path')
+    snapshot_parser.add_argument('--manifest', required=False, help='Artifact manifest path (optional for off mode)')
 
     # consume-release-ingress command
     consume_parser = subparsers.add_parser('consume-release-ingress', help='Consume release ingress')
     consume_parser.add_argument('--root', required=True, help='Protection store root path')
-    consume_parser.add_argument('--manifest', required=True, help='Artifact manifest path')
+    consume_parser.add_argument('--manifest', required=False, help='Artifact manifest path (optional for off mode)')
     consume_parser.add_argument('--release-id', required=True, help='Release ID to consume')
 
     args = parser.parse_args()

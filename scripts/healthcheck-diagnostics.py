@@ -57,9 +57,13 @@ def dependencies(items):
         if not isinstance(item, dict):
             continue
         detail = {key: sanitize(item[key]) for key in ("name", "scope", "lifecycle") if key in item}
-        for key in ("ok", "initialized", "http_status", "duration_ms", "result_count"):
+        # B2: Add categories_count, engines_count, status, public_unknown, searxng_search, egress_proxy
+        for key in ("ok", "initialized", "http_status", "duration_ms", "result_count", "categories_count", "engines_count", "public_unknown"):
             if isinstance(item.get(key), (bool, int, float)):
                 detail[key] = item[key]
+        for key in ("status", "searxng_search", "egress_proxy"):
+            if isinstance(item.get(key), str):
+                detail[key] = sanitize(item[key])
         if isinstance(item.get("error"), dict):
             detail["error"] = {key: sanitize(item["error"][key]) for key in ("kind", "message", "code", "http_status") if key in item["error"]}
         if "unresponsive_engines" in item:

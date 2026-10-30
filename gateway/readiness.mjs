@@ -28,18 +28,6 @@ function engineDetails(value, secrets) {
     : sanitizeDiagnostic(item, secrets));
 }
 
-function responsiveEngineCount(serverTiming, unresponsiveEngines) {
-  const failed = new Set(unresponsiveEngines.map(item => item[0]));
-  const responsive = new Set();
-  // SearXNG emits per-engine total timings only for completed searches, including
-  // zero hits. Aggregate timings and engines also reported failed are not proof.
-  for (const metric of (serverTiming ?? '').split(',')) {
-    const match = /^total_\d+_([^;]+);dur=(\d+(?:\.\d+)?)$/.exec(metric.trim());
-    if (match && match[1].trim() && Number.isFinite(Number(match[2])) && !failed.has(match[1])) responsive.add(match[1]);
-  }
-  return responsive.size;
-}
-
 async function responseText(response) {
   const reader = response.body?.getReader();
   if (!reader) return '';
@@ -64,14 +52,14 @@ async function probeJson(url, options, label) {
   const text = await responseText(response);
   let body;
   try { body = JSON.parse(text); } catch { /* Non-JSON error bodies still carry a useful HTTP diagnostic. */ }
-  if (!response.ok) throw failure('dependency_http_status', `${label} returned HTTP ${response.status}: ${text}`, { httpStatus: response.status, engines: body?.unresponsive_engines });
+  if (!response.ok) throw failure('dependency_http_status', `${label} returned HTTP ${response.status}: ${text}`, { httpStatus: response.status });
   if (body === undefined) throw failure('dependency_invalid_data', `${label} returned invalid JSON`, { httpStatus: response.status });
   return { body, http_status: response.status, server_timing: response.headers.get('server-timing') };
 }
 
 // The only injected operation is the existing public-egress transport boundary.
 // Deadlines include DNS, connection establishment and response-body consumption.
-export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl, egressProbe, secrets = [], cacheMs = 10000, probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS, now = Date.now }) {
+export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl, egressProbe, protectionState, secrets = [], cacheMs = 10000, probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS, now = Date.now }) {
   let cached;
   let checkedAt = 0;
   let inFlight;
@@ -89,7 +77,6 @@ export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl,
     } catch (error) {
       return {
         name, scope, ok: false, duration_ms: now() - started,
-        ...(error.engines !== undefined ? { unresponsive_engines: engineDetails(error.engines, [crawlToken, ...secrets]) } : {}),
         error: { kind: controller.signal.aborted ? 'dependency_timeout' : error.kind ?? 'dependency_error', message: redact(error.message ?? error),
           ...(error.httpStatus ? { http_status: error.httpStatus } : {}),
           ...(error.cause?.code || error.code ? { code: redact(error.cause?.code ?? error.code) } : {}) },
@@ -98,23 +85,14 @@ export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl,
   }
   async function check() {
     const dependencies = await Promise.all([
-      probe('searxng', 'public_connectivity', async signal => {
-        const { body, http_status, server_timing } = await probeJson(`${searxUrl.replace(/\/+$/, '')}/search?q=readyz&format=json`, { signal }, 'SearXNG');
-        if (!body || typeof body !== 'object' || !Array.isArray(body.results)) throw failure('dependency_invalid_data', 'SearXNG response must contain a results array', { httpStatus: http_status, engines: body?.unresponsive_engines });
-        if (body.unresponsive_engines !== undefined && (!Array.isArray(body.unresponsive_engines) || !body.unresponsive_engines.every(item => Array.isArray(item) && item.length >= 2 && typeof item[0] === 'string' && item[0].trim() && typeof item[1] === 'string'))) throw failure('dependency_invalid_data', 'SearXNG returned invalid engine diagnostics', { httpStatus: http_status, engines: body.unresponsive_engines });
-        const failed = new Set((body.unresponsive_engines ?? []).map(item => item[0]));
-        const items = body.results.filter(item => {
-          if (failed.has(item?.engine)) return false;
-          if (typeof item?.url !== 'string' || (item.title != null && typeof item.title !== 'string') || (item.content != null && typeof item.content !== 'string')) return false;
-          try {
-            const url = new URL(item.url);
-            return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && Boolean(item.title?.trim() || item.content?.trim());
-          } catch { return false; }
-        });
-        const results = normalizeSearchResults(items);
-        const responsive_engine_count = responsiveEngineCount(server_timing, body.unresponsive_engines ?? []);
-        if (!results.length && (body.results.length || !Array.isArray(body.unresponsive_engines) || !responsive_engine_count)) throw failure('search_empty', 'SearXNG returned no usable results or evidence of a responsive engine', { httpStatus: http_status, engines: body.unresponsive_engines });
-        return { http_status, result_count: results.length, ...(responsive_engine_count ? { responsive_engine_count } : {}), ...(body.unresponsive_engines !== undefined ? { unresponsive_engines: engineDetails(body.unresponsive_engines, [crawlToken, ...secrets]) } : {}) };
+      // B2: Changed from /search?q=readyz to /config - zero engine sends
+      probe('searxng_config', 'core', async signal => {
+        const { body, http_status } = await probeJson(`${searxUrl.replace(/\/+$/, '')}/config`, { signal }, 'SearXNG config');
+        if (!body || typeof body !== 'object') throw failure('dependency_invalid_data', 'SearXNG config response must be an object', { httpStatus: http_status });
+        // Verify categories and engines structure exists
+        if (!body.categories || typeof body.categories !== 'object') throw failure('dependency_invalid_data', 'SearXNG config missing categories', { httpStatus: http_status });
+        if (!Array.isArray(body.engines)) throw failure('dependency_invalid_data', 'SearXNG config missing engines array', { httpStatus: http_status });
+        return { http_status, categories_count: Object.keys(body.categories).length, engines_count: body.engines.length };
       }),
       probe('crawl4ai', 'core', async signal => {
         const { body, http_status } = await probeJson(`${crawlUrl.replace(/\/+$/, '')}/readyz`, { headers: { authorization: `Bearer ${crawlToken}` }, signal }, 'Crawl4AI');
@@ -126,6 +104,25 @@ export function createReadiness({ searxUrl, crawlUrl, crawlToken, playwrightUrl,
         await response.body?.cancel();
         if (![200, 400, 405, 406].includes(response.status)) throw failure('dependency_http_status', `Playwright returned HTTP ${response.status}`, { httpStatus: response.status });
         return { http_status: response.status };
+      }),
+      // B2: Public evidence from protection snapshot, not new egress
+      probe('protection_snapshot', 'public_connectivity', async signal => {
+        if (!protectionState) {
+          return { status: 'not_checked', public_unknown: true };
+        }
+        try {
+          const snapshot = await protectionState.snapshot();
+          if (!snapshot.public_snapshot) {
+            return { status: 'not_checked', public_unknown: true };
+          }
+          return {
+            status: snapshot.public_snapshot.searxng_search === 'passed' && snapshot.public_snapshot.egress_proxy === 'passed' ? 'passed' : 'unknown',
+            searxng_search: snapshot.public_snapshot.searxng_search,
+            egress_proxy: snapshot.public_snapshot.egress_proxy,
+          };
+        } catch (error) {
+          return { status: 'unknown', error: redact(error.message ?? error) };
+        }
       }),
       probe('egress_proxy', 'public_connectivity', egressProbe),
     ]);

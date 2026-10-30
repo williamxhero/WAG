@@ -130,6 +130,7 @@ fi
 check_http egress-connect http --proxy http://127.0.0.1:7895 https://example.com/ || degraded=1
 # Completed zero-hit searches report degradation but return 0; broken paths
 # still return nonzero and fail the full run. Third-party hits are not a gate.
-check_http public-search search "http://yosef-server:8801/search?q=healthcheck&format=json" || degraded=1
+# B2: Removed public-search - zero engine sends in healthcheck
+# check_http public-search search "http://yosef-server:8801/search?q=healthcheck&format=json" || degraded=1
 check_command proxy-restarts systemctl show web-access-egress-proxy.service --property=NRestarts --value || degraded=1
 exit "$degraded"

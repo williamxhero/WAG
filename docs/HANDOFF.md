@@ -1,6 +1,6 @@
 # WAG operator handoff — 2026-11-19 candidate snapshot
 
-Use this checked-in handoff for #157. It records a snapshot, not a live dashboard, approval to operate, or a claim of merged delivery. See the [delivery model and diagrams](architecture/wag157/README.md). The renderer verified the artifacts and pinned source references locally, but Chrome could not establish its inspection connection; viewport containment is not verified. GitHub source links for the candidate pin depend on publishing that commit.
+Use this checked-in handoff for #157. It records a snapshot, not a live dashboard, approval to operate, or a claim of merged delivery. See the [delivery model and diagrams](architecture/wag157/README.md). The renderer verified the artifacts and pinned source references locally. The initial elevated Chrome run could not establish its inspection pipe. A subsequent normal-integrity desktop Chrome run verified four of four unchanged generated HTML artifacts whose SHA-256 digests matched the committed files: `evidence.architecture.html`, `gates.architecture.html`, `quality.architecture.html`, and `restoration.architecture.html`. All four passed viewport containment, readability, viewer chrome, theme state, and capture checks. This is browser evidence for the diagrams only, not Linux reliability, product acceptance, runtime verification, or production evidence. GitHub source links for the candidate pin depend on publishing that commit.
 
 ## Candidate and CI receipts
 

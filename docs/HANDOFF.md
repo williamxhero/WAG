@@ -1,0 +1,56 @@
+# WAG operator handoff — 2026-11-19 candidate snapshot
+
+Use this checked-in handoff for #157. It records a snapshot, not a live dashboard, approval to operate, or a claim of merged delivery. See the [delivery model and diagrams](architecture/wag157/README.md). Archlens checked the document citations locally; the four repository citations were checked separately with Git at the restored source pin. The elevated Chrome attempt could not connect to its inspection pipe. After that failure, normal-integrity desktop Chrome checks passed for all four regenerated document views, with SHA-256 digests matching the exact HTML committed at `5ac6614b9bcbaad156e429032433e074189546c0`. This is visual evidence only, not evidence of Linux reliability, product acceptance, runtime verification, or production operation. GitHub source links for the candidate pin depend on publishing that commit.
+
+## Candidate and CI receipts
+
+- Canonical GitHub `main` was observed at [`6481f551d3406d450a62a0a6e52311a107b7f076`](https://github.com/williamxhero/WAG/commit/6481f551d3406d450a62a0a6e52311a107b7f076); [push gate 40870504851](https://github.com/williamxhero/WAG/actions/runs/40870504851) passed at that SHA only. Historical local `main` (`c64b469`) is divergent (+2/−2 against that base), not a replacement for remote main.
+- For restoration, use the reviewed increments at `3ce71b5526741c3f7c837dbb1373a5b40a221fb6` (#161, after #160's `806256315b81c0e8eadf23b10f7b2c65dbd05b94`). This handoff and its model are the #162 layer above that pin. [Draft PR #163](https://github.com/williamxhero/WAG/pull/163) was observed at the #160 SHA; [run 44483811430](https://github.com/williamxhero/WAG/actions/runs/44483811430) was in progress at readback and is not evidence for the combined candidate, even if it later passes.
+- Frozen B audit: WAG [draft PR #156](https://github.com/williamxhero/WAG/pull/156) is unmerged at `075f7f4fd1ef1afda695d5000acea43cf54f274d`; [reliability run 41082779770](https://github.com/williamxhero/WAG/actions/runs/41082779770) failed at that exact SHA (historical Node summary: 615 pass, 20 fail, 1 skip; downstream Python steps did not run). Neither the #157 candidate nor main is that B tree.
+- Downstream A: [fork #1](https://github.com/williamxhero/searxng-ex/issues/1) is closed; preserve the [owner approval receipt](https://github.com/williamxhero/searxng-ex/issues/1#issuecomment-6526080289), which names `a51aa5a0b`. The unmerged [fork draft PR #4](https://github.com/williamxhero/searxng-ex/pull/4) differs: [Integration run 40978200626](https://github.com/williamxhero/searxng-ex/actions/runs/40978200626) passed at `27d2df33e15e01443a603654599598465936dca7`. The observed fork `wag-production` ref (`9fea41204fdfa7a5cfa15b0ebd12904c520478ce`) is a third identity, not proof of deployed code or artifact/ABI provenance. A remains the unique core owner; the local stand-in is not an approved package.
+- Next gate: on the stable candidate containing #160–#162, record focused evidence and run the existing full reliability gate on actual Linux for AC-P7; obtain real candidate exact-head GitHub CI and independent Standards and Spec reviews. Reuse pre-PR evidence only for the identical stable SHA and recorded environment/scope; never substitute old main, a draft's earlier CI, or a mock. After normal merge, read back local/tracking/live remote main SHAs, verify ancestry/content and CI at the actual merged SHA. No promotion or closure on missing or failed evidence. Outside mandatory AC-P7, broad regression follows the default batch of five integrated independent needs; this snapshot asserts no batch count.
+
+## Restored increments
+
+[#160 preservation and recovery receipt](wag157-preservation.md) maps retained originals and private verification material. #161 restores #122 query syntax (`e586b03`), #125 deterministic offline RRF (`ba8d49c`, including its proof), and the T0.2 design (`412f7f0`) selectively, not by merging the diagnostic chain or either divergent historical branch. Equivalent #116/#117 fixtures were already on main. RRF is not integrated P3 or supply/quality acceptance. [#128 T0.2 design](../reports/spec82-p0-baseline-20261028/README.md) is **NOT RUN**: the historical runner is retained as inert text outside the tracked candidate; no real success-rate, CAPTCHA or p95 result and no public send authorization.
+
+## Dated tracker correction — proposed, not posted
+
+After fresh verification, the orchestrator should append the following 2026-11-19 correction (preserve original history and retract unsupported checked assertions; do not close B tickets):
+
+| Record | Correction to append |
+| --- | --- |
+| [#148](https://github.com/williamxhero/WAG/issues/148) | Historical tracking, not a new contract. Keep the dated Linux-only decision, Windows failure / root cause unproven, and A's original approval. Do not roll the old 1/9 count into #159 or extrapolate it into B readiness, merge, deployment or quality. |
+| [#151](https://github.com/williamxhero/WAG/issues/151) | Incomplete. Protocol/adapter shapes exist; no real approved-A import. Manifest-backed snapshot and ingress still return `not_implemented`. The CLI flag is described as optional/off, but its handlers still construct a path from the manifest argument and the Node adapter still supplies `--manifest`; this is not end-to-end off compatibility or a protected handoff. Artifact identity and negative boundary tests still need proof. |
+| [#152](https://github.com/williamxhero/WAG/issues/152) | Prior code-inspection checkmarks are not verified acceptance. `/config` replaces the readiness search, but the egress callback remains in readiness and full healthcheck retains a separate connect path. Historical offline observation: snapshot `not_checked`, `public_unknown=true`, egress callback called and aggregation still passed; not a production observation. Zero public egress and degraded/unknown behavior not proved. |
+| [#153](https://github.com/williamxhero/WAG/issues/153) | Prior checkmarks are not verified acceptance. Optional manifest wiring and existing error fields do not prove backend-enabled refusal enforcement, missing-manifest rejection at the protected release boundary or compatible off mode. Missing MCP boundary evidence. |
+| [#154](https://github.com/williamxhero/WAG/issues/154) | Prior checkmarks are not verified acceptance. The pinned B delta lacks search/evaluator changes claimed in the narrative; refusal-before-retry/provider, request-scoped ingress and bound replay are unproved. Both evaluator retry paths and original domain/provenance/date assertions need real evidence, not just result counts. |
+| [#155](https://github.com/williamxhero/WAG/issues/155) | Incomplete. No probe delta at the pinned head: independent ledger/initialize and old source pin remain; same A artifact/store and native parser/child boundary are not established. |
+| PR #156 | Draft B source is partial; historical focused/Docker or review claims are not full acceptance. Use the failed exact-head CI above. No B approval, main delivery, deployment or quality claim follows from these receipts. |
+
+## Historical state and non-executable recovery
+
+Retain the original **2026-11-17 HANDOFF audit** and its `wag-state-20261117` architecture/evidence snapshot at their original locations. They are historical originals, not tracked links in this candidate. Keep both original state files intact; see the #160 receipt for private integrity and ownership records. Do not copy sensitive scratch to GitHub.
+
+- `.loop-forever/state.json` records #82/implement and a stale completed map: **#127 is the fixture PR for #117**, **#125 is offline RRF**, and **[fork #3](https://github.com/williamxhero/searxng-ex/issues/3) is T0.1 fixed baseline**, still open. T0.2's entry is design only. #116/#117 draft blockers are stale (PRs #118/#127 merged); #119 was closed as a bounded diagnostic, not a Windows fix or main merge of PR #126. Keep #114's own acceptance separate and #121 frozen.
+- `loop-forever-state.json` says active/#82/to-tickets; this is a stale declarative record, not evidence of a running job or permission to resume. Baseline thresholds and provider credentials remain decisions/gates, not launch instructions. Reconcile already-created tickets with #159 instead of re-splitting #82; fork/allowlist decisions do not authorize new engine or subscription activation.
+- For an authorized future handover, compare retained originals privately with their recorded digests, read back the actual tracker, dependencies and exact refs, and draft a human-reviewed replacement frontier separately. The only current authorized frontier is inside #157, now the combined candidate verification/review and main handoff. Do not restart either loop, replay a runner, or hand-edit a running job. Stop on missing evidence, mismatched identity, or unclear ownership.
+
+## Decisions and next gates
+
+[#159](https://github.com/williamxhero/WAG/issues/159) orders delivery: [#157](https://github.com/williamxhero/WAG/issues/157) (#160 → #161 → [#162](https://github.com/williamxhero/WAG/issues/162)) → [#158](https://github.com/williamxhero/WAG/issues/158) (A artifact/main reconciliation, not started by this slice) → [#107](https://github.com/williamxhero/WAG/issues/107) (B consumer wiring) → [#108](https://github.com/williamxhero/WAG/issues/108) (C guarded migration/release). Left means acceptance prerequisite, not network traffic. #158 also gates #151; #151 gates #152/#153/#155, and #153 gates #154.
+
+[#82](https://github.com/williamxhero/WAG/issues/82), [#49](https://github.com/williamxhero/WAG/issues/49), [#60](https://github.com/williamxhero/WAG/issues/60), and [#74](https://github.com/williamxhero/WAG/issues/74) retain distinct quality gates. #108 precedes real sampling acceptance for #49/#60/#74; protection, lawful supply and explicit sampling authorization still matter. Offline RRF, CI and core readiness do not prove supply, relevance or page dates. [#121](https://github.com/williamxhero/WAG/issues/121) is independent; public week remains frozen and day/month/year are unchanged.
+
+Approval here is #157 only. No production change, release, SSH, migration, restart, paid/public requests, version/engine changes, new API, automation, Windows work or cleanup of historical resources. The outer delivery owner may address tracker corrections and closures only after the relevant fresh gates; clean only owned new resources after merge and preservation checks.
+
+## Diagram projection limits
+
+The four document views omit inline repository path/line badges by design. The four Git file links in the [generated overview](architecture/wag157/README.md) remain pinned to `3ce71b5526741c3f7c837dbb1373a5b40a221fb6`.
+
+- **Restoration:** omits #158 (Reconcile A).
+- **Gates:** omits #160 (Preserve) and Quality gates; the `authorized` boundary encloses only two of its three members.
+- **Evidence:** omits #160 and #162 (Reconcile); the `authorized` box is not drawn because only one member is in view.
+- **Quality:** omits #160, #162, and #107 (Wire B); the `authorized` box is not drawn because only one member is in view.
+
+These are limits of the views, not changes to the delivery gates or authorization.

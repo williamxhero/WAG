@@ -1,0 +1,404 @@
+{
+    "schema_version":  1,
+    "system":  {
+                   "sources":  [
+                                   {
+                                       "note":  "Dated operator snapshot, tracker proposal and recovery boundaries.",
+                                       "ref":  "docs/HANDOFF.md",
+                                       "kind":  "document"
+                                   },
+                                   {
+                                       "note":  "Sanitized #160 receipt, not raw evidence.",
+                                       "ref":  "docs/wag157-preservation.md",
+                                       "kind":  "document"
+                                   },
+                                   {
+                                       "note":  "Exact restored source pin, before the #162 documentation layer.",
+                                       "ref":  "https://github.com/williamxhero/WAG/commit/3ce71b5526741c3f7c837dbb1373a5b40a221fb6",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored public query documentation at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/README.md",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored offline RRF implementation at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/gateway/spec82-rrf.mjs",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored offline RRF proof tests at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/gateway/spec82-rrf.test.mjs",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored offline RRF baseline report at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/reports/spec82-p0-baseline-20261028/README.md",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Authoritative acceptance ordering.",
+                                       "ref":  "https://github.com/williamxhero/WAG/issues/159",
+                                       "kind":  "external"
+                                   },
+                                   {
+                                       "note":  "Earlier #160 draft head; not final evidence.",
+                                       "ref":  "https://github.com/williamxhero/WAG/pull/163",
+                                       "kind":  "external"
+                                   },
+                                   {
+                                       "note":  "Frozen B snapshot; draft, exact-head failure.",
+                                       "ref":  "https://github.com/williamxhero/WAG/pull/156",
+                                       "kind":  "external"
+                                   },
+                                   {
+                                       "note":  "Frozen A snapshot; draft, exact-head Integration success.",
+                                       "ref":  "https://github.com/williamxhero/searxng-ex/pull/4",
+                                       "kind":  "external"
+                                   },
+                                   {
+                                       "note":  "Retained privately; prior views informed scope but are not publication dependencies.",
+                                       "ref":  "2026-11-17 historical delivery analysis",
+                                       "kind":  "document"
+                                   }
+                               ],
+                   "domain":  "document",
+                    "legend": { "backend": "Delivery work", "database": "Evidence snapshot", "security": "Decision gate" },
+                   "name":  "WAG #157 delivery snapshot (2026-11-19)",
+                   "purpose":  "Show what #157 restores and which acceptance gates still separate the candidate from delivered software."
+               },
+    "boundaries":  [
+                       {
+                           "label":  "#157 only",
+                           "claim":  "Only this preservation and selective integration scope is authorized; it confers no downstream or production permission.",
+                           "contains":  [
+                                            "preserve",
+                                            "restore",
+                                            "reconcile"
+                                        ],
+                           "id":  "authorized",
+                           "kind":  "ownership"
+                       },
+                       {
+                           "label":  "Evidence snapshots",
+                           "claim":  "These are observed ref identities, not promotions or runtime connections.",
+                           "contains":  [
+                                            "main",
+                                            "a-snapshot",
+                                            "b-snapshot"
+                                        ],
+                           "id":  "frozen",
+                           "kind":  "ownership"
+                       }
+                   ],
+    "components":  [
+                       {
+                           "id":  "preserve",
+                           "name":  "#160 Preserve",
+                           "kind":  "workflow",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Restored increments",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Records recovery coordinates without cleaning history.",
+                           "detail":  "Receipts",
+                           "status":  "built"
+                       },
+                       {
+                           "id":  "restore",
+                           "name":  "#161 Restore",
+                           "responsibility":  "Restores query docs, offline RRF and T0.2 design selectively.",
+                           "kind":  "workflow",
+                           "status":  "built",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Restored increments",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "detail":  "3ce71b5"
+                       },
+                       {
+                           "id":  "reconcile",
+                           "name":  "#162 Reconcile",
+                           "kind":  "workflow",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Candidate and CI receipts",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Aligns delivery evidence for the remaining #157 gates.",
+                           "detail":  "Gate pending",
+                           "status":  "partial"
+                       },
+                       {
+                           "id":  "artifact",
+                           "name":  "#158 Reconcile A",
+                           "kind":  "workflow",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Decisions and next gates",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Reconciles approval, artifact identity, ABI and owning main without replacing A.",
+                           "detail":  "Future acceptance",
+                           "status":  "planned"
+                       },
+                       {
+                           "id":  "consumer",
+                           "name":  "#107 Wire B",
+                           "kind":  "workflow",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Decisions and next gates",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Owns WAG consumer enforcement of the single approved A contract.",
+                           "detail":  "Draft #156",
+                           "status":  "partial"
+                       },
+                       {
+                           "id":  "release",
+                           "name":  "#108 Guard release",
+                           "kind":  "workflow",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Decisions and next gates",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Owns migration, guarded release and rollback evidence without resetting protection state.",
+                           "detail":  "Future acceptance",
+                           "status":  "planned"
+                       },
+                       {
+                           "id":  "quality",
+                           "name":  "Quality gates",
+                           "kind":  "workflow",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Decisions and next gates",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Requires each existing supply, date and quality gate independently of engineering CI.",
+                           "detail":  "#82 / #49 / #60 / #74",
+                           "status":  "planned"
+                       },
+                       {
+                           "id":  "week",
+                           "name":  "#121 Public week",
+                           "kind":  "gateway",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Decisions and next gates",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Requires a distinct owner decision before changing the public week window.",
+                           "detail":  "Independent freeze",
+                           "status":  "planned"
+                       },
+                       {
+                           "id":  "main",
+                           "name":  "Canonical main",
+                           "kind":  "file-store",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Candidate and CI receipts",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Identifies what was on remote main at readback, not what this candidate will deliver.",
+                           "detail":  "6481f55 observed",
+                           "status":  "built"
+                       },
+                       {
+                           "id":  "a-snapshot",
+                           "name":  "Frozen A head",
+                           "kind":  "file-store",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Candidate and CI receipts",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Records an unmerged fork candidate and exact-head Integration receipt, not deployed identity.",
+                           "detail":  "27d2df33e / CI green",
+                           "status":  "built"
+                       },
+                       {
+                           "id":  "b-snapshot",
+                           "name":  "Frozen B head",
+                           "kind":  "file-store",
+                           "doc_refs":  [
+                                            {
+                                                "section":  "Candidate and CI receipts",
+                                                "path":  "docs/HANDOFF.md"
+                                            }
+                                        ],
+                           "responsibility":  "Records the unmerged WAG B candidate and exact-head failure, not acceptance of the B wiring.",
+                           "detail":  "075f7f4 / CI red",
+                           "status":  "built"
+                       }
+                   ],
+    "relations":  [
+                      {
+                          "what_crosses":  "Confirmed lineage and the retained originals.",
+                          "to":  "restore",
+                          "from":  "preserve",
+                          "mechanism":  "manual",
+                          "summary":  "Preserved source",
+                          "status":  "built"
+                      },
+                      {
+                          "what_crosses":  "Reviewed increments and exact restoration pin.",
+                          "to":  "reconcile",
+                          "from":  "restore",
+                          "mechanism":  "manual",
+                          "summary":  "Restored candidate",
+                          "status":  "built"
+                      },
+                      {
+                          "what_crosses":  "Only accepted #157 clears this prerequisite; no automatic start.",
+                          "to":  "artifact",
+                          "from":  "reconcile",
+                          "crosses":  "authorized",
+                          "mechanism":  "manual",
+                          "summary":  "#157 acceptance first",
+                          "status":  "planned"
+                      },
+                      {
+                          "what_crosses":  "Approved artifact and ABI evidence, not a copied core.",
+                          "to":  "consumer",
+                          "from":  "artifact",
+                          "mechanism":  "manual",
+                          "summary":  "A identity first",
+                          "status":  "planned"
+                      },
+                      {
+                          "what_crosses":  "Validated consumer behavior, not deployment approval.",
+                          "to":  "release",
+                          "from":  "consumer",
+                          "mechanism":  "manual",
+                          "summary":  "B acceptance first",
+                          "status":  "planned"
+                      },
+                      {
+                          "what_crosses":  "Applies to real sampling for #49/#60/#74; lawful supply and explicit approval are also required.",
+                          "to":  "quality",
+                          "from":  "release",
+                          "mechanism":  "manual",
+                          "summary":  "Sampling prerequisite",
+                          "status":  "planned"
+                      }
+                  ],
+    "questions":  [
+                      {
+                          "omits":  "Historical branch inventory, full runtime graphs, raw receipts and untracked audit inputs are not projected.",
+                          "narrative":  "Follow preservation into selective recovery: #122 query docs, #125 offline RRF, and the T0.2 design. #128 is NOT RUN, and the old runner is inert. #162 makes the evidence legible without editing the state snapshots or restarting a job.\n\nThe separate evidence view records the three detached ref identities. Canonical main CI covers its old SHA; A Integration is for fork PR #4 only, and B failed at PR #156. The earlier #163 draft is not combined-candidate proof. Stop on mismatched SHA or missing fresh evidence.",
+                          "id":  "restoration",
+                          "answer":  "Use the #161 source pin above #160, plus the reviewed #162 handoff. Observed canonical main and the frozen A and B heads are separate, unpromoted identities.",
+                          "ask":  "What was restored and what remains separate?",
+                          "involves":  [
+                                           "preserve",
+                                           "restore",
+                                           "reconcile"
+                                       ],
+                          "facts":  [
+                                        "exact"
+                                    ],
+                          "title":  "What belongs in the restoration candidate?",
+                          "context":  "The historical local and remote main diverged. A branch or a green check is not a deployment receipt."
+                      },
+                      {
+                          "omits":  "Detailed B branches, individual quality tests and the legacy six views are deliberately not expanded here.",
+                          "narrative":  "Complete the first three slices with actual Linux broad reliability, exact-head CI, independent Standards and Spec reviews, and merged-main verification. Only #157 is authorized. Next, #158 reconciles A identity and gates B, including #151. #151 gates #152, #153 and #155; #153 gates #154. B remains partial, and C must verify guarded migration/release separately.\n\nFor #49, #60 and #74, live sampling acceptance follows #108 but still needs protection, lawful supply and permission. #82 retains its own P0–P3 exit rules; offline work is not live acceptance. #121 does not block the existing public contract.",
+                          "id":  "gates",
+                          "answer":  "#157 gates #158, then #107 and #108. The existing quality gates demand their own evidence; #121 is independent and frozen.",
+                          "ask":  "Which acceptance prerequisites remain and what is independent?",
+                          "involves":  [
+                                           "restore",
+                                           "reconcile",
+                                           "artifact",
+                                           "consumer",
+                                           "release"
+                                       ],
+                          "facts":  [
+                                        "authority"
+                                    ],
+                          "title":  "Which gates remain after #157?",
+                          "context":  "An edge is an acceptance prerequisite, not network activity. Status describes evidence or proposed delivery, not deployed code."
+                      },
+                      {
+                          "id": "evidence",
+                          "title": "Which refs do the receipts actually cover?",
+                          "ask": "What do the observed ref identities establish?",
+                          "context": "The observed refs are separate from the restoration tree.",
+                          "answer": "Old main passed, A passed at its draft head, and B failed at its draft head. None proves the combined #157 candidate or deployment.",
+                          "narrative": "Compare the three refs without any promotion arrows. Match the workflow head SHA and scope before reusing its result; the handoff links each exact run.",
+                          "involves": ["main", "a-snapshot", "b-snapshot", "restore"],
+                          "facts": ["exact"],
+                          "omits": "Production topology and historical worktree inventory are not projected."
+                      },
+                      {
+                          "id": "quality",
+                          "title": "Why are quality and week separate?",
+                          "ask": "What does release acceptance leave unresolved?",
+                          "context": "A guarded release does not establish the quality of search results.",
+                          "answer": "Real sampling for #49/#60/#74 follows #108, and #82 retains its own exit criteria. The public week freeze is independent.",
+                          "narrative": "Read the single edge as a real-sampling prerequisite only, not a new runtime connection or sampling approval. Offline preparation remains distinct. The detached #121 decision does not gate the existing public API.",
+                          "involves": ["release", "quality", "week", "restore"],
+                          "facts": ["authority"],
+                          "omits": "Detailed per-ticket quality thresholds remain in the original specs."
+                      }
+                  ],
+    "facts":  [
+                  {
+                      "claim":  "CI proves only its exact SHA and scope.",
+                      "id":  "exact",
+                      "doc_refs":  [
+                                       {
+                                           "section":  "Candidate and CI receipts",
+                                           "path":  "docs/HANDOFF.md"
+                                       }
+                                   ],
+                      "kind":  "constraint"
+                  },
+                  {
+                      "claim":  "No production, paid, public, or automated operation is authorized by this snapshot.",
+                      "id":  "authority",
+                      "doc_refs":  [
+                                       {
+                                           "section":  "Decisions and next gates",
+                                           "path":  "docs/HANDOFF.md"
+                                       }
+                                   ],
+                      "kind":  "constraint"
+                  }
+              ],
+    "glossary":  [
+                     {
+                         "term":  "Exact-head CI",
+                         "definition":  "A workflow run whose recorded commit matches the candidate being evaluated."
+                     },
+                     {
+                         "term":  "RRF",
+                         "definition":  "Reciprocal Rank Fusion; here only a deterministic offline core."
+                     },
+                     {
+                         "term":  "Acceptance prerequisite",
+                         "definition":  "A required earlier gate, not a runtime call or permission to begin later work."
+                     },
+                     {
+                         "term":  "ABI",
+                         "definition":  "The binary interface that an installed artifact and its dependencies must satisfy."
+                     }
+                 ]
+}

@@ -43,3 +43,14 @@ Retain the original **2026-11-17 HANDOFF audit** and its `wag-state-20261117` ar
 [#82](https://github.com/williamxhero/WAG/issues/82), [#49](https://github.com/williamxhero/WAG/issues/49), [#60](https://github.com/williamxhero/WAG/issues/60), and [#74](https://github.com/williamxhero/WAG/issues/74) retain distinct quality gates. #108 precedes real sampling acceptance for #49/#60/#74; protection, lawful supply and explicit sampling authorization still matter. Offline RRF, CI and core readiness do not prove supply, relevance or page dates. [#121](https://github.com/williamxhero/WAG/issues/121) is independent; public week remains frozen and day/month/year are unchanged.
 
 Approval here is #157 only. No production change, release, SSH, migration, restart, paid/public requests, version/engine changes, new API, automation, Windows work or cleanup of historical resources. The outer delivery owner may address tracker corrections and closures only after the relevant fresh gates; clean only owned new resources after merge and preservation checks.
+
+## Diagram projection limits
+
+The four document views omit inline repository path/line badges by design. The four Git file links in the [generated overview](architecture/wag157/README.md) remain pinned to `3ce71b5526741c3f7c837dbb1373a5b40a221fb6`.
+
+- **Restoration:** omits #158 (Reconcile A).
+- **Gates:** omits #160 (Preserve) and Quality gates; the `authorized` boundary encloses only two of its three members.
+- **Evidence:** omits #160 and #162 (Reconcile); the `authorized` box is not drawn because only one member is in view.
+- **Quality:** omits #160, #162, and #107 (Wire B); the `authorized` box is not drawn because only one member is in view.
+
+These are limits of the views, not changes to the delivery gates or authorization.

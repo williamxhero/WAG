@@ -2,9 +2,7 @@
 
 Show what #157 restores and which acceptance gates still separate the candidate from delivered software.
 
-Analysed at [`3ce71b5`](https://github.com/williamxhero/WAG/tree/3ce71b5526741c3f7c837dbb1373a5b40a221fb6).
-
-**Read from.** docs/HANDOFF.md (document); docs/wag157-preservation.md (document); https://github.com/williamxhero/WAG/commit/3ce71b5526741c3f7c837dbb1373a5b40a221fb6 (code); https://github.com/williamxhero/WAG/issues/159 (external); https://github.com/williamxhero/WAG/pull/163 (external); https://github.com/williamxhero/WAG/pull/156 (external); https://github.com/williamxhero/searxng-ex/pull/4 (external); 2026-11-17 historical delivery analysis (document).
+**Read from.** docs/HANDOFF.md (document); docs/wag157-preservation.md (document); https://github.com/williamxhero/WAG/commit/3ce71b5526741c3f7c837dbb1373a5b40a221fb6 (code); https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/README.md (code); https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/gateway/spec82-rrf.mjs (code); https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/gateway/spec82-rrf.test.mjs (code); https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/reports/spec82-p0-baseline-20261028/README.md (code); https://github.com/williamxhero/WAG/issues/159 (external); https://github.com/williamxhero/WAG/pull/163 (external); https://github.com/williamxhero/WAG/pull/156 (external); https://github.com/williamxhero/searxng-ex/pull/4 (external); 2026-11-17 historical delivery analysis (document).
 
 > Generated from the analysis by archlens. Edit the analysis, never this file.
 
@@ -153,7 +151,6 @@ Contains: Canonical main, Frozen A head, Frozen B head.
 
 **#161 Restore**: Restores query docs, offline RRF and T0.2 design selectively.
 
-- Source: `README.md`, `gateway/spec82-rrf.mjs`, `gateway/spec82-rrf.test.mjs`, `reports/spec82-p0-baseline-20261028/README.md`
 - Documented in: [docs/HANDOFF.md Restored increments](../../../docs/HANDOFF.md)
 
 **#162 Reconcile** *(partial)*: Aligns delivery evidence for the remaining #157 gates.

@@ -18,6 +18,26 @@
                                        "kind":  "code"
                                    },
                                    {
+                                       "note":  "Restored public query documentation at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/README.md",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored offline RRF implementation at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/gateway/spec82-rrf.mjs",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored offline RRF proof tests at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/gateway/spec82-rrf.test.mjs",
+                                       "kind":  "code"
+                                   },
+                                   {
+                                       "note":  "Restored offline RRF baseline report at the source pin.",
+                                       "ref":  "https://github.com/williamxhero/WAG/blob/3ce71b5526741c3f7c837dbb1373a5b40a221fb6/reports/spec82-p0-baseline-20261028/README.md",
+                                       "kind":  "code"
+                                   },
+                                   {
                                        "note":  "Authoritative acceptance ordering.",
                                        "ref":  "https://github.com/williamxhero/WAG/issues/159",
                                        "kind":  "external"
@@ -43,13 +63,9 @@
                                        "kind":  "document"
                                    }
                                ],
-                   "domain":  "software",
+                   "domain":  "document",
                     "legend": { "backend": "Delivery work", "database": "Evidence snapshot", "security": "Decision gate" },
                    "name":  "WAG #157 delivery snapshot (2026-11-19)",
-                   "repository":  {
-                                      "revision":  "3ce71b5526741c3f7c837dbb1373a5b40a221fb6",
-                                      "url":  "https://github.com/williamxhero/WAG"
-                                  },
                    "purpose":  "Show what #157 restores and which acceptance gates still separate the candidate from delivered software."
                },
     "boundaries":  [
@@ -101,20 +117,6 @@
                                             {
                                                 "section":  "Restored increments",
                                                 "path":  "docs/HANDOFF.md"
-                                            }
-                                        ],
-                           "evidence":  [
-                                            {
-                                                "path":  "README.md"
-                                            },
-                                            {
-                                                "path":  "gateway/spec82-rrf.mjs"
-                                            },
-                                            {
-                                                "path":  "gateway/spec82-rrf.test.mjs"
-                                            },
-                                            {
-                                                "path":  "reports/spec82-p0-baseline-20261028/README.md"
                                             }
                                         ],
                            "detail":  "3ce71b5"

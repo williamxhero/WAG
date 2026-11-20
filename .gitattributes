@@ -1,1 +1,6 @@
 *.sh text eol=lf
+
+# SPEC #119 receipt harness verifies its own sources by exact byte SHA-256
+# (receipt_model.FIELDS hashing, pure_test_runner FROZEN, observe_once.py).
+# CRLF conversion would silently break that self-check on checkout.
+scripts/wag119-receipt/** text eol=lf

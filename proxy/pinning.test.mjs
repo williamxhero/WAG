@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
@@ -11,6 +12,7 @@ import path from 'node:path';
 import tls from 'node:tls';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { createCrawlerTeardownObserver, teardownCrawler, tracePathOutside } from './fixtures/crawler-teardown-observer.mjs';
 
 const serverFile = new URL('./server.mjs', import.meta.url);
 const dnsFixture = new URL('./fixtures/dns.mjs', import.meta.url);
@@ -311,17 +313,26 @@ test('owned crawler API proxy config enforces navigation, redirects and real ren
   await new Promise(resolve => reservation.close(resolve));
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'wag-crawler-pinning-'));
   const spki = new crypto.X509Certificate(identity.cert).publicKey.export({ type: 'spki', format: 'der' });
-  const child = spawn(process.env.PYTHON || 'python', [fileURLToPath(new URL('./fixtures/crawler.py', import.meta.url))], {
+  const python = process.env.PYTHON || 'python';
+  const traceFile = process.env.WAG_CRAWLER_TEARDOWN_TRACE;
+  let observer;
+  if (traceFile !== undefined) {
+    assert.ok(path.isAbsolute(python), 'observed crawler requires an absolute Python executable');
+    const trace = tracePathOutside(traceFile, directory);
+    writeFileSync(trace, '', { flag: 'wx', mode: 0o600 });
+    observer = createCrawlerTeardownObserver({
+      directory, python, parentPid: process.pid,
+      emit: record => appendFileSync(trace, `${JSON.stringify(record)}\n`, { flush: true }),
+      onFailure: () => { process.exitCode = process.exitCode || 1; },
+    });
+  }
+  const child = spawn(python, [fileURLToPath(new URL('./fixtures/crawler.py', import.meta.url))], {
     cwd: directory,
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', WAG_FIXTURE_NODE: process.execPath, WAG_FIXTURE_PORT: String(port), WAG_FIXTURE_SPKI: crypto.createHash('sha256').update(spki).digest('base64'), CRAWL4AI_TOKEN: 'offline-crawler-fixture', CRAWL4AI_DATA_DIR: directory, EGRESS_PROXY: `http://127.0.0.1:${proxy.port}` },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  t.after(async () => {
-    if (child.exitCode === null && child.signalCode === null) {
-      await new Promise(resolve => { child.once('exit', resolve); child.kill(); });
-    }
-    await fs.rm(directory, { recursive: true, force: true });
-  });
+  observer?.attach(child);
+  t.after(() => teardownCrawler(child, directory, { remove: fs.rm, observer }));
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('crawler fixture did not start')), 5000);
     let diagnostics = '';

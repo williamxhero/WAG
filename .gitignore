@@ -6,6 +6,9 @@ __pycache__/
 # Runtime state and generated evaluation output
 artifacts/
 reports/
+!reports/spec82-p0-baseline-20261028/
+reports/spec82-p0-baseline-20261028/*.jsonl
+reports/spec82-p0-baseline-20261028/*.json
 runtime/evals/
 runtime/**/artifacts/
 *.tmp
